@@ -1,26 +1,105 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Brand — deep emerald → teal */
+  --color-brand-50: #ecfdf5;
+  --color-brand-100: #d1fae5;
+  --color-brand-200: #a7f3d0;
+  --color-brand-300: #6ee7b7;
+  --color-brand-400: #34d399;
+  --color-brand-500: #10b981;
+  --color-brand-600: #059669;
+  --color-brand-700: #047857;
+  --color-brand-800: #065f46;
+  --color-brand-900: #064e3b;
+  --color-brand-950: #022c22;
+
+  --color-accent-300: #5eead4;
+  --color-accent-400: #2dd4bf;
+  --color-accent-500: #14b8a6;
+  --color-accent-600: #0d9488;
+  --color-accent-700: #0f766e;
+
+  /* Warm ink — slightly browner than cool slate for a paper feel */
+  --color-ink-50: #f6f5f0;
+  --color-ink-100: #ece9e0;
+  --color-ink-200: #ddd9cd;
+  --color-ink-300: #b8b3a4;
+  --color-ink-400: #918c7f;
+  --color-ink-500: #6c6759;
+  --color-ink-600: #4d4a40;
+  --color-ink-700: #36342d;
+  --color-ink-800: #23221d;
+  --color-ink-900: #121210;
+
+  /* Surfaces */
+  --color-canvas: #f8f6ef;       /* warm paper */
+  --color-paper: #fdfcf7;        /* card surface */
+  --color-paper-2: #fbfaf3;      /* alt surface */
+
+  --font-sans: var(--font-inter-sans), "Inter", system-ui, sans-serif;
+  --font-serif: var(--font-serif), "Fraunces", "Cormorant Garamond", Georgia, serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+  }
+  .font-display {
+    font-family: var(--font-serif);
+    font-feature-settings: "ss01", "ss02";
+    letter-spacing: -0.018em;
+  }
+
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer utilities {
+  /* Deep editorial gradient — used for hero & dark surfaces */
+  .bg-brand-gradient {
+    background-image:
+      radial-gradient(120% 80% at 80% 10%, rgba(94, 234, 212, 0.18), transparent 60%),
+      radial-gradient(80% 60% at 10% 100%, rgba(20, 184, 166, 0.16), transparent 60%),
+      linear-gradient(180deg, #022c22 0%, #064e3b 60%, #0a3a2d 100%);
+  }
+
+  /* Cream mesh — subtle warmth for the light surface */
+  .bg-canvas-mesh {
+    background-image:
+      radial-gradient(70% 50% at 10% 0%, rgba(16, 185, 129, 0.06), transparent 60%),
+      radial-gradient(60% 50% at 100% 100%, rgba(14, 165, 233, 0.04), transparent 60%);
+  }
+
+  /* Paper grain — adds editorial texture without noise */
+  .bg-paper-grain {
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(54, 52, 45, 0.045) 1px, transparent 0);
+    background-size: 6px 6px;
+  }
+
+  .bg-grid-soft {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .hairline { border-color: rgba(54, 52, 45, 0.10); }
+  .hairline-strong { border-color: rgba(54, 52, 45, 0.18); }
+  .hairline-on-dark { border-color: rgba(255, 255, 255, 0.10); }
+
+  /* Tabular numerals for stats */
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+
+  /* Focus ring used by inputs/buttons */
+  .ring-focus {
+    @apply focus:outline-none focus:ring-4 focus:ring-brand-900/12 focus:border-brand-700;
+  }
 }
