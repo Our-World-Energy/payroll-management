@@ -1,0 +1,334 @@
+"use client";
+
+import { useState } from "react";
+import { LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight, LuPencil, LuChevronRight as LuBreadcrumb, LuSlidersHorizontal, LuX } from "react-icons/lu";
+import type { Contractor, FilterRule } from "./types";
+import { AddContractorModal } from "@/components/AddContractorModal";
+import { FilterModal, applyFilters } from "@/components/FilterModal";
+
+const INITIAL_DATA: Contractor[] = [
+  {
+    uid: "UID-99218", firstName: "Marcus",  middleName: "Lee",   surname: "Chen",      fullName: "Marcus Lee Chen",
+    avatar: "MC", dob: "1995-05-14", gender: "Male",   contractorId: "#C-8821",
+    department: "Solar Engineering", subDepartment: "Field Inspection", role: "Lead Inspector",
+    location: "San Diego, CA", status: "Active", hireDate: "2021-03-12", officeLocation: "West Coast HQ",
+    currency: "USD", monthlyRate: "$5,200", weeklyRate: "$1,300", hourlyRate: "$32.50",
+    email: "marcus.c@worldenergy.com", payCategory: "Full-Time", shiftHours: "08:00 - 17:00",
+    restDay: "Sunday", manager: "Jonathan Wu", payPeriod: "Bi-Weekly",
+  },
+  {
+    uid: "UID-99542", firstName: "Elena",  middleName: "Sofia", surname: "Rodriguez", fullName: "Elena Sofia Rodriguez",
+    avatar: "ER", dob: "1992-11-28", gender: "Female", contractorId: "#C-9042",
+    department: "Grid Maintenance", subDepartment: "High Voltage", role: "HV Specialist",
+    location: "Austin, TX", status: "Active", hireDate: "2022-06-15", officeLocation: "Texas Regional",
+    currency: "USD", monthlyRate: "$7,200", weeklyRate: "$1,800", hourlyRate: "$45.00",
+    email: "e.rodriguez@contract.net", payCategory: "Freelance", shiftHours: "07:00 - 16:00",
+    restDay: "Saturday", manager: "Marco Delgado", payPeriod: "Monthly",
+  },
+  {
+    uid: "UID-97731", firstName: "David",  middleName: "Alan",  surname: "Miller",    fullName: "David Alan Miller",
+    avatar: "DM", dob: "1978-02-09", gender: "Male",   contractorId: "#C-7731",
+    department: "Field Safety", subDepartment: "Compliance", role: "Officer",
+    location: "Phoenix, AZ", status: "Inactive", hireDate: "2019-11-01", officeLocation: "Southwest Hub",
+    currency: "USD", monthlyRate: "$6,000", weeklyRate: "$1,500", hourlyRate: "$37.50",
+    email: "d.miller@external.com", payCategory: "Advisory", shiftHours: "09:00 - 18:00",
+    restDay: "Weekends", manager: "Sarah Jenkins", payPeriod: "Monthly",
+  },
+  {
+    uid: "UID-99112", firstName: "Sarah",  middleName: "Beth",  surname: "Jenkins",   fullName: "Sarah Beth Jenkins",
+    avatar: "SJ", dob: "1989-08-21", gender: "Female", contractorId: "#C-9112",
+    department: "Logistics", subDepartment: "Supply Chain", role: "Analyst",
+    location: "Denver, CO", status: "Active", hireDate: "2020-04-10", officeLocation: "Mountain Division",
+    currency: "USD", monthlyRate: "$5,800", weeklyRate: "$1,450", hourlyRate: "$36.25",
+    email: "s.jenkins@worldenergy.com", payCategory: "Contract", shiftHours: "08:30 - 17:30",
+    restDay: "Sunday", manager: "Kevin Thorne", payPeriod: "Weekly",
+  },
+  {
+    uid: "UID-98401", firstName: "Priya",  middleName: "Anita", surname: "Sharma",    fullName: "Priya Anita Sharma",
+    avatar: "PS", dob: "1990-03-15", gender: "Female", contractorId: "#C-8401",
+    department: "Engineering", subDepartment: "Electrical", role: "Senior Engineer",
+    location: "Bangalore, IN", status: "Active", hireDate: "2020-07-01", officeLocation: "India HQ",
+    currency: "INR", monthlyRate: "₹95,000", weeklyRate: "₹23,750", hourlyRate: "₹593",
+    email: "p.sharma@worldenergy.com", payCategory: "Full-Time", shiftHours: "09:00 - 18:00",
+    restDay: "Sunday", manager: "Aisha Patel", payPeriod: "Monthly",
+  },
+  {
+    uid: "UID-98502", firstName: "Carlos", middleName: "Juan",  surname: "Rivera",    fullName: "Carlos Juan Rivera",
+    avatar: "CR", dob: "1985-07-22", gender: "Male",   contractorId: "#C-8502",
+    department: "Operations", subDepartment: "Solar Array", role: "Site Manager",
+    location: "Monterrey, MX", status: "Active", hireDate: "2018-09-15", officeLocation: "Mexico Regional",
+    currency: "MXN", monthlyRate: "MX$28,000", weeklyRate: "MX$7,000", hourlyRate: "MX$175",
+    email: "c.rivera@worldenergy.com", payCategory: "Full-Time", shiftHours: "08:00 - 17:00",
+    restDay: "Sunday", manager: "Marco Delgado", payPeriod: "Bi-Weekly",
+  },
+  {
+    uid: "UID-98613", firstName: "Ana",    middleName: "Maria", surname: "Santos",    fullName: "Ana Maria Santos",
+    avatar: "AS", dob: "1993-12-05", gender: "Female", contractorId: "#C-8613",
+    department: "Logistics", subDepartment: "Offshore Support", role: "Logistics Lead",
+    location: "Manila, PH", status: "On Leave", hireDate: "2021-01-20", officeLocation: "Philippines HQ",
+    currency: "PHP", monthlyRate: "₱55,000", weeklyRate: "₱13,750", hourlyRate: "₱344",
+    email: "a.santos@worldenergy.com", payCategory: "Contract", shiftHours: "08:00 - 17:00",
+    restDay: "Sunday", manager: "John Reyes", payPeriod: "Monthly",
+  },
+  {
+    uid: "UID-98724", firstName: "James",  middleName: "Kwame", surname: "Okoye",     fullName: "James Kwame Okoye",
+    avatar: "JO", dob: "1988-04-11", gender: "Male",   contractorId: "#C-8724",
+    department: "Grid Maintenance", subDepartment: "Distribution", role: "Grid Technician",
+    location: "Houston, TX", status: "Active", hireDate: "2019-05-14", officeLocation: "West Coast HQ",
+    currency: "USD", monthlyRate: "$5,500", weeklyRate: "$1,375", hourlyRate: "$34.37",
+    email: "j.okoye@worldenergy.com", payCategory: "Full-Time", shiftHours: "07:00 - 16:00",
+    restDay: "Saturday", manager: "Jonathan Wu", payPeriod: "Bi-Weekly",
+  },
+];
+
+const AVATAR_COLORS: Record<string, string> = {
+  MC: "bg-emerald-100 text-emerald-700", ER: "bg-blue-100 text-blue-700",
+  DM: "bg-slate-200 text-slate-600",     SJ: "bg-emerald-100 text-emerald-700",
+  PS: "bg-purple-100 text-purple-700",   CR: "bg-orange-100 text-orange-700",
+  AS: "bg-pink-100 text-pink-700",       JO: "bg-teal-100 text-teal-700",
+};
+
+const STATUS_STYLES: Record<string, string> = {
+  Active:     "bg-teal-100 text-teal-800",
+  Inactive:   "bg-red-100 text-red-700",
+  "On Leave": "bg-amber-100 text-amber-700",
+};
+
+const PAGE_SIZE = 4;
+
+export default function ContractorsPage() {
+  const [data, setData]             = useState<Contractor[]>(INITIAL_DATA);
+  const [activeRules, setActiveRules] = useState<FilterRule[]>([]);
+  const [page, setPage]             = useState(1);
+  const [showAdd, setShowAdd]       = useState(false);
+  const [showFilter, setShowFilter] = useState(false);
+  const [dept, setDept]             = useState("All Departments");
+  const [payType, setPayType]       = useState("All Pay Types");
+
+  // Quick filters + advanced filters combined
+  const quickFiltered = data.filter((c) => {
+    const deptMatch = dept === "All Departments" || c.department === dept;
+    const payMatch  = payType === "All Pay Types" || c.payCategory === payType;
+    return deptMatch && payMatch;
+  });
+  const filtered = activeRules.length > 0 ? applyFilters(quickFiltered, activeRules) : quickFiltered;
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const rows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  function handleAddContractor(c: Contractor) {
+    setData((d) => [c, ...d]);
+    setPage(1);
+  }
+
+  function handleApplyFilters(rules: FilterRule[]) {
+    setActiveRules(rules);
+    setPage(1);
+  }
+
+  function removeRule(id: string) {
+    setActiveRules((r) => r.filter((x) => x.id !== id));
+    setPage(1);
+  }
+
+  const reset = () => { setDept("All Departments"); setPayType("All Pay Types"); setActiveRules([]); setPage(1); };
+
+  const avatarColor = (avatar: string) => AVATAR_COLORS[avatar] ?? "bg-slate-100 text-slate-600";
+
+  const COLS = [
+    "Unique ID","First Name","Middle Name","Surname","Full Name","Date of Birth","Gender",
+    "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
+    "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
+    "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Action",
+  ];
+
+  return (
+    <>
+      {showAdd    && <AddContractorModal onClose={() => setShowAdd(false)}    onAdd={handleAddContractor} />}
+      {showFilter && <FilterModal initialRules={activeRules} onApply={handleApplyFilters} onClose={() => setShowFilter(false)} />}
+
+      <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
+        {/* Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 md:mb-8 gap-4 max-w-7xl mx-auto">
+          <div>
+            <nav className="flex mb-2">
+              <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                <li>Management</li>
+                <li><LuBreadcrumb size={14} className="text-slate-400" /></li>
+                <li className="text-teal-600">Contractor Details</li>
+              </ol>
+            </nav>
+            <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Contractor Directory</h2>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm">
+              <LuDownload size={16} strokeWidth={2} />
+              Export
+            </button>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#003527] text-white rounded-xl text-sm font-semibold hover:bg-[#064E3B] transition-all shadow-md"
+            >
+              <LuUserPlus size={16} strokeWidth={2} />
+              Add Contractor
+            </button>
+          </div>
+        </div>
+
+        {/* Filter Bar */}
+        <div className="mb-4 max-w-7xl mx-auto">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center">
+            <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
+            <select value={dept} onChange={(e) => { setDept(e.target.value); setPage(1); }}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+              <option>All Departments</option>
+              <option>Solar Engineering</option><option>Grid Maintenance</option>
+              <option>Field Safety</option><option>Logistics</option>
+              <option>Engineering</option><option>Operations</option>
+            </select>
+            <select value={payType} onChange={(e) => { setPayType(e.target.value); setPage(1); }}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+              <option>All Pay Types</option>
+              <option>Full-Time</option><option>Freelance</option>
+              <option>Contract</option><option>Advisory</option>
+            </select>
+
+            {/* Advanced filter trigger */}
+            <button
+              onClick={() => setShowFilter(true)}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all ${
+                activeRules.length > 0
+                  ? "bg-teal-600 text-white border-teal-600"
+                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <LuSlidersHorizontal size={15} strokeWidth={2} />
+              Advanced Filters
+              {activeRules.length > 0 && (
+                <span className="inline-flex items-center justify-center size-5 rounded-full bg-white text-teal-700 text-xs font-bold">
+                  {activeRules.length}
+                </span>
+              )}
+            </button>
+
+            {(dept !== "All Departments" || payType !== "All Pay Types" || activeRules.length > 0) && (
+              <button onClick={reset} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear all filters">
+                <LuX size={16} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Active filter chips */}
+        {activeRules.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-4 max-w-7xl mx-auto">
+            {activeRules.map((r) => (
+              <span key={r.id} className="inline-flex items-center gap-1.5 px-3 py-1 bg-teal-50 border border-teal-200 text-teal-700 text-xs font-medium rounded-full">
+                <span className="font-semibold capitalize">{r.column}</span>
+                <span className="opacity-60">{r.operator.replace(/_/g, " ")}</span>
+                {r.value && <span>&ldquo;{r.value}&rdquo;</span>}
+                {r.value2 && <span>– &ldquo;{r.value2}&rdquo;</span>}
+                <button onClick={() => removeRule(r.id)} className="ml-0.5 hover:text-red-500 transition-colors">
+                  <LuX size={11} strokeWidth={2.5} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Table */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-7xl mx-auto">
+          <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
+            <table className="w-full text-left border-collapse" style={{ minWidth: "2200px" }}>
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  {COLS.map((h) => (
+                    <th key={h} className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {rows.length === 0 ? (
+                  <tr>
+                    <td colSpan={COLS.length} className="px-4 py-16 text-center text-slate-400 text-sm">
+                      No contractors match your filters.
+                    </td>
+                  </tr>
+                ) : rows.map((c) => (
+                  <tr key={c.uid} className="hover:bg-slate-50/80 transition-colors cursor-pointer group">
+                    <td className="px-4 py-4 text-sm text-slate-500 font-mono">{c.uid}</td>
+                    <td className="px-4 py-4 text-sm text-slate-900 font-medium">{c.firstName}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.middleName}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.surname}</td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(c.avatar)}`}>
+                          {c.avatar}
+                        </div>
+                        <span className="text-sm font-semibold text-[#003527] whitespace-nowrap">{c.fullName}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.dob}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.gender}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 font-mono">{c.contractorId}</td>
+                    <td className="px-4 py-4 text-sm text-slate-900 whitespace-nowrap">{c.department}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.subDepartment}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.role}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.location}</td>
+                    <td className="px-4 py-4">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${STATUS_STYLES[c.status] ?? "bg-slate-100 text-slate-500"}`}>
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.hireDate}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.officeLocation}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.currency}</td>
+                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.monthlyRate}</td>
+                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.weeklyRate}</td>
+                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.hourlyRate}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.email}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.payCategory}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.shiftHours}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.restDay}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.manager}</td>
+                    <td className="px-4 py-4 text-sm text-slate-500">{c.payPeriod}</td>
+                    <td className="px-4 py-4 text-right whitespace-nowrap">
+                      <button className="p-1.5 text-slate-400 hover:text-[#003527] transition-colors rounded-md hover:bg-slate-100">
+                        <LuPencil size={15} strokeWidth={1.75} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+            <p className="text-xs text-slate-500 font-medium">
+              Showing {filtered.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length} contractors
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
+                className="p-1.5 border border-slate-200 rounded-lg hover:bg-white transition-colors disabled:opacity-40">
+                <LuChevronLeft size={16} strokeWidth={2} />
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                <button key={n} onClick={() => setPage(n)}
+                  className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                    n === page ? "bg-white border border-teal-600 text-teal-700 font-bold" : "text-slate-600 hover:bg-white"
+                  }`}>
+                  {n}
+                </button>
+              ))}
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                className="p-1.5 border border-slate-200 rounded-lg hover:bg-white transition-colors disabled:opacity-40">
+                <LuChevronRight size={16} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

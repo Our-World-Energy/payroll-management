@@ -1,0 +1,130 @@
+export type Contractor = {
+  id: string;
+  name: string;
+  role: string;
+  region: "US" | "Philippines" | "Mexico" | "India";
+  site: string;
+  status: "Active" | "On Leave" | "Inactive";
+  cert: "Certified" | "Expiring" | "Expired";
+};
+
+export type AttendanceRecord = {
+  contractorId: string;
+  name: string;
+  role: string;
+  avatar: string;
+  region: string;
+  date: string;
+  checkIn: string;
+  checkOut: string;
+  hours: string;
+  status: "Present" | "Late" | "Absent" | "On Leave";
+  // Weekly tracking
+  standardMinutes: number;
+  actualMinutes: number;
+  weeklyStatus: "Standard Met" | "Approval Needed" | "Review Needed" | "On Leave";
+};
+
+export type PayrollRecord = {
+  id: string;
+  name: string;
+  region: string;
+  role: string;
+  hours: number;
+  rate: number;
+  gross: number;
+  deductions: number;
+  net: number;
+  status: "Paid" | "Pending" | "On Leave" | "On Hold";
+};
+
+export type TimeOffRequest = {
+  id: string;
+  name: string;
+  region: string;
+  type: "Annual Leave" | "Sick Leave" | "Unpaid Leave";
+  from: string;
+  to: string;
+  days: number;
+  reason: string;
+  status: "Approved" | "Pending" | "Rejected";
+};
+
+export const CONTRACTORS: Contractor[] = [
+  { id: "C001", name: "Sarah Jenkins",  role: "Solar Technician",    region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified" },
+  { id: "C002", name: "Michael Chen",   role: "Safety Officer",      region: "US",          site: "Wind Farm East",status: "Active",   cert: "Expiring"  },
+  { id: "C003", name: "Priya Sharma",   role: "Electrical Engineer", region: "India",       site: "Hydro Beta",    status: "Active",   cert: "Certified" },
+  { id: "C004", name: "Carlos Rivera",  role: "Site Manager",        region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Certified" },
+  { id: "C005", name: "Ana Santos",     role: "Logistics Lead",      region: "Philippines", site: "HQ Support",    status: "On Leave", cert: "Certified" },
+  { id: "C006", name: "James Okoye",    role: "Grid Technician",     region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified" },
+  { id: "C007", name: "Li Wei",         role: "Data Analyst",        region: "India",       site: "Remote",        status: "Inactive", cert: "Expired"   },
+  { id: "C008", name: "Maria Lopez",    role: "Field Engineer",      region: "Mexico",      site: "Solar Array C", status: "Active",   cert: "Certified" },
+  { id: "C009", name: "John Reyes",     role: "Solar Technician",    region: "Philippines", site: "Solar Array D", status: "Active",   cert: "Certified" },
+  { id: "C010", name: "Aisha Patel",    role: "Project Manager",     region: "India",       site: "HQ India",      status: "Active",   cert: "Certified" },
+  { id: "C011", name: "Tom Bradley",    role: "Grid Technician",     region: "US",          site: "Wind Farm East",status: "Active",   cert: "Certified" },
+  { id: "C012", name: "Rosa Mendez",    role: "Field Engineer",      region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Expiring"  },
+];
+
+export const ATTENDANCE: AttendanceRecord[] = [
+  { contractorId: "C001", name: "Sarah Jenkins",  role: "Solar Technician",    avatar: "SJ", region: "US",          date: "2026-05-15", checkIn: "08:02", checkOut: "17:05", hours: "9h 03m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C002", name: "Michael Chen",   role: "Safety Officer",      avatar: "MC", region: "US",          date: "2026-05-15", checkIn: "08:45", checkOut: "17:00", hours: "8h 15m", status: "Present",  standardMinutes: 2400, actualMinutes: 2610, weeklyStatus: "Approval Needed"  },
+  { contractorId: "C003", name: "Priya Sharma",   role: "Electrical Engineer", avatar: "PS", region: "India",       date: "2026-05-15", checkIn: "09:10", checkOut: "—",     hours: "—",      status: "Late",     standardMinutes: 2400, actualMinutes: 2180, weeklyStatus: "Review Needed"    },
+  { contractorId: "C004", name: "Carlos Rivera",  role: "Site Manager",        avatar: "CR", region: "Mexico",      date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C005", name: "Ana Santos",     role: "Logistics Lead",      avatar: "AS", region: "Philippines", date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "On Leave", standardMinutes: 2400, actualMinutes: 0,    weeklyStatus: "On Leave"         },
+  { contractorId: "C006", name: "James Okoye",    role: "Grid Technician",     avatar: "JO", region: "US",          date: "2026-05-15", checkIn: "07:58", checkOut: "17:02", hours: "9h 04m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C007", name: "Li Wei",         role: "Data Analyst",        avatar: "LW", region: "India",       date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2400, actualMinutes: 2150, weeklyStatus: "Review Needed"    },
+  { contractorId: "C008", name: "Maria Lopez",    role: "Field Engineer",      avatar: "ML", region: "Mexico",      date: "2026-05-15", checkIn: "08:30", checkOut: "17:30", hours: "9h 00m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C009", name: "John Reyes",     role: "Solar Technician",    avatar: "JR", region: "Philippines", date: "2026-05-15", checkIn: "08:15", checkOut: "17:10", hours: "8h 55m", status: "Present",  standardMinutes: 2400, actualMinutes: 2580, weeklyStatus: "Approval Needed"  },
+  { contractorId: "C010", name: "Aisha Patel",    role: "Project Manager",     avatar: "AP", region: "India",       date: "2026-05-15", checkIn: "08:50", checkOut: "17:45", hours: "8h 55m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C011", name: "Tom Bradley",    role: "Grid Technician",     avatar: "TB", region: "US",          date: "2026-05-15", checkIn: "09:30", checkOut: "17:00", hours: "7h 30m", status: "Late",     standardMinutes: 2400, actualMinutes: 2220, weeklyStatus: "Review Needed"    },
+  { contractorId: "C012", name: "Rosa Mendez",    role: "Field Engineer",      avatar: "RM", region: "Mexico",      date: "2026-05-15", checkIn: "08:05", checkOut: "17:05", hours: "9h 00m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+];
+
+export const PAYROLL: PayrollRecord[] = [
+  { id: "PR-0041", name: "Sarah Jenkins",  region: "US",          role: "Solar Technician",    hours: 92, rate: 45, gross: 4140, deductions: 621, net: 3519, status: "Paid"    },
+  { id: "PR-0042", name: "Michael Chen",   region: "US",          role: "Safety Officer",      hours: 88, rate: 52, gross: 4576, deductions: 686, net: 3890, status: "Paid"    },
+  { id: "PR-0043", name: "Priya Sharma",   region: "India",       role: "Electrical Engineer", hours: 90, rate: 38, gross: 3420, deductions: 513, net: 2907, status: "Pending" },
+  { id: "PR-0044", name: "Carlos Rivera",  region: "Mexico",      role: "Site Manager",        hours: 95, rate: 41, gross: 3895, deductions: 584, net: 3311, status: "Pending" },
+  { id: "PR-0045", name: "Ana Santos",     region: "Philippines", role: "Logistics Lead",      hours: 40, rate: 28, gross: 1120, deductions: 168, net: 952,  status: "On Leave"},
+  { id: "PR-0046", name: "James Okoye",    region: "US",          role: "Grid Technician",     hours: 96, rate: 44, gross: 4224, deductions: 634, net: 3590, status: "Paid"    },
+  { id: "PR-0047", name: "Li Wei",         region: "India",       role: "Data Analyst",        hours: 0,  rate: 35, gross: 0,    deductions: 0,   net: 0,    status: "On Hold" },
+  { id: "PR-0048", name: "Maria Lopez",    region: "Mexico",      role: "Field Engineer",      hours: 94, rate: 40, gross: 3760, deductions: 564, net: 3196, status: "Paid"    },
+  { id: "PR-0049", name: "John Reyes",     region: "Philippines", role: "Solar Technician",    hours: 90, rate: 30, gross: 2700, deductions: 405, net: 2295, status: "Paid"    },
+  { id: "PR-0050", name: "Aisha Patel",    region: "India",       role: "Project Manager",     hours: 92, rate: 42, gross: 3864, deductions: 580, net: 3284, status: "Pending" },
+  { id: "PR-0051", name: "Tom Bradley",    region: "US",          role: "Grid Technician",     hours: 88, rate: 44, gross: 3872, deductions: 581, net: 3291, status: "Paid"    },
+  { id: "PR-0052", name: "Rosa Mendez",    region: "Mexico",      role: "Field Engineer",      hours: 94, rate: 40, gross: 3760, deductions: 564, net: 3196, status: "Pending" },
+];
+
+export const TIME_OFF: TimeOffRequest[] = [
+  { id: "TO-101", name: "Sarah Jenkins",  region: "US",          type: "Annual Leave", from: "2026-05-20", to: "2026-05-22", days: 3,  reason: "Family vacation",   status: "Approved" },
+  { id: "TO-102", name: "Priya Sharma",   region: "India",       type: "Sick Leave",   from: "2026-05-15", to: "2026-05-16", days: 2,  reason: "Medical appointment",status: "Approved" },
+  { id: "TO-103", name: "Carlos Rivera",  region: "Mexico",      type: "Annual Leave", from: "2026-05-19", to: "2026-05-23", days: 5,  reason: "Personal travel",   status: "Pending"  },
+  { id: "TO-104", name: "Ana Santos",     region: "Philippines", type: "Annual Leave", from: "2026-05-13", to: "2026-05-17", days: 5,  reason: "Holiday",           status: "Approved" },
+  { id: "TO-105", name: "Li Wei",         region: "India",       type: "Unpaid Leave", from: "2026-05-10", to: "2026-05-20", days: 11, reason: "Extended absence",  status: "Rejected" },
+  { id: "TO-106", name: "James Okoye",    region: "US",          type: "Sick Leave",   from: "2026-05-18", to: "2026-05-18", days: 1,  reason: "Unwell",            status: "Pending"  },
+  { id: "TO-107", name: "John Reyes",     region: "Philippines", type: "Annual Leave", from: "2026-05-25", to: "2026-05-26", days: 2,  reason: "Rest day",          status: "Pending"  },
+  { id: "TO-108", name: "Rosa Mendez",    region: "Mexico",      type: "Sick Leave",   from: "2026-05-14", to: "2026-05-14", days: 1,  reason: "Fever",             status: "Approved" },
+  { id: "TO-109", name: "Tom Bradley",    region: "US",          type: "Annual Leave", from: "2026-05-22", to: "2026-05-22", days: 1,  reason: "Personal errand",   status: "Approved" },
+  { id: "TO-110", name: "Aisha Patel",    region: "India",       type: "Sick Leave",   from: "2026-05-16", to: "2026-05-16", days: 1,  reason: "Not feeling well",  status: "Approved" },
+  { id: "TO-111", name: "Michael Chen",   region: "US",          type: "Annual Leave", from: "2026-05-28", to: "2026-05-29", days: 2,  reason: "Weekend trip",      status: "Pending"  },
+  { id: "TO-112", name: "Maria Lopez",    region: "Mexico",      type: "Annual Leave", from: "2026-05-30", to: "2026-05-30", days: 1,  reason: "Public holiday",    status: "Approved" },
+];
+
+// ── Derived metrics (single source of truth for the dashboard) ──────────────
+
+export function getDashboardMetrics() {
+  const byRegion = (r: string) => CONTRACTORS.filter((c) => c.region === r).length;
+
+  const ptoToday    = ATTENDANCE.filter((a) => a.status === "On Leave").length;
+  const absentToday = ATTENDANCE.filter((a) => a.status === "Absent").length;
+
+  return {
+    totalActive:  CONTRACTORS.length,
+    us:           byRegion("US"),
+    philippines:  byRegion("Philippines"),
+    mexico:       byRegion("Mexico"),
+    india:        byRegion("India"),
+    ptoToday,
+    absentToday,
+  };
+}
