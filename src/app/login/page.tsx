@@ -13,13 +13,23 @@ import {
   LuGlobe,
 } from "react-icons/lu";
 
+const VALID_EMAIL    = "admin@gmail.com";
+const VALID_PASSWORD = "admin123";
+
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail]               = useState("");
+  const [password, setPassword]         = useState("");
+  const [error, setError]               = useState("");
   const router = useRouter();
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    router.push("/");
+    if (email === VALID_EMAIL && password === VALID_PASSWORD) {
+      router.push("/admin");
+    } else {
+      setError("Invalid email or password.");
+    }
   }
 
   return (
@@ -104,6 +114,8 @@ export default function LoginPage() {
                   name="email"
                   type="email"
                   required
+                  value={email}
+                  onChange={(e) => { setEmail(e.target.value); setError(""); }}
                   placeholder="name@company.com"
                   className="w-full pl-10 pr-4 py-3 rounded-lg text-base outline-none transition-all border"
                   style={{
@@ -152,6 +164,8 @@ export default function LoginPage() {
                   name="password"
                   type={showPassword ? "text" : "password"}
                   required
+                  value={password}
+                  onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   placeholder="••••••••"
                   className="w-full pl-10 pr-12 py-3 rounded-lg text-base outline-none transition-all border"
                   style={{
@@ -200,6 +214,13 @@ export default function LoginPage() {
                 Remember this device for 30 days
               </label>
             </div>
+
+            {/* Error */}
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">
+                {error}
+              </p>
+            )}
 
             {/* Sign In button */}
             <button
