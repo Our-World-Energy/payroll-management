@@ -12,7 +12,7 @@ export type Contractor = {
   subDepartment: string;
   role: string;
   location: string;
-  status: "Active" | "Inactive" | "On Leave";
+  status: "Active" | "Dismissed";
   hireDate: string;
   officeLocation: string;
   currency: string;
@@ -25,6 +25,7 @@ export type Contractor = {
   restDay: string;
   manager: string;
   payPeriod: string;
+  createdOn: string;
 };
 
 export type ColumnDef = {
@@ -59,6 +60,7 @@ export const COLUMNS: ColumnDef[] = [
   { key: "restDay",        label: "Rest Day",        type: "string" },
   { key: "manager",        label: "Manager",         type: "string" },
   { key: "payPeriod",      label: "Pay Period",      type: "string" },
+  { key: "createdOn",      label: "Created On",      type: "date"   },
 ];
 
 export type FilterRule = {
@@ -66,5 +68,5 @@ export type FilterRule = {
   column: keyof Contractor;
   operator: string;
   value: string;
-  value2?: string; // for between / date range
+  value2?: string;
 };
