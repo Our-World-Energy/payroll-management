@@ -94,7 +94,7 @@ const STATUS_STYLES: Record<string, string> = {
   Dismissed: "bg-red-100 text-red-700",
 };
 
-const PAGE_SIZE = 4;
+const PAGE_SIZE = 15;
 
 export default function ContractorsPage() {
   const [data, setData]               = useState<Contractor[]>(INITIAL_DATA);
@@ -147,7 +147,7 @@ export default function ContractorsPage() {
   const avatarColor = (avatar: string) => AVATAR_COLORS[avatar] ?? "bg-slate-100 text-slate-600";
 
   const COLS = [
-    "Unique ID","First Name","Middle Name","Surname","Full Name","Date of Birth","Gender",
+    "Unique ID","Full Name","Date of Birth","Gender",
     "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
     "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
     "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Created On","Action",
@@ -162,7 +162,7 @@ export default function ContractorsPage() {
 
       <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 md:mb-8 gap-4 max-w-7xl mx-auto">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 md:mb-8 gap-4 max-w-full mx-auto">
           <div>
             <nav className="flex mb-2">
               <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
@@ -171,7 +171,7 @@ export default function ContractorsPage() {
                 <li className="text-teal-600">Contractor Details</li>
               </ol>
             </nav>
-            <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Contractor Directory</h2>
+            <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Contractor Detail</h2>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <button className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm">
@@ -196,7 +196,7 @@ export default function ContractorsPage() {
         </div>
 
         {/* Filter Bar */}
-        <div className="mb-4 max-w-7xl mx-auto">
+        <div className="mb-4 max-w-full mx-auto">
           <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center">
             <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
             <select value={dept} onChange={(e) => { setDept(e.target.value); setPage(1); }}
@@ -241,7 +241,7 @@ export default function ContractorsPage() {
 
         {/* Active filter chips */}
         {activeRules.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-4 max-w-7xl mx-auto">
+          <div className="flex flex-wrap gap-2 mb-4 max-w-full mx-auto">
             {activeRules.map((r) => (
               <span key={r.id} className="inline-flex items-center gap-1.5 px-3 py-1 bg-teal-50 border border-teal-200 text-teal-700 text-xs font-medium rounded-full">
                 <span className="font-semibold capitalize">{r.column}</span>
@@ -257,19 +257,17 @@ export default function ContractorsPage() {
         )}
 
         {/* Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-7xl mx-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-full mx-auto">
           <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
-            <table className="w-full text-left border-collapse" style={{ minWidth: "2200px" }}>
+            <table className="w-full text-left" style={{ minWidth: "2200px", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
+                <tr style={{ background: "#003527" }}>
                   {/* Fixed columns */}
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 bg-slate-50 border-r border-slate-200" style={{ minWidth: 130 }}>Unique ID</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap sticky z-20 bg-slate-50" style={{ left: 130, minWidth: 110 }}>First Name</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap sticky z-20 bg-slate-50" style={{ left: 240, minWidth: 120 }}>Middle Name</th>
-                  <th className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap sticky z-20 bg-slate-50 border-r border-slate-200" style={{ left: 360, minWidth: 110 }}>Surname</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20" style={{ minWidth: 130, background: "#003527" }}>Unique ID</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky z-20 border-r border-white/20" style={{ left: 130, minWidth: 200, background: "#003527" }}>Full Name</th>
                   {/* Scrollable columns */}
-                  {COLS.slice(4).map((h) => (
-                    <th key={h} className="px-4 py-3.5 text-xs font-semibold text-slate-600 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  {COLS.slice(2).map((h, i) => (
+                    <th key={h} className={`px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap ${i < COLS.slice(2).length - 1 ? "border-r border-white/20" : ""}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -283,44 +281,41 @@ export default function ContractorsPage() {
                 ) : rows.map((c) => (
                   <tr key={c.uid} className="hover:bg-slate-50 transition-colors cursor-pointer group">
                     {/* Fixed columns */}
-                    <td className="px-4 py-4 text-sm text-slate-500 font-mono whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-100" style={{ minWidth: 130 }}>{c.uid}</td>
-                    <td className="px-4 py-4 text-sm text-slate-900 font-medium whitespace-nowrap sticky z-10 bg-white group-hover:bg-slate-50" style={{ left: 130, minWidth: 110 }}>{c.firstName}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap sticky z-10 bg-white group-hover:bg-slate-50" style={{ left: 240, minWidth: 120 }}>{c.middleName}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap sticky z-10 bg-white group-hover:bg-slate-50 border-r border-slate-100" style={{ left: 360, minWidth: 110 }}>{c.surname}</td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-2.5 text-sm text-slate-500 font-mono whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 130 }}>{c.uid}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap sticky z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ left: 130, minWidth: 200 }}>
                       <div className="flex items-center gap-2.5">
-                        <div className={`h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(c.avatar)}`}>
+                        <div className={`h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(c.avatar)}`}>
                           {c.avatar}
                         </div>
                         <span className="text-sm font-semibold text-[#003527] whitespace-nowrap">{c.fullName}</span>
                       </div>
                     </td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.dob}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500">{c.gender}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 font-mono">{c.contractorId}</td>
-                    <td className="px-4 py-4 text-sm text-slate-900 whitespace-nowrap">{c.department}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.subDepartment}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.role}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.location}</td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.dob}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.gender}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 font-mono border-r border-slate-100">{c.contractorId}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-900 whitespace-nowrap border-r border-slate-100">{c.department}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.subDepartment}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.role}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.location}</td>
+                    <td className="px-4 py-2.5 border-r border-slate-100">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${STATUS_STYLES[c.status] ?? "bg-slate-100 text-slate-500"}`}>
                         {c.status}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.hireDate}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.officeLocation}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500">{c.currency}</td>
-                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.monthlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
-                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.weeklyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
-                    <td className="px-4 py-4 text-sm text-slate-600 tabular-nums">{c.hourlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.email}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500">{c.payCategory}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.shiftHours}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500">{c.restDay}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.manager}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap" style={{ minWidth: 220 }}>{c.payPeriod}</td>
-                    <td className="px-4 py-4 text-sm text-slate-500 whitespace-nowrap">{c.createdOn}</td>
-                    <td className="px-4 py-4 text-right whitespace-nowrap">
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.hireDate}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.officeLocation}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.currency}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.monthlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.weeklyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.hourlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.email}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.payCategory}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.shiftHours}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.restDay}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.manager}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100" style={{ minWidth: 160 }}>Sunday – Saturday</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.createdOn}</td>
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
                       <button
                         onClick={() => setEditTarget(c)}
                         className="p-1.5 text-slate-400 hover:text-[#003527] transition-colors rounded-md hover:bg-slate-100"
