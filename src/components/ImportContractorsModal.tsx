@@ -156,6 +156,7 @@ function rowToContractor(data: Record<string, string>): Contractor {
     monthlyRate:   monthly             || "—",
     weeklyRate:    weekly,
     hourlyRate:    hourly,
+    dismissalDate: data.status === "Dismissed" ? (data.dismissal_date ?? "") : "",
   };
 }
 

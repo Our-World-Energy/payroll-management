@@ -26,6 +26,7 @@ export type Contractor = {
   manager: string;
   payPeriod: string;
   createdOn: string;
+  dismissalDate: string;
 };
 
 export type ColumnDef = {
@@ -61,6 +62,7 @@ export const COLUMNS: ColumnDef[] = [
   { key: "manager",        label: "Manager",         type: "string" },
   { key: "payPeriod",      label: "Pay Period",      type: "string" },
   { key: "createdOn",      label: "Created On",      type: "date"   },
+  { key: "dismissalDate", label: "Dismissal Date",  type: "date"   },
 ];
 
 export type FilterRule = {

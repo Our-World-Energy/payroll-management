@@ -3,45 +3,13 @@
 import { useState, useEffect } from "react";
 import { LuX, LuUserPlus, LuPencil } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
+import { useContractorConfig } from "@/components/ContractorConfigContext";
 
 type Props = {
   onClose: () => void;
   onSave: (c: Contractor) => void;
   initial?: Contractor;
 };
-
-// ── Department → Sub-department → Role ───────────────────────────────────────
-const DEPT_TREE: Record<string, Record<string, string[]>> = {
-  "Internal Operations": {
-    CAD: ["Electrical Review Manager", "Electrical Review Team Lead", "Electrical Review Sr"],
-    Electrical: ["Electrical 1", "Electrical 2"],
-  },
-  "Field Ops": {
-    Construction: ["Construction Manager", "Construction Lead", "Site Supervisor"],
-    Inspection:   ["Field Inspector", "Quality Inspector"],
-  },
-  "Solar Engineering": {
-    "Field Inspection":   ["Lead Inspector", "Solar Technician"],
-    "Panel Installation": ["Installation Lead", "Installer"],
-    "System Design":      ["Design Engineer", "CAD Drafter"],
-  },
-  "Grid Maintenance": {
-    "High Voltage":  ["HV Specialist", "HV Technician"],
-    Distribution:    ["Grid Technician", "Maintenance Lead"],
-    Substation:      ["Substation Engineer", "Protection Relay Tech"],
-  },
-  "Field Safety": {
-    Compliance:            ["Safety Officer", "Compliance Analyst"],
-    "Risk Assessment":     ["Risk Analyst", "HSE Coordinator"],
-    "Emergency Response":  ["Emergency Coordinator", "First Responder"],
-  },
-  Logistics: {
-    "Supply Chain":     ["Logistics Lead", "Supply Analyst"],
-    "Offshore Support": ["Offshore Coordinator", "Logistics Specialist"],
-    Warehouse:          ["Warehouse Manager", "Inventory Clerk"],
-  },
-};
-const DEPARTMENTS = Object.keys(DEPT_TREE);
 
 // ── Country → States ──────────────────────────────────────────────────────────
 const COUNTRY_STATES: Record<string, string[]> = {
@@ -51,27 +19,6 @@ const COUNTRY_STATES: Record<string, string[]> = {
   USA:         ["California", "Texas", "Arizona", "Colorado", "Florida", "New York", "Washington"],
 };
 const COUNTRIES = Object.keys(COUNTRY_STATES);
-
-const OFFICE_LOCATIONS = [
-  "PGS [AZ, Yuma]", "OWE [MA, Auburn]", "Solar Godz [FL, Jacksonville]",
-  "eEquals [VA, Richmond]", "Allied Energy Solutions [ME, Brunswick]", "Adrian Martinez",
-  "Allied Energy Solutions [NH, Bow]", "eEquals [IL, St Louis]",
-  "Allied Energy Solutions [NJ, Pennsauken]", "OWE [AZ, Tucson]", "Va Energy Electric",
-  "Solar Godz [VA, Richmond]", "Allied Energy Solutions [TX, Midland]",
-  "Sunrite Solar [MA, Hudson]", "OWE [AZ, Tempe]", "Solar Godz [FL, Tallahassee]",
-  "No Office", "Clear Solar Solutions [CA, Turlock]", "OWE [TX, San Antonio]",
-  "OWE [AZ, Phoenix]", "OWE [TX, Austin]", "Allied Energy Solutions [RI, Providence]",
-  "eEquals [MD, Jessup]", "Cody Rawleigh", "Sunforce [TX, Las Cruces]",
-  "OWE [TX, El Paso]", "OWE [FL, St Peterburg]", "Integrity Electrical [AZ, Yuma]",
-  "Green Volt [CA, Fresno]", "Sun Craft Contracting [FL, Flagler]", "OWE [CO, Denver]",
-  "OWE [CO, Grand Junction]", "OWE [TX, Corpus Christi]", "Sunrite Solar [CT, Wallingford]",
-  "OWE [AZ, Kingman]", "Sunlife Tech [PR, Guaynabo]", "Solar Godz [FL, Tampa]",
-  "Solar Godz [MD, Jessup]", "Sunrite Solar [RI, Rhode Island]", "Optimum Home [TX, Houston]",
-  "OWE [TX, Houston]", "Mendez Electric Solar [CA, San Jacinto]",
-  "Direct Electrical Innovations [TX, Dallas]", "Allied Energy Solutions [IL, Hammond]",
-  "OWE [TX, Grand Prairie]", "OWE [NM, Albuquerque]", "Adrian Ruvalcaba",
-  "Allied Energy Solutions [MA, Mansfield]", "DT Solar [TX, Brownsville]",
-];
 
 const MANAGERS       = ["Colten Warnock", "Dillard Blanton"];
 const PAY_CATEGORIES = ["Hourly", "Fixed"];
@@ -118,6 +65,8 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
+  const { officeLocations, deptTree } = useContractorConfig();
+  const DEPARTMENTS = Object.keys(deptTree);
 
   const parseLocation = (loc?: string) => {
     if (!loc) return { country: COUNTRIES[0], state: "" };
@@ -143,7 +92,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     role:           initial?.role           ?? "",
     country:        initLoc.country,
     state:          initLoc.state,
-    officeLocation: initial?.officeLocation ?? OFFICE_LOCATIONS[0],
+    officeLocation: initial?.officeLocation ?? officeLocations[0],
     manager:        initial?.manager        ?? MANAGERS[0],
     hireDate:       initial?.hireDate       ?? "",
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
@@ -155,6 +104,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     monthlyRate:    initial?.monthlyRate    ?? "",
     weeklyRate:     initial?.weeklyRate     ?? "",
     hourlyRate:     initial?.hourlyRate     ?? "",
+    dismissalDate:  initial?.dismissalDate  ?? "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -223,14 +173,15 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       monthlyRate:    form.monthlyRate || "—",
       weeklyRate:     form.weeklyRate  || "—",
       hourlyRate:     form.hourlyRate  || "—",
+      dismissalDate:  form.status === "Dismissed" ? (form.dismissalDate || "") : "",
     };
 
     onSave(contractor);
     onClose();
   }
 
-  const subDepts = Object.keys(DEPT_TREE[form.department] ?? {});
-  const roles    = DEPT_TREE[form.department]?.[form.subDepartment] ?? [];
+  const subDepts = Object.keys(deptTree[form.department] ?? {});
+  const roles    = deptTree[form.department]?.[form.subDepartment] ?? [];
   const states   = COUNTRY_STATES[form.country] ?? [];
 
   return (
@@ -348,7 +299,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
               <FIELD label="Office Location">
                 <select className={SELECT} value={form.officeLocation} onChange={(e) => set("officeLocation", e.target.value)}>
-                  {OFFICE_LOCATIONS.map((o) => <option key={o}>{o}</option>)}
+                  {officeLocations.map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FIELD>
 
@@ -382,6 +333,13 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </FIELD>
+
+              {/* Dismissal Date — only when Dismissed */}
+              {form.status === "Dismissed" && (
+                <FIELD label="Dismissal Date">
+                  <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
+                </FIELD>
+              )}
 
               {/* Pay Period — always Sun–Sat, read-only */}
               <FIELD label="Pay Period (Sun – Sat cut-off)">
