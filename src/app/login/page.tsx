@@ -12,24 +12,36 @@ import {
   LuCircleHelp,
   LuGlobe,
 } from "react-icons/lu";
-
-const VALID_EMAIL    = "admin@gmail.com";
-const VALID_PASSWORD = "admin123";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail]               = useState("");
   const [password, setPassword]         = useState("");
   const [error, setError]               = useState("");
+  const [loading, setLoading]           = useState(false);
   const router = useRouter();
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (email === VALID_EMAIL && password === VALID_PASSWORD) {
-      router.push("/admin");
-    } else {
-      setError("Invalid email or password.");
+    setError("");
+    setLoading(true);
+
+    const supabase = createClient();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (signInError) {
+      setError(signInError.message);
+      setLoading(false);
+      return;
     }
+
+    // Session cookies are set; refresh so the proxy + server see the new auth.
+    router.push("/admin");
+    router.refresh();
   }
 
   return (
@@ -225,7 +237,8 @@ export default function LoginPage() {
             {/* Sign In button */}
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-base font-semibold text-white shadow-md transition-all active:scale-[0.98]"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-base font-semibold text-white shadow-md transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
               style={{ background: "#064e3b" }}
               onMouseEnter={(e) =>
                 (e.currentTarget.style.background = "#003527")
@@ -234,7 +247,7 @@ export default function LoginPage() {
                 (e.currentTarget.style.background = "#064e3b")
               }
             >
-              Sign In
+              {loading ? "Signing In…" : "Sign In"}
               <LuLogIn className="text-base" />
             </button>
           </form>
