@@ -12,10 +12,15 @@ import {
   LuSettings,
   LuChevronsUpDown,
   LuSparkles,
-  LuEllipsis,
+  LuLogOut,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { Logo } from "./Logo";
+
+type SidebarUser = {
+  id: string;
+  email: string;
+};
 
 type NavItem = {
   href: string;
@@ -37,8 +42,17 @@ const NAV_SECONDARY: NavItem[] = [
   { href: "/dashboard/settings", label: "Settings", Icon: LuSettings },
 ];
 
-export function Sidebar() {
+export function Sidebar({ user }: { user?: SidebarUser }) {
   const pathname = usePathname();
+
+  const initials = (user?.email ?? "??")
+    .split("@")[0]
+    .split(/[.\-_]/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase() ?? "")
+    .join("") || "U";
+  const displayName = user?.email?.split("@")[0] ?? "User";
   const isActive = (href: string) =>
     href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(href);
 
@@ -156,22 +170,30 @@ export function Sidebar() {
 
       {/* User */}
       <div className="relative m-3 mt-0 rounded-xl border hairline-on-dark bg-white/3 backdrop-blur-sm p-2.5 flex items-center gap-2.5">
-        <div className="relative">
+        <div className="relative shrink-0">
           <div className="size-8 rounded-full bg-linear-to-br from-accent-300 to-brand-700 grid place-items-center text-[11px] font-semibold text-brand-950">
-            AU
+            {initials}
           </div>
           <span className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-accent-400 ring-2 ring-brand-900" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-[12px] font-semibold truncate">Alex Underwood</p>
-          <p className="text-[10px] text-emerald-100/55 truncate">System Lead</p>
+          <p className="text-[12px] font-semibold truncate capitalize">
+            {displayName}
+          </p>
+          <p className="text-[10px] text-emerald-100/55 truncate">
+            {user?.email ?? "Signed out"}
+          </p>
         </div>
-        <button
-          aria-label="Account menu"
-          className="p-1.5 text-emerald-100/55 hover:text-white rounded-md hover:bg-white/10 transition-colors"
-        >
-          <LuEllipsis size={16} strokeWidth={1.75} />
-        </button>
+        <form action="/auth/sign-out" method="post">
+          <button
+            type="submit"
+            aria-label="Sign out"
+            title="Sign out"
+            className="p-1.5 text-emerald-100/55 hover:text-white rounded-md hover:bg-white/10 transition-colors"
+          >
+            <LuLogOut size={16} strokeWidth={1.75} />
+          </button>
+        </form>
       </div>
     </aside>
   );
