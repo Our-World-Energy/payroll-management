@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-// Client-side route guard. The app is a static export (no server/proxy), so
-// auth gating happens in the browser: check for a session, redirect to /login
-// if absent, and react to sign-out events live.
+// Client-side route guard for /admin. The proxy only refreshes the session
+// (it does not gate routes), so access control happens here: require a session,
+// then require an aal2 (2FA-verified) session, reacting to sign-out events live.
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
@@ -14,13 +14,25 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const supabase = createClient();
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setChecked(true);
-      } else {
+    (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session) {
         router.replace("/login");
+        return;
       }
-    });
+
+      // 2FA is mandatory: require an aal2 (MFA-verified) session for /admin.
+      const { data: aal } =
+        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (aal?.currentLevel !== "aal2") {
+        router.replace("/two-factor");
+        return;
+      }
+
+      setChecked(true);
+    })();
 
     const {
       data: { subscription },

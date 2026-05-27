@@ -39,8 +39,9 @@ export default function LoginPage() {
       return;
     }
 
-    // Session cookies are set; refresh so the proxy + server see the new auth.
-    router.push("/admin");
+    // Password is verified (session is aal1). 2FA is mandatory, so always route
+    // through /two-factor, which enrolls or challenges before reaching /admin.
+    router.push("/two-factor");
     router.refresh();
   }
 
