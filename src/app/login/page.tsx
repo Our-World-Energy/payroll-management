@@ -13,38 +13,37 @@ import {
   LuLoader,
   LuCircleAlert,
 } from "react-icons/lu";
-import { Logo } from "@/components/Logo";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [email, setEmail]               = useState("");
+  const [password, setPassword]         = useState("");
+  const [error, setError]               = useState("");
+  const [loading, setLoading]           = useState(false);
+  const router = useRouter();
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setError("");
     setLoading(true);
 
-    const form = new FormData(e.currentTarget);
-    const email = String(form.get("email") || "").trim();
-    const password = String(form.get("password") || "");
-
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
-    if (error) {
-      setError(error.message);
+    if (signInError) {
+      setError(signInError.message);
       setLoading(false);
       return;
     }
 
+    // Session cookies are set; refresh so the proxy + server see the new auth.
+    router.push("/admin");
     router.refresh();
-    router.push("/dashboard");
   }
 
   return (
@@ -261,16 +260,30 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              <button
-                type="button"
-                disabled
-                title="SSO coming soon"
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-paper hairline border text-ink-500 font-medium py-3.5 cursor-not-allowed"
-              >
-                <LuBuilding2 size={18} strokeWidth={1.75} className="text-ink-400" />
-                Continue with SSO
-              </button>
-            </form>
+            {/* Error */}
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">
+                {error}
+              </p>
+            )}
+
+            {/* Sign In button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-base font-semibold text-white shadow-md transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ background: "#064e3b" }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.background = "#003527")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.background = "#064e3b")
+              }
+            >
+              {loading ? "Signing In…" : "Sign In"}
+              <LuLogIn className="text-base" />
+            </button>
+          </form>
 
             <p className="mt-10 text-center text-[12px] text-ink-500 leading-relaxed">
               Authorized access only. By signing in you agree to our{" "}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LuLayoutDashboard, LuHardHat, LuFingerprint, LuWallet,
   LuCalendarX, LuChartBar, LuSettings, LuLogOut,
@@ -9,6 +9,7 @@ import {
 import type { IconType } from "react-icons";
 import Image from "next/image";
 import { useSidebar } from "./SidebarContext";
+import { createClient } from "@/lib/supabase/client";
 
 type NavItem = { href: string; label: string; Icon: IconType };
 
@@ -24,7 +25,14 @@ const NAV_ITEMS: NavItem[] = [
 
 export function AdminSidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { open, close } = useSidebar();
+
+  async function handleLogout() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/login");
+  }
 
   const isActive = (href: string) =>
     href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
@@ -62,7 +70,7 @@ export function AdminSidebar() {
 
       {/* Logout */}
       <div className="p-4 border-t border-slate-100 shrink-0">
-        <button className="flex items-center gap-3 w-full px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all rounded-lg">
+        <button onClick={handleLogout} className="flex items-center gap-3 w-full px-3 py-2.5 text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all rounded-lg">
           <LuLogOut size={18} strokeWidth={1.75} />
           Logout
         </button>
