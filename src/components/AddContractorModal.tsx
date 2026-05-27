@@ -97,8 +97,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     hireDate:       initial?.hireDate       ?? "",
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
     payCategory:    initial?.payCategory    ?? PAY_CATEGORIES[0],
-    shiftFrom:      initial?.shiftHours?.split(" to ")[0] ?? "8:00 AM",
-    shiftTo:        initial?.shiftHours?.split(" to ")[1] ?? "5:00 PM",
+    shiftType:      initial?.shiftType ?? "Fixed",
+    shiftFrom:      initial?.shiftHours?.split(" to ")[0] ?? "9:00 AM",
+    shiftTo:        initial?.shiftHours?.split(" to ")[1] ?? "6:00 PM",
     restDays:       initial?.restDay && initial.restDay !== "—" ? initial.restDay.split(", ") : [] as string[],
     currency:       initial?.currency       ?? CURRENCIES[0],
     monthlyRate:    initial?.monthlyRate    ?? "",
@@ -166,8 +167,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       hireDate:       form.hireDate,
       status:         form.status,
       payCategory:    form.payCategory,
-      payPeriod:      getPayPeriod(),
-      shiftHours:     `${form.shiftFrom} to ${form.shiftTo}`,
+      payPeriod:      "Sunday – Saturday",
+      shiftType:      form.shiftType,
+      shiftHours:     form.shiftType === "Fixed" ? `${form.shiftFrom} to ${form.shiftTo}` : "Flexible",
       restDay:        form.restDays.length ? form.restDays.join(", ") : "—",
       currency:       form.currency,
       monthlyRate:    form.monthlyRate || "—",
@@ -341,22 +343,34 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </FIELD>
               )}
 
-              {/* Pay Period — always Sun–Sat, read-only */}
-              <FIELD label="Pay Period (Sun – Sat cut-off)">
-                <input className={READONLY} readOnly value={getPayPeriod()} />
+              {/* Pay Period — static days only, read-only */}
+              <FIELD label="Pay Period">
+                <input className={READONLY} readOnly value="Sunday – Saturday" />
               </FIELD>
 
-              {/* Shift time range */}
-              <FIELD label="Shift Start">
-                <select className={SELECT} value={form.shiftFrom} onChange={(e) => set("shiftFrom", e.target.value)}>
-                  {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
+              {/* Shift Type */}
+              <FIELD label="Shift Type">
+                <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
+                  <option value="Fixed">Fixed</option>
+                  <option value="Flexible">Flexible</option>
                 </select>
               </FIELD>
-              <FIELD label="Shift End">
-                <select className={SELECT} value={form.shiftTo} onChange={(e) => set("shiftTo", e.target.value)}>
-                  {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
-                </select>
-              </FIELD>
+
+              {/* Shift Start / End — only shown when Fixed */}
+              {form.shiftType === "Fixed" && (
+                <>
+                  <FIELD label="Shift Start">
+                    <select className={SELECT} value={form.shiftFrom} onChange={(e) => set("shiftFrom", e.target.value)}>
+                      {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
+                    </select>
+                  </FIELD>
+                  <FIELD label="Shift End">
+                    <select className={SELECT} value={form.shiftTo} onChange={(e) => set("shiftTo", e.target.value)}>
+                      {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
+                    </select>
+                  </FIELD>
+                </>
+              )}
 
               {/* Rest Days — multi-select pill buttons */}
               <div className="sm:col-span-3 flex flex-col gap-1.5">

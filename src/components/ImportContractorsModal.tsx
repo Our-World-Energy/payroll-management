@@ -119,11 +119,6 @@ function rowToContractor(data: Record<string, string>): Contractor {
   const monthly = data.monthly_rate ?? "";
   const weekly  = monthly ? (parseFloat(monthly) / 4.33).toFixed(2)       : "—";
   const hourly  = monthly ? (parseFloat(monthly) / 4.33 / 40).toFixed(2)  : "—";
-  const today   = new Date();
-  const sun     = new Date(today); sun.setDate(today.getDate() - today.getDay());
-  const sat     = new Date(sun);   sat.setDate(sun.getDate() + 6);
-  const fmt     = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-
   const firstName  = data.first_name?.trim()  ?? "";
   const middleName = data.middle_name?.trim() ?? "";
   const surname    = data.surname?.trim()     ?? "";
@@ -149,8 +144,9 @@ function rowToContractor(data: Record<string, string>): Contractor {
     hireDate:      data.hire_date      ?? "",
     status:        VALID_STATUSES.includes(data.status) ? (data.status as "Active" | "Dismissed") : "Active",
     payCategory:   data.pay_category   ?? "",
-    payPeriod:     `${fmt(sun)} – ${fmt(sat)}`,
-    shiftHours:    data.shift_from && data.shift_to ? `${data.shift_from} to ${data.shift_to}` : "",
+    payPeriod:     "Sunday – Saturday",
+    shiftType:     data.shift_type === "Flexible" ? "Flexible" : "Fixed",
+    shiftHours:    data.shift_type === "Flexible" ? "Flexible" : (data.shift_from && data.shift_to ? `${data.shift_from} to ${data.shift_to}` : ""),
     restDay:       data.rest_days      ?? "—",
     currency:      data.currency       ?? "USD",
     monthlyRate:   monthly             || "—",

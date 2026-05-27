@@ -25,6 +25,7 @@ export type Contractor = {
   restDay: string;
   manager: string;
   payPeriod: string;
+  shiftType: string;
   createdOn: string;
   dismissalDate: string;
 };
