@@ -15,7 +15,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "San Diego, CA", status: "Active", hireDate: "2021-03-12", officeLocation: "OWE [AZ, Phoenix]",
     currency: "USD", monthlyRate: "5200", weeklyRate: "1300", hourlyRate: "32.50",
     email: "marcus.c@worldenergy.com", payCategory: "Full-Time", shiftHours: "8:00 AM to 5:00 PM",
-    restDay: "Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2021-03-10", dismissalDate: "",
+    restDay: "Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2021-03-10", dismissalDate: "",
   },
   {
     uid: "UID-99542", firstName: "Elena",  middleName: "Sofia", surname: "Rodriguez", fullName: "Elena Sofia Rodriguez",
@@ -24,7 +24,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Austin, TX", status: "Active", hireDate: "2022-06-15", officeLocation: "OWE [TX, Austin]",
     currency: "USD", monthlyRate: "7200", weeklyRate: "1800", hourlyRate: "45.00",
     email: "e.rodriguez@contract.net", payCategory: "Freelance", shiftHours: "7:00 AM to 4:00 PM",
-    restDay: "Saturday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2022-06-10", dismissalDate: "",
+    restDay: "Saturday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2022-06-10", dismissalDate: "",
   },
   {
     uid: "UID-97731", firstName: "David",  middleName: "Alan",  surname: "Miller",    fullName: "David Alan Miller",
@@ -33,7 +33,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Phoenix, AZ", status: "Dismissed", hireDate: "2019-11-01", officeLocation: "OWE [AZ, Phoenix]",
     currency: "USD", monthlyRate: "6000", weeklyRate: "1500", hourlyRate: "37.50",
     email: "d.miller@external.com", payCategory: "Advisory", shiftHours: "9:00 AM to 6:00 PM",
-    restDay: "Saturday, Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2019-10-28", dismissalDate: "2024-03-15",
+    restDay: "Saturday, Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "Contract ended — role no longer required.", createdOn: "2019-10-28", dismissalDate: "2024-03-15",
   },
   {
     uid: "UID-99112", firstName: "Sarah",  middleName: "Beth",  surname: "Jenkins",   fullName: "Sarah Beth Jenkins",
@@ -42,7 +42,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Denver, CO", status: "Active", hireDate: "2020-04-10", officeLocation: "OWE [CO, Denver]",
     currency: "USD", monthlyRate: "5800", weeklyRate: "1450", hourlyRate: "36.25",
     email: "s.jenkins@worldenergy.com", payCategory: "Contract", shiftHours: "8:30 AM to 5:30 PM",
-    restDay: "Sunday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2020-04-05", dismissalDate: "",
+    restDay: "Sunday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2020-04-05", dismissalDate: "",
   },
   {
     uid: "UID-98401", firstName: "Priya",  middleName: "Anita", surname: "Sharma",    fullName: "Priya Anita Sharma",
@@ -51,7 +51,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Bangalore, IN", status: "Active", hireDate: "2020-07-01", officeLocation: "No Office",
     currency: "INR", monthlyRate: "95000", weeklyRate: "23750", hourlyRate: "593",
     email: "p.sharma@worldenergy.com", payCategory: "Full-Time", shiftHours: "9:00 AM to 6:00 PM",
-    restDay: "Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2020-06-25", dismissalDate: "",
+    restDay: "Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2020-06-25", dismissalDate: "",
   },
   {
     uid: "UID-98502", firstName: "Carlos", middleName: "Juan",  surname: "Rivera",    fullName: "Carlos Juan Rivera",
@@ -60,7 +60,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Monterrey, MX", status: "Active", hireDate: "2018-09-15", officeLocation: "Allied Energy Solutions [TX, Midland]",
     currency: "MXN", monthlyRate: "28000", weeklyRate: "7000", hourlyRate: "175",
     email: "c.rivera@worldenergy.com", payCategory: "Full-Time", shiftHours: "8:00 AM to 5:00 PM",
-    restDay: "Sunday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2018-09-01", dismissalDate: "",
+    restDay: "Sunday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2018-09-01", dismissalDate: "",
   },
   {
     uid: "UID-98613", firstName: "Ana",    middleName: "Maria", surname: "Santos",    fullName: "Ana Maria Santos",
@@ -69,7 +69,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Manila, PH", status: "Active", hireDate: "2021-01-20", officeLocation: "Sunlife Tech [PR, Guaynabo]",
     currency: "PHP", monthlyRate: "55000", weeklyRate: "13750", hourlyRate: "344",
     email: "a.santos@worldenergy.com", payCategory: "Contract", shiftHours: "8:00 AM to 5:00 PM",
-    restDay: "Saturday, Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2021-01-15", dismissalDate: "",
+    restDay: "Saturday, Sunday", manager: "Colten Warnock", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2021-01-15", dismissalDate: "",
   },
   {
     uid: "UID-98724", firstName: "James",  middleName: "Kwame", surname: "Okoye",     fullName: "James Kwame Okoye",
@@ -78,7 +78,7 @@ const INITIAL_DATA: Contractor[] = [
     location: "Houston, TX", status: "Active", hireDate: "2019-05-14", officeLocation: "OWE [TX, Houston]",
     currency: "USD", monthlyRate: "5500", weeklyRate: "1375", hourlyRate: "34.37",
     email: "j.okoye@worldenergy.com", payCategory: "Full-Time", shiftHours: "7:00 AM to 4:00 PM",
-    restDay: "Saturday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", createdOn: "2019-05-10", dismissalDate: "",
+    restDay: "Saturday", manager: "Dillard Blanton", payPeriod: "Sunday – Saturday", shiftType: "Fixed", dismissalReason: "", createdOn: "2019-05-10", dismissalDate: "",
   },
 ];
 
@@ -157,7 +157,7 @@ export default function ContractorsPage() {
     "Unique ID","Full Name","Date of Birth","Gender",
     "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
     "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
-    "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Created On","Dismissal Date","Action",
+    "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Created On","Dismissal Date","Dismissal Reason","Action",
   ];
 
   return (
@@ -265,7 +265,7 @@ export default function ContractorsPage() {
         {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden max-w-full mx-auto">
           <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
-            <table className="w-full text-left" style={{ minWidth: "2200px", borderCollapse: "separate", borderSpacing: 0 }}>
+            <table className="w-full text-left" style={{ minWidth: "2440px", borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr style={{ background: "#003527" }}>
                   {/* Fixed columns */}
@@ -324,6 +324,11 @@ export default function ContractorsPage() {
                     <td className="px-4 py-2.5 text-sm whitespace-nowrap border-r border-slate-100">
                       {c.dismissalDate
                         ? <span className="text-red-500 font-medium">{fmtDate(c.dismissalDate)}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-sm border-r border-slate-100" style={{ minWidth: 200, maxWidth: 280 }}>
+                      {c.dismissalReason
+                        ? <span className="text-red-500">{c.dismissalReason}</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { LuTrendingUp, LuTriangleAlert, LuMegaphone, LuCalendar, LuFlag } from "react-icons/lu";
+import { LuTrendingUp, LuTriangleAlert, LuCalendar, LuFlag } from "react-icons/lu";
 import { getDashboardMetrics } from "@/lib/data";
+import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 
 const HOLIDAYS = [
   { country: "United States", holiday: "Memorial Day",     color: "text-blue-500"    },
@@ -78,15 +79,7 @@ export default function AdminPage() {
       {/* Bottom grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
         {/* Announcement */}
-        <div className="lg:col-span-2 bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Offshore Announcement</h4>
-            <LuMegaphone size={22} strokeWidth={1.75} className="text-teal-600" />
-          </div>
-          <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
-            <p className="text-sm text-slate-500">No new announcements for today. All offshore teams are operating as scheduled.</p>
-          </div>
-        </div>
+        <AnnouncementBoard />
 
         {/* Holidays */}
         <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm">

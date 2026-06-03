@@ -20,7 +20,6 @@ const COUNTRY_STATES: Record<string, string[]> = {
 };
 const COUNTRIES = Object.keys(COUNTRY_STATES);
 
-const MANAGERS       = ["Colten Warnock", "Dillard Blanton"];
 const PAY_CATEGORIES = ["Hourly", "Fixed"];
 const CURRENCIES     = ["PHP", "INR", "MXN", "USD"];
 const STATUSES       = ["Active", "Dismissed"] as const;
@@ -65,7 +64,7 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
-  const { officeLocations, deptTree } = useContractorConfig();
+  const { officeLocations, deptTree, managers } = useContractorConfig();
   const DEPARTMENTS = Object.keys(deptTree);
 
   const parseLocation = (loc?: string) => {
@@ -93,7 +92,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     country:        initLoc.country,
     state:          initLoc.state,
     officeLocation: initial?.officeLocation ?? officeLocations[0],
-    manager:        initial?.manager        ?? MANAGERS[0],
+    manager:        initial?.manager        ?? managers[0] ?? "",
     hireDate:       initial?.hireDate       ?? "",
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
     payCategory:    initial?.payCategory    ?? PAY_CATEGORIES[0],
@@ -105,7 +104,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     monthlyRate:    initial?.monthlyRate    ?? "",
     weeklyRate:     initial?.weeklyRate     ?? "",
     hourlyRate:     initial?.hourlyRate     ?? "",
-    dismissalDate:  initial?.dismissalDate  ?? "",
+    dismissalDate:   initial?.dismissalDate   ?? "",
+    dismissalReason: initial?.dismissalReason ?? "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -175,7 +175,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       monthlyRate:    form.monthlyRate || "—",
       weeklyRate:     form.weeklyRate  || "—",
       hourlyRate:     form.hourlyRate  || "—",
-      dismissalDate:  form.status === "Dismissed" ? (form.dismissalDate || "") : "",
+      dismissalDate:   form.status === "Dismissed" ? (form.dismissalDate   || "") : "",
+      dismissalReason: form.status === "Dismissed" ? (form.dismissalReason || "") : "",
     };
 
     onSave(contractor);
@@ -307,7 +308,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
               <FIELD label="Manager">
                 <select className={SELECT} value={form.manager} onChange={(e) => set("manager", e.target.value)}>
-                  {MANAGERS.map((m) => <option key={m}>{m}</option>)}
+                  {managers.map((m) => <option key={m}>{m}</option>)}
                 </select>
               </FIELD>
             </div>
@@ -336,11 +337,23 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
 
-              {/* Dismissal Date — only when Dismissed */}
+              {/* Dismissal Date + Reason — only when Dismissed */}
               {form.status === "Dismissed" && (
-                <FIELD label="Dismissal Date">
-                  <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
-                </FIELD>
+                <>
+                  <FIELD label="Dismissal Date">
+                    <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
+                  </FIELD>
+                  <div className="sm:col-span-2 flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
+                    <textarea
+                      rows={3}
+                      className={INPUT + " resize-none"}
+                      placeholder="Describe the reason for dismissal…"
+                      value={form.dismissalReason}
+                      onChange={(e) => set("dismissalReason", e.target.value)}
+                    />
+                  </div>
+                </>
               )}
 
               {/* Pay Period — static days only, read-only */}

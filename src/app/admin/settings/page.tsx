@@ -8,7 +8,7 @@ const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text
 const SELECT = INPUT + " cursor-pointer";
 
 export default function SettingsPage() {
-  const { officeLocations, setOfficeLocations, deptTree, setDeptTree } = useContractorConfig();
+  const { officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers } = useContractorConfig();
 
   // ── Office location state ─────────────────────────────────────────────────
   const [newLocation, setNewLocation] = useState("");
@@ -22,6 +22,20 @@ export default function SettingsPage() {
 
   function removeLocation(loc: string) {
     setOfficeLocations(officeLocations.filter((l) => l !== loc));
+  }
+
+  // ── Manager state ─────────────────────────────────────────────────────────
+  const [newManager, setNewManager] = useState("");
+
+  function addManager() {
+    const v = newManager.trim();
+    if (!v || managers.includes(v)) return;
+    setManagers([...managers, v]);
+    setNewManager("");
+  }
+
+  function removeManager(m: string) {
+    setManagers(managers.filter((x) => x !== m));
   }
 
   // ── Role management state ─────────────────────────────────────────────────
@@ -92,16 +106,9 @@ export default function SettingsPage() {
         <div className="px-6 py-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Company Name</label>
-              <input defaultValue="Our World Energy" className={INPUT} />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">System Label</label>
-              <input defaultValue="Contractor Management System" className={INPUT} />
-            </div>
-            <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Default Timezone</label>
               <select className={SELECT}>
+                <option>UTC (Coordinated Universal Time)</option>
                 <option>UTC−5 (Eastern Time)</option>
                 <option>UTC+5:30 (India)</option>
                 <option>UTC−6 (Central Time)</option>
@@ -152,6 +159,45 @@ export default function SettingsPage() {
               <span key={loc} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 {loc}
                 <button onClick={() => removeLocation(loc)} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                  <LuX size={13} strokeWidth={2.5} />
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Managers */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h4 className="text-base font-semibold text-[#003527]">Managers</h4>
+            <p className="text-xs text-slate-400 mt-0.5">These appear in the Manager dropdown when adding a contractor.</p>
+          </div>
+          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{managers.length} managers</span>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="flex gap-2">
+            <input
+              value={newManager}
+              onChange={(e) => setNewManager(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addManager()}
+              placeholder="e.g. Jane Smith"
+              className={INPUT}
+            />
+            <button
+              onClick={addManager}
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors"
+            >
+              <LuPlus size={15} strokeWidth={2.5} />
+              Add
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+            {managers.map((m) => (
+              <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+                {m}
+                <button onClick={() => removeManager(m)} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
                   <LuX size={13} strokeWidth={2.5} />
                 </button>
               </span>
