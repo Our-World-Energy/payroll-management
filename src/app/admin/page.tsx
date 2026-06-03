@@ -1,16 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { LuTrendingUp, LuTriangleAlert, LuCalendar, LuFlag } from "react-icons/lu";
+import { LuTrendingUp, LuTriangleAlert } from "react-icons/lu";
 import { getDashboardMetrics } from "@/lib/data";
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
-
-const HOLIDAYS = [
-  { country: "United States", holiday: "Memorial Day",     color: "text-blue-500"    },
-  { country: "India",         holiday: "Bakrid",           color: "text-orange-500"  },
-  { country: "Mexico",        holiday: "Father's Day",     color: "text-emerald-500" },
-  { country: "Philippines",   holiday: "Independence Day", color: "text-teal-500"    },
-];
+import { HolidayCalendar } from "@/components/HolidayCalendar";
 
 export default function AdminPage() {
   const m = getDashboardMetrics();
@@ -82,26 +76,7 @@ export default function AdminPage() {
         <AnnouncementBoard />
 
         {/* Holidays */}
-        <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-5 md:mb-6">
-            <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Holidays</h4>
-            <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
-          </div>
-          <div className="space-y-1">
-            {HOLIDAYS.map(({ country, holiday, color }) => (
-              <div key={country} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg transition-colors">
-                <div className="flex items-center gap-3">
-                  <LuFlag size={16} strokeWidth={1.75} className={color} />
-                  <span className="text-sm font-medium text-slate-700">{country}</span>
-                </div>
-                <span className="text-xs text-slate-500">{holiday}</span>
-              </div>
-            ))}
-          </div>
-          <button className="w-full mt-5 md:mt-6 py-3 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-widest">
-            View Full Calendar
-          </button>
-        </div>
+        <HolidayCalendar />
       </div>
     </div>
   );
