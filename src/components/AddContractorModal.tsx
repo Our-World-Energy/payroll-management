@@ -319,53 +319,37 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           {/* ── Employment ── */}
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+            {/* Row 1: Hire Date · Pay Category · Pay Period */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <FIELD label="Hire Date" required>
                 <input type="date" className={INPUT} value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
                 {errors.hireDate && <span className="text-xs text-red-500">{errors.hireDate}</span>}
               </FIELD>
+              <FIELD label="Pay Category">
+                <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
+                  {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </FIELD>
+              <FIELD label="Pay Period">
+                <input className={READONLY} readOnly value="Sunday – Saturday" />
+              </FIELD>
+            </div>
 
-              {/* Status: Active or Dismissed only */}
+            {/* Row 2: Status · Shift Type · Shift Start · Shift End · Equipment Provided */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <FIELD label="Status">
                 <select className={SELECT} value={form.status} onChange={(e) => set("status", e.target.value as typeof STATUSES[number])}>
                   {STATUSES.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </FIELD>
-
-              {/* Dismissal Date + Reason — only when Dismissed */}
-              {form.status === "Dismissed" && (
-                <>
-                  <FIELD label="Dismissal Date">
-                    <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
-                  </FIELD>
-                  <div className="sm:col-span-2 flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
-                    <textarea
-                      rows={3}
-                      className={INPUT + " resize-none"}
-                      placeholder="Describe the reason for dismissal…"
-                      value={form.dismissalReason}
-                      onChange={(e) => set("dismissalReason", e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-
-              {/* Pay Period — static days only, read-only */}
-              <FIELD label="Pay Period">
-                <input className={READONLY} readOnly value="Sunday – Saturday" />
-              </FIELD>
-
-              {/* Shift Type */}
               <FIELD label="Shift Type">
                 <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
                   <option value="Fixed">Fixed</option>
                   <option value="Flexible">Flexible</option>
                 </select>
               </FIELD>
-
-              {/* Shift Start / End — only shown when Fixed */}
-              {form.shiftType === "Fixed" && (
+              {form.shiftType === "Fixed" ? (
                 <>
                   <FIELD label="Shift Start">
                     <select className={SELECT} value={form.shiftFrom} onChange={(e) => set("shiftFrom", e.target.value)}>
@@ -378,40 +362,42 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     </select>
                   </FIELD>
                 </>
+              ) : (
+                /* placeholder cells to keep Equipment Provided in position */
+                <div className="hidden sm:block sm:col-span-2" />
               )}
-
-              {/* Pay Category — moved here, after shift */}
-              <FIELD label="Pay Category">
-                <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
-                  {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
-                </select>
-              </FIELD>
-
-              {/* Equipment Provided */}
               <FIELD label="Equipment Provided">
                 <div className="flex items-center gap-4 py-2">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="equipmentProvided"
-                      checked={form.equipmentProvided === true}
+                    <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === true}
                       onChange={() => setForm((f) => ({ ...f, equipmentProvided: true }))}
-                      className="w-4 h-4 accent-teal-600"
-                    />
+                      className="w-4 h-4 accent-teal-600" />
                     <span className="text-sm text-slate-700 font-medium">Yes</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="equipmentProvided"
-                      checked={form.equipmentProvided === false}
+                    <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === false}
                       onChange={() => setForm((f) => ({ ...f, equipmentProvided: false }))}
-                      className="w-4 h-4 accent-teal-600"
-                    />
+                      className="w-4 h-4 accent-teal-600" />
                     <span className="text-sm text-slate-700 font-medium">No</span>
                   </label>
                 </div>
               </FIELD>
+
+              {/* Dismissal fields — span full width, only when Dismissed */}
+              {form.status === "Dismissed" && (
+                <>
+                  <FIELD label="Dismissal Date">
+                    <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
+                  </FIELD>
+                  <div className="sm:col-span-2 flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
+                    <textarea rows={3} className={INPUT + " resize-none"}
+                      placeholder="Describe the reason for dismissal…"
+                      value={form.dismissalReason}
+                      onChange={(e) => set("dismissalReason", e.target.value)} />
+                  </div>
+                </>
+              )}
 
               {/* Rest Days — multi-select pill buttons */}
               <div className="sm:col-span-3 flex flex-col gap-1.5">
