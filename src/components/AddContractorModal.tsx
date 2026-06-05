@@ -104,8 +104,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     monthlyRate:    initial?.monthlyRate    ?? "",
     weeklyRate:     initial?.weeklyRate     ?? "",
     hourlyRate:     initial?.hourlyRate     ?? "",
-    dismissalDate:   initial?.dismissalDate   ?? "",
-    dismissalReason: initial?.dismissalReason ?? "",
+    dismissalDate:      initial?.dismissalDate      ?? "",
+    dismissalReason:    initial?.dismissalReason    ?? "",
+    equipmentProvided:  initial?.equipmentProvided  ?? false,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -175,8 +176,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       monthlyRate:    form.monthlyRate || "—",
       weeklyRate:     form.weeklyRate  || "—",
       hourlyRate:     form.hourlyRate  || "—",
-      dismissalDate:   form.status === "Dismissed" ? (form.dismissalDate   || "") : "",
-      dismissalReason: form.status === "Dismissed" ? (form.dismissalReason || "") : "",
+      dismissalDate:      form.status === "Dismissed" ? (form.dismissalDate   || "") : "",
+      dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
+      equipmentProvided:  form.equipmentProvided,
     };
 
     onSave(contractor);
@@ -330,13 +332,6 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
 
-              {/* Pay Category: Hourly or Fixed */}
-              <FIELD label="Pay Category">
-                <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
-                  {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
-                </select>
-              </FIELD>
-
               {/* Dismissal Date + Reason — only when Dismissed */}
               {form.status === "Dismissed" && (
                 <>
@@ -384,6 +379,39 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   </FIELD>
                 </>
               )}
+
+              {/* Pay Category — moved here, after shift */}
+              <FIELD label="Pay Category">
+                <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
+                  {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
+                </select>
+              </FIELD>
+
+              {/* Equipment Provided */}
+              <FIELD label="Equipment Provided">
+                <div className="flex items-center gap-4 py-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="equipmentProvided"
+                      checked={form.equipmentProvided === true}
+                      onChange={() => setForm((f) => ({ ...f, equipmentProvided: true }))}
+                      className="w-4 h-4 accent-teal-600"
+                    />
+                    <span className="text-sm text-slate-700 font-medium">Yes</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="equipmentProvided"
+                      checked={form.equipmentProvided === false}
+                      onChange={() => setForm((f) => ({ ...f, equipmentProvided: false }))}
+                      className="w-4 h-4 accent-teal-600"
+                    />
+                    <span className="text-sm text-slate-700 font-medium">No</span>
+                  </label>
+                </div>
+              </FIELD>
 
               {/* Rest Days — multi-select pill buttons */}
               <div className="sm:col-span-3 flex flex-col gap-1.5">
