@@ -179,3 +179,40 @@ model Activity {
   @@index([createdAt])
   @@map("activity_log")
 }
+
+model ContractorProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  uid               String   @unique
+  firstName         String   @default("")
+  middleName        String   @default("")
+  surname           String   @default("")
+  fullName          String   @default("")
+  avatar            String   @default("")
+  dob               String   @default("")
+  gender            String   @default("Not Specified")
+  contractorId      String   @default("")
+  department        String   @default("")
+  subDepartment     String   @default("")
+  role              String   @default("")
+  location          String   @default("")
+  status            String   @default("Active")
+  hireDate          String   @default("")
+  officeLocation    String   @default("")
+  currency          String   @default("USD")
+  monthlyRate       String   @default("")
+  weeklyRate        String   @default("")
+  hourlyRate        String   @default("")
+  email             String   @default("")
+  payCategory       String   @default("")
+  shiftHours        String   @default("")
+  restDay           String   @default("")
+  manager           String   @default("")
+  payPeriod         String   @default("Sunday – Saturday")
+  shiftType         String   @default("Fixed")
+  createdOn         String   @default("")
+  dismissalDate     String   @default("")
+  dismissalReason   String   @default("")
+  equipmentProvided Boolean  @default(false)
+
+  @@map("contractor_profiles")
+}
