@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight,
   LuPencil, LuChevronRight as LuBreadcrumb,
-  LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw,
+  LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle,
 } from "react-icons/lu";
 import type { Contractor, FilterRule } from "./types";
 import { AddContractorModal } from "@/components/AddContractorModal";
@@ -15,10 +15,19 @@ import {
   fetchAllContractors,
   createContractor,
   updateContractor,
+  deleteContractor,
   type FetchParams,
 } from "./actions";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+
+// Module-level cache — survives navigation, cleared when filters/page change.
+type CacheEntry = { rows: Contractor[]; total: number; key: string };
+let pageCache: CacheEntry | null = null;
+
+function cacheKey(page: number, pageSize: number, country: string, status: string, rules: FilterRule[]) {
+  return `${page}|${pageSize}|${country}|${status}|${JSON.stringify(rules)}`;
+}
 
 const STATUS_STYLES: Record<string, string> = {
   Active:    "bg-teal-100 text-teal-800",
@@ -94,13 +103,13 @@ const COLS = [
   "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
   "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
   "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Equipment Provided",
-  "Created On","Dismissal Date","Dismissal Reason","Action",
+  "Worksnap ID","Created On","Dismissal Date","Dismissal Reason","Action",
 ];
 
 export default function ContractorsPage() {
-  const [rows, setRows]           = useState<Contractor[]>([]);
-  const [total, setTotal]         = useState(0);
-  const [loading, setLoading]     = useState(true);
+  const [rows, setRows]           = useState<Contractor[]>(pageCache?.rows ?? []);
+  const [total, setTotal]         = useState(pageCache?.total ?? 0);
+  const [loading, setLoading]     = useState(pageCache === null);
   const [saving, setSaving]       = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -113,20 +122,32 @@ export default function ContractorsPage() {
   const [showAdd, setShowAdd]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
   const [editTarget, setEditTarget]   = useState<Contractor | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Contractor | null>(null);
+  const [deleting, setDeleting]       = useState(false);
   const [showFilter, setShowFilter]   = useState(false);
 
   // Debounce ref — cancel in-flight fetch when params change
   const fetchIdRef = useRef(0);
 
   const loadPage = useCallback(async (
-    p: number, ps: number, c: string, s: string, rules: FilterRule[]
+    p: number, ps: number, c: string, s: string, rules: FilterRule[],
+    { force = false } = {}
   ) => {
+    const key = cacheKey(p, ps, c, s, rules);
+    // Serve from cache unless forced (e.g. after add/edit/import)
+    if (!force && pageCache?.key === key) {
+      setRows(pageCache.rows);
+      setTotal(pageCache.total);
+      setLoading(false);
+      return;
+    }
     const id = ++fetchIdRef.current;
     setLoading(true);
     try {
       const params: FetchParams = { page: p, pageSize: ps, country: c, status: s, rules };
       const result = await fetchContractorsPage(params);
       if (id !== fetchIdRef.current) return; // stale
+      pageCache = { rows: result.rows, total: result.total, key };
       setRows(result.rows);
       setTotal(result.total);
     } finally {
@@ -169,9 +190,9 @@ export default function ContractorsPage() {
     setSaving(true);
     try {
       await createContractor(c);
-      // reload first page to show new entry
+      pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules);
+      await loadPage(1, pageSize, country, status, activeRules, { force: true });
     } finally {
       setSaving(false);
     }
@@ -181,7 +202,8 @@ export default function ContractorsPage() {
     setSaving(true);
     try {
       await updateContractor(c);
-      await loadPage(page, pageSize, country, status, activeRules);
+      pageCache = null;
+      await loadPage(page, pageSize, country, status, activeRules, { force: true });
     } finally {
       setSaving(false);
     }
@@ -191,10 +213,27 @@ export default function ContractorsPage() {
     setSaving(true);
     try {
       await Promise.all(contractors.map((c) => createContractor(c)));
+      pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules);
+      await loadPage(1, pageSize, country, status, activeRules, { force: true });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteContractor(deleteTarget.uid);
+      pageCache = null;
+      setDeleteTarget(null);
+      // If we just deleted the last row on this page, go back one
+      const newPage = rows.length === 1 && page > 1 ? page - 1 : page;
+      setPage(newPage);
+      await loadPage(newPage, pageSize, country, status, activeRules, { force: true });
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -205,6 +244,44 @@ export default function ContractorsPage() {
     <>
       {showAdd    && <AddContractorModal onClose={() => setShowAdd(false)} onSave={handleAddContractor} />}
       {editTarget && <AddContractorModal onClose={() => setEditTarget(null)} onSave={handleEditContractor} initial={editTarget} />}
+
+      {/* Delete confirm modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 size-11 rounded-xl bg-red-50 flex items-center justify-center">
+                <LuTriangle size={22} className="text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Delete Contractor</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Are you sure you want to delete <span className="font-semibold text-slate-700">{deleteTarget.fullName}</span>?
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+              >
+                <LuTrash2 size={15} strokeWidth={2} />
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showFilter && (
         <FilterModal
           initialRules={activeRules}
@@ -230,7 +307,7 @@ export default function ContractorsPage() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <button
-              onClick={() => loadPage(page, pageSize, country, status, activeRules)}
+              onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, { force: true }); }}
               disabled={loading}
               title="Refresh"
               className="inline-flex items-center gap-2 px-3 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
@@ -437,6 +514,9 @@ export default function ContractorsPage() {
                         ? <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-100 text-teal-700">Yes</span>
                         : <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500">No</span>}
                     </td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 font-mono whitespace-nowrap border-r border-slate-100">
+                      {c.worksnapId || <span className="text-slate-300">—</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{fmtDate(c.createdOn)}</td>
                     <td className="px-4 py-2.5 text-sm whitespace-nowrap border-r border-slate-100">
                       {c.dismissalDate
@@ -449,13 +529,22 @@ export default function ContractorsPage() {
                         : <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-2.5 text-right whitespace-nowrap">
-                      <button
-                        onClick={() => setEditTarget(c)}
-                        className="p-1.5 text-slate-400 hover:text-[#003527] transition-colors rounded-md hover:bg-slate-100"
-                        title="Edit contractor"
-                      >
-                        <LuPencil size={15} strokeWidth={1.75} />
-                      </button>
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setEditTarget(c)}
+                          className="p-1.5 text-slate-400 hover:text-[#003527] transition-colors rounded-md hover:bg-slate-100"
+                          title="Edit contractor"
+                        >
+                          <LuPencil size={15} strokeWidth={1.75} />
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget(c)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 transition-colors rounded-md hover:bg-red-50"
+                          title="Delete contractor"
+                        >
+                          <LuTrash2 size={15} strokeWidth={1.75} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

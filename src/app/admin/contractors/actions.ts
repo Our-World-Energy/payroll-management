@@ -37,6 +37,7 @@ function toContractor(row: Record<string, unknown>): Contractor {
     dismissalDate:     String(row.dismissalDate     ?? ""),
     dismissalReason:   String(row.dismissalReason   ?? ""),
     equipmentProvided: Boolean(row.equipmentProvided),
+    worksnapId:        String(row.worksnapId ?? ""),
   };
 }
 
@@ -209,6 +210,7 @@ export async function createContractor(c: Contractor): Promise<void> {
       dismissalDate:     c.dismissalDate,
       dismissalReason:   c.dismissalReason,
       equipmentProvided: c.equipmentProvided,
+      worksnapId:        c.worksnapId,
     },
   });
 }
@@ -247,6 +249,7 @@ export async function updateContractor(c: Contractor): Promise<void> {
       dismissalDate:     c.dismissalDate,
       dismissalReason:   c.dismissalReason,
       equipmentProvided: c.equipmentProvided,
+      worksnapId:        c.worksnapId,
     },
   });
 }

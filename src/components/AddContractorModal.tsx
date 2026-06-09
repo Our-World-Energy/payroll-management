@@ -107,6 +107,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     dismissalDate:      initial?.dismissalDate      ?? "",
     dismissalReason:    initial?.dismissalReason    ?? "",
     equipmentProvided:  initial?.equipmentProvided  ?? false,
+    worksnapId:         initial?.worksnapId         ?? "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -179,6 +180,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       dismissalDate:      form.status === "Dismissed" ? (form.dismissalDate   || "") : "",
       dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
       equipmentProvided:  form.equipmentProvided,
+      worksnapId:         form.worksnapId,
     };
 
     onSave(contractor);
@@ -250,6 +252,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               <FIELD label="Email" required>
                 <input type="email" className={INPUT} value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="name@company.com" />
                 {errors.email && <span className="text-xs text-red-500">{errors.email}</span>}
+              </FIELD>
+
+              <FIELD label="Worksnap ID">
+                <input className={INPUT} value={form.worksnapId} onChange={(e) => set("worksnapId", e.target.value)} placeholder="e.g. 123456" />
               </FIELD>
             </div>
           </section>

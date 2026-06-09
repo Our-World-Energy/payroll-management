@@ -213,6 +213,7 @@ model ContractorProfile {
   dismissalDate     String   @default("")
   dismissalReason   String   @default("")
   equipmentProvided Boolean  @default(false)
+  worksnapId        String   @default("")
 
   @@map("contractor_profiles")
 }

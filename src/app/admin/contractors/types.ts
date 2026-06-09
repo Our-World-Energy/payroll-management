@@ -30,6 +30,7 @@ export type Contractor = {
   dismissalDate: string;
   dismissalReason: string;
   equipmentProvided: boolean;
+  worksnapId: string;
 };
 
 export type ColumnDef = {
@@ -68,6 +69,7 @@ export const COLUMNS: ColumnDef[] = [
   { key: "dismissalDate",   label: "Dismissal Date",   type: "date"   },
   { key: "dismissalReason",    label: "Dismissal Reason",    type: "string" },
   { key: "equipmentProvided", label: "Equipment Provided", type: "string" },
+  { key: "worksnapId",        label: "Worksnap ID",        type: "string" },
 ];
 
 export type FilterRule = {

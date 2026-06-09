@@ -4,42 +4,51 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-// Client-side route guard for /admin. The proxy only refreshes the session
-// (it does not gate routes), so access control happens here: require a session,
-// then require an aal2 (2FA-verified) session, reacting to sign-out events live.
+// Cache the auth check result for the lifetime of the browser tab so
+// navigating between /admin/* pages never re-runs the two round-trips.
+let authCache: "ok" | "pending" | null = null;
+
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [checked, setChecked] = useState(false);
+  // If already verified this tab, skip the loading flash entirely.
+  const [checked, setChecked] = useState(authCache === "ok");
 
   useEffect(() => {
     const supabase = createClient();
 
+    if (authCache === "ok") {
+      // Already verified — just wire up the sign-out listener.
+      const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (!session) { authCache = null; router.replace("/login"); }
+      });
+      return () => subscription.unsubscribe();
+    }
+
+    if (authCache === "pending") return; // another instance is already checking
+    authCache = "pending";
+
     (async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        authCache = null;
         router.replace("/login");
         return;
       }
 
-      // 2FA is mandatory: require an aal2 (MFA-verified) session for /admin.
-      const { data: aal } =
-        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal?.currentLevel !== "aal2") {
+        authCache = null;
         router.replace("/two-factor");
         return;
       }
 
+      authCache = "ok";
       setChecked(true);
     })();
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session) router.replace("/login");
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) { authCache = null; router.replace("/login"); }
     });
-
     return () => subscription.unsubscribe();
   }, [router]);
 
