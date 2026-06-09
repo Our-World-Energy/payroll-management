@@ -1,8 +1,16 @@
 "use server";
 
-import { prisma } from "@/lib/prisma";
+import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
+
+const TABLE = "contractor_profiles";
+
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  return createClient(url, key, { auth: { persistSession: false } });
+}
 
 function toContractor(row: Record<string, unknown>): Contractor {
   return {
@@ -37,7 +45,7 @@ function toContractor(row: Record<string, unknown>): Contractor {
     dismissalDate:     String(row.dismissalDate     ?? ""),
     dismissalReason:   String(row.dismissalReason   ?? ""),
     equipmentProvided: Boolean(row.equipmentProvided),
-    worksnapId:        String(row.worksnapId ?? ""),
+    worksnapId:        String(row.worksnapId        ?? ""),
   };
 }
 
@@ -49,22 +57,15 @@ export type FetchParams = {
   rules: FilterRule[];
 };
 
-// Build Prisma where clause from quick filters + advanced rules
-function buildWhere(country: string, status: string, rules: FilterRule[]) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const AND: any[] = [];
-
+// Apply quick-filter + advanced rules to a Supabase query builder
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyFilters(query: any, country: string, status: string, rules: FilterRule[]) {
   if (country !== "All Countries") {
-    AND.push({
-      OR: [
-        { location: { endsWith: `, ${country}` } },
-        { location: { equals: country } },
-      ],
-    });
+    query = query.or(`location.ilike.%, ${country},location.eq.${country}`);
   }
 
   if (status !== "All Statuses") {
-    AND.push({ status: { equals: status } });
+    query = query.eq("status", status);
   }
 
   for (const rule of rules) {
@@ -76,47 +77,34 @@ function buildWhere(country: string, status: string, rules: FilterRule[]) {
       const noVal = rule.operator === "is_empty" || rule.operator === "is_not_empty";
       if (!noVal && !rule.value.trim()) continue;
       switch (rule.operator) {
-        case "contains":      AND.push({ [field]: { contains: rule.value, mode: "insensitive" } }); break;
-        case "not_contains":  AND.push({ NOT: { [field]: { contains: rule.value, mode: "insensitive" } } }); break;
-        case "starts_with":   AND.push({ [field]: { startsWith: rule.value, mode: "insensitive" } }); break;
-        case "ends_with":     AND.push({ [field]: { endsWith: rule.value, mode: "insensitive" } }); break;
-        case "equals":        AND.push({ [field]: { equals: rule.value, mode: "insensitive" } }); break;
-        case "not_equals":    AND.push({ NOT: { [field]: { equals: rule.value, mode: "insensitive" } } }); break;
-        case "is_empty":      AND.push({ [field]: { equals: "" } }); break;
-        case "is_not_empty":  AND.push({ NOT: { [field]: { equals: "" } } }); break;
-      }
-    }
-
-    if (colDef.type === "number") {
-      if (!rule.value.trim()) continue;
-      const v1 = parseFloat(rule.value);
-      const v2 = parseFloat(rule.value2 ?? "");
-      if (isNaN(v1)) continue;
-      // rates are stored as text so filter client-side after fetch for number columns
-      // We store as text, so use string comparison as best effort; real filtering below
-      switch (rule.operator) {
-        case "contains": AND.push({ [field]: { contains: rule.value } }); break;
-        default: break;
+        case "contains":      query = query.ilike(field, `%${rule.value}%`);  break;
+        case "not_contains":  query = query.not(field, "ilike", `%${rule.value}%`); break;
+        case "starts_with":   query = query.ilike(field, `${rule.value}%`);   break;
+        case "ends_with":     query = query.ilike(field, `%${rule.value}`);   break;
+        case "equals":        query = query.ilike(field, rule.value);          break;
+        case "not_equals":    query = query.not(field, "ilike", rule.value);   break;
+        case "is_empty":      query = query.eq(field, "");                     break;
+        case "is_not_empty":  query = query.neq(field, "");                    break;
       }
     }
 
     if (colDef.type === "date") {
       if (!rule.value.trim()) continue;
-      // dates stored as text YYYY-MM-DD, use string comparison which works for ISO dates
       switch (rule.operator) {
-        case "date_eq":      AND.push({ [field]: { equals: rule.value } }); break;
-        case "date_before":  AND.push({ [field]: { lt: rule.value } }); break;
-        case "date_after":   AND.push({ [field]: { gt: rule.value } }); break;
+        case "date_eq":     query = query.eq(field, rule.value);              break;
+        case "date_before": query = query.lt(field, rule.value);              break;
+        case "date_after":  query = query.gt(field, rule.value);              break;
         case "date_between":
           if (rule.value2?.trim()) {
-            AND.push({ [field]: { gte: rule.value, lte: rule.value2 } });
+            query = query.gte(field, rule.value).lte(field, rule.value2);
           }
           break;
       }
     }
+    // number columns: handled client-side via postFilterNumbers (rates stored as text)
   }
 
-  return AND.length > 0 ? { AND } : {};
+  return query;
 }
 
 // Number-column client-side post-filter (rates stored as text)
@@ -150,110 +138,114 @@ export async function fetchContractorsPage(params: FetchParams): Promise<{
   rows: Contractor[];
   total: number;
 }> {
-  const where = buildWhere(params.country, params.status, params.rules);
+  const sb = getSupabase();
+  const from = (params.page - 1) * params.pageSize;
+  const to = from + params.pageSize - 1;
 
-  const [rawRows, total] = await Promise.all([
-    prisma.contractorProfile.findMany({
-      where,
-      orderBy: { id: "desc" },
-      skip: (params.page - 1) * params.pageSize,
-      take: params.pageSize,
-    }),
-    prisma.contractorProfile.count({ where }),
-  ]);
+  let query = sb.from(TABLE).select("*", { count: "exact" });
+  query = applyFilters(query, params.country, params.status, params.rules);
+  query = query.order("id", { ascending: false }).range(from, to);
 
-  const rows = postFilterNumbers(rawRows.map(toContractor), params.rules);
-  return { rows, total };
+  const { data, error, count } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = postFilterNumbers((data ?? []).map(toContractor), params.rules);
+  return { rows, total: count ?? 0 };
 }
 
-// Fetch ALL rows matching filters (for export)
-export async function fetchAllContractors(params: Omit<FetchParams, "page" | "pageSize">): Promise<Contractor[]> {
-  const where = buildWhere(params.country, params.status, params.rules);
-  const rawRows = await prisma.contractorProfile.findMany({
-    where,
-    orderBy: { id: "desc" },
-  });
-  return postFilterNumbers(rawRows.map(toContractor), params.rules);
+export async function fetchAllContractors(
+  params: Omit<FetchParams, "page" | "pageSize">
+): Promise<Contractor[]> {
+  const sb = getSupabase();
+  let query = sb.from(TABLE).select("*");
+  query = applyFilters(query, params.country, params.status, params.rules);
+  query = query.order("id", { ascending: false });
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  return postFilterNumbers((data ?? []).map(toContractor), params.rules);
 }
 
 export async function createContractor(c: Contractor): Promise<void> {
-  await prisma.contractorProfile.create({
-    data: {
-      uid:               c.uid,
-      firstName:         c.firstName,
-      middleName:        c.middleName,
-      surname:           c.surname,
-      fullName:          c.fullName,
-      avatar:            c.avatar,
-      dob:               c.dob,
-      gender:            c.gender,
-      contractorId:      c.contractorId,
-      department:        c.department,
-      subDepartment:     c.subDepartment,
-      role:              c.role,
-      location:          c.location,
-      status:            c.status,
-      hireDate:          c.hireDate,
-      officeLocation:    c.officeLocation,
-      currency:          c.currency,
-      monthlyRate:       c.monthlyRate,
-      weeklyRate:        c.weeklyRate,
-      hourlyRate:        c.hourlyRate,
-      email:             c.email,
-      payCategory:       c.payCategory,
-      shiftHours:        c.shiftHours,
-      restDay:           c.restDay,
-      manager:           c.manager,
-      payPeriod:         c.payPeriod,
-      shiftType:         c.shiftType,
-      createdOn:         c.createdOn,
-      dismissalDate:     c.dismissalDate,
-      dismissalReason:   c.dismissalReason,
-      equipmentProvided: c.equipmentProvided,
-      worksnapId:        c.worksnapId,
-    },
+  const sb = getSupabase();
+  const { error } = await sb.from(TABLE).insert({
+    uid:               c.uid,
+    firstName:         c.firstName,
+    middleName:        c.middleName,
+    surname:           c.surname,
+    fullName:          c.fullName,
+    avatar:            c.avatar,
+    dob:               c.dob,
+    gender:            c.gender,
+    contractorId:      c.contractorId,
+    department:        c.department,
+    subDepartment:     c.subDepartment,
+    role:              c.role,
+    location:          c.location,
+    status:            c.status,
+    hireDate:          c.hireDate,
+    officeLocation:    c.officeLocation,
+    currency:          c.currency,
+    monthlyRate:       c.monthlyRate,
+    weeklyRate:        c.weeklyRate,
+    hourlyRate:        c.hourlyRate,
+    email:             c.email,
+    payCategory:       c.payCategory,
+    shiftHours:        c.shiftHours,
+    restDay:           c.restDay,
+    manager:           c.manager,
+    payPeriod:         c.payPeriod,
+    shiftType:         c.shiftType,
+    createdOn:         c.createdOn,
+    dismissalDate:     c.dismissalDate,
+    dismissalReason:   c.dismissalReason,
+    equipmentProvided: c.equipmentProvided,
+    worksnapId:        c.worksnapId,
   });
+  if (error) throw new Error(error.message);
 }
 
 export async function updateContractor(c: Contractor): Promise<void> {
-  await prisma.contractorProfile.update({
-    where: { uid: c.uid },
-    data: {
-      firstName:         c.firstName,
-      middleName:        c.middleName,
-      surname:           c.surname,
-      fullName:          c.fullName,
-      avatar:            c.avatar,
-      dob:               c.dob,
-      gender:            c.gender,
-      contractorId:      c.contractorId,
-      department:        c.department,
-      subDepartment:     c.subDepartment,
-      role:              c.role,
-      location:          c.location,
-      status:            c.status,
-      hireDate:          c.hireDate,
-      officeLocation:    c.officeLocation,
-      currency:          c.currency,
-      monthlyRate:       c.monthlyRate,
-      weeklyRate:        c.weeklyRate,
-      hourlyRate:        c.hourlyRate,
-      email:             c.email,
-      payCategory:       c.payCategory,
-      shiftHours:        c.shiftHours,
-      restDay:           c.restDay,
-      manager:           c.manager,
-      payPeriod:         c.payPeriod,
-      shiftType:         c.shiftType,
-      createdOn:         c.createdOn,
-      dismissalDate:     c.dismissalDate,
-      dismissalReason:   c.dismissalReason,
-      equipmentProvided: c.equipmentProvided,
-      worksnapId:        c.worksnapId,
-    },
-  });
+  const sb = getSupabase();
+  const { error } = await sb.from(TABLE).update({
+    firstName:         c.firstName,
+    middleName:        c.middleName,
+    surname:           c.surname,
+    fullName:          c.fullName,
+    avatar:            c.avatar,
+    dob:               c.dob,
+    gender:            c.gender,
+    contractorId:      c.contractorId,
+    department:        c.department,
+    subDepartment:     c.subDepartment,
+    role:              c.role,
+    location:          c.location,
+    status:            c.status,
+    hireDate:          c.hireDate,
+    officeLocation:    c.officeLocation,
+    currency:          c.currency,
+    monthlyRate:       c.monthlyRate,
+    weeklyRate:        c.weeklyRate,
+    hourlyRate:        c.hourlyRate,
+    email:             c.email,
+    payCategory:       c.payCategory,
+    shiftHours:        c.shiftHours,
+    restDay:           c.restDay,
+    manager:           c.manager,
+    payPeriod:         c.payPeriod,
+    shiftType:         c.shiftType,
+    createdOn:         c.createdOn,
+    dismissalDate:     c.dismissalDate,
+    dismissalReason:   c.dismissalReason,
+    equipmentProvided: c.equipmentProvided,
+    worksnapId:        c.worksnapId,
+  }).eq("uid", c.uid);
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteContractor(uid: string): Promise<void> {
-  await prisma.contractorProfile.delete({ where: { uid } });
+  const sb = getSupabase();
+  const { error } = await sb.from(TABLE).delete().eq("uid", uid);
+  if (error) throw new Error(error.message);
 }
