@@ -508,7 +508,7 @@ export default function ContractorsPage() {
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.shiftHours}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.restDay}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.manager}</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100" style={{ minWidth: 160 }}>Sunday – Saturday</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100" style={{ minWidth: 160 }}>{c.payPeriod}</td>
                     <td className="px-4 py-2.5 border-r border-slate-100 whitespace-nowrap">
                       {c.equipmentProvided
                         ? <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-100 text-teal-700">Yes</span>

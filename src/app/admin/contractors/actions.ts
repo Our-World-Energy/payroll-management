@@ -61,7 +61,8 @@ export type FetchParams = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyFilters(query: any, country: string, status: string, rules: FilterRule[]) {
   if (country !== "All Countries") {
-    query = query.or(`location.ilike.%, ${country},location.eq.${country}`);
+    // Match "City, Country" or just "Country"
+    query = query.or(`location.ilike.*, ${country},location.eq.${country}`);
   }
 
   if (status !== "All Statuses") {
