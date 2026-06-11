@@ -61,8 +61,9 @@ export type FetchParams = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function applyFilters(query: any, country: string, status: string, rules: FilterRule[]) {
   if (country !== "All Countries") {
-    // Match "City, Country" or just "Country"
-    query = query.or(`location.ilike.*, ${country},location.eq.${country}`);
+    // locations are stored as "City, Country" — just ilike "%Country" covers both
+    // "Gujarat, India" and "India" without the comma parsing issue in .or()
+    query = query.ilike("location", `%${country}`);
   }
 
   if (status !== "All Statuses") {
