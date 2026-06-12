@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LuPlus, LuX, LuChevronDown, LuChevronUp } from "react-icons/lu";
+import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle } from "react-icons/lu";
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
@@ -9,6 +9,14 @@ const SELECT = INPUT + " cursor-pointer";
 
 export default function SettingsPage() {
   const { officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers } = useContractorConfig();
+
+  // ── Confirm delete popup ──────────────────────────────────────────────────
+  type ConfirmTarget = { label: string; onConfirm: () => void };
+  const [confirm, setConfirm] = useState<ConfirmTarget | null>(null);
+
+  function askConfirm(label: string, onConfirm: () => void) {
+    setConfirm({ label, onConfirm });
+  }
 
   // ── Office location state ─────────────────────────────────────────────────
   const [newLocation, setNewLocation] = useState("");
@@ -93,6 +101,41 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+
+      {/* Confirm delete modal */}
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setConfirm(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 size-11 rounded-xl bg-red-50 flex items-center justify-center">
+                <LuTriangle size={22} className="text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Confirm Delete</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Are you sure you want to remove <span className="font-semibold text-slate-700">&ldquo;{confirm.label}&rdquo;</span>? This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button
+                onClick={() => setConfirm(null)}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { confirm.onConfirm(); setConfirm(null); }}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
+              >
+                <LuX size={15} strokeWidth={2} />
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mb-2">
         <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Settings</h2>
         <p className="text-sm text-slate-500 mt-1">Manage organisation-wide configuration.</p>
@@ -158,7 +201,7 @@ export default function SettingsPage() {
             {officeLocations.map((loc) => (
               <span key={loc} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 {loc}
-                <button onClick={() => removeLocation(loc)} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                <button onClick={() => askConfirm(loc, () => removeLocation(loc))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
                   <LuX size={13} strokeWidth={2.5} />
                 </button>
               </span>
@@ -197,7 +240,7 @@ export default function SettingsPage() {
             {managers.map((m) => (
               <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 {m}
-                <button onClick={() => removeManager(m)} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                <button onClick={() => askConfirm(m, () => removeManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
                   <LuX size={13} strokeWidth={2.5} />
                 </button>
               </span>
@@ -247,7 +290,7 @@ export default function SettingsPage() {
                   {dept}
                   <span className="text-xs font-normal text-slate-400 ml-1">{Object.keys(subs).length} sub-dept{Object.keys(subs).length !== 1 ? "s" : ""}</span>
                 </button>
-                <button onClick={() => removeDepartment(dept)} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+                <button onClick={() => askConfirm(dept, () => removeDepartment(dept))} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
                   <LuX size={14} strokeWidth={2.5} />
                 </button>
               </div>
@@ -283,7 +326,7 @@ export default function SettingsPage() {
                             {sub}
                             <span className="font-normal text-slate-400 ml-1">{roles.length} role{roles.length !== 1 ? "s" : ""}</span>
                           </button>
-                          <button onClick={() => removeSubDepartment(dept, sub)} className="p-0.5 text-slate-300 hover:text-red-500 transition-colors rounded">
+                          <button onClick={() => askConfirm(sub, () => removeSubDepartment(dept, sub))} className="p-0.5 text-slate-300 hover:text-red-500 transition-colors rounded">
                             <LuX size={13} strokeWidth={2.5} />
                           </button>
                         </div>
@@ -309,7 +352,7 @@ export default function SettingsPage() {
                               {roles.map((role) => (
                                 <span key={role} className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600">
                                   {role}
-                                  <button onClick={() => removeRole(dept, sub, role)} className="text-slate-300 hover:text-red-500 transition-colors">
+                                  <button onClick={() => askConfirm(role, () => removeRole(dept, sub, role))} className="text-slate-300 hover:text-red-500 transition-colors">
                                     <LuX size={11} strokeWidth={2.5} />
                                   </button>
                                 </span>

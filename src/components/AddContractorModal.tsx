@@ -254,9 +254,6 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 {errors.email && <span className="text-xs text-red-500">{errors.email}</span>}
               </FIELD>
 
-              <FIELD label="Worksnap ID">
-                <input className={INPUT} value={form.worksnapId} onChange={(e) => set("worksnapId", e.target.value)} placeholder="e.g. 123456" />
-              </FIELD>
             </div>
           </section>
 

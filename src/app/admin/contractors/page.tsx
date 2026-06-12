@@ -99,11 +99,11 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
 }
 
 const COLS = [
-  "Unique ID","Full Name","Date of Birth","Gender",
+  "Full Name","Date of Birth","Gender",
   "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
   "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
   "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Equipment Provided",
-  "Worksnap ID","Created On","Dismissal Date","Dismissal Reason","Action",
+  "Created On","Dismissal Date","Dismissal Reason","Action",
 ];
 
 export default function ContractorsPage() {
@@ -423,14 +423,10 @@ export default function ContractorsPage() {
               <thead>
                 <tr style={{ background: "#003527" }}>
                   <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                    style={{ minWidth: 130, background: "#003527" }}>
-                    Unique ID
-                  </th>
-                  <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky z-20 border-r border-white/20"
-                    style={{ left: 130, minWidth: 200, background: "#003527" }}>
+                    style={{ minWidth: 200, background: "#003527" }}>
                     Full Name
                   </th>
-                  {COLS.slice(2).map((h, i) => (
+                  {COLS.slice(1).map((h, i) => (
                     <th key={h}
                       className={`px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap ${
                         i < COLS.slice(2).length - 1 ? "border-r border-white/20" : ""
@@ -446,16 +442,13 @@ export default function ContractorsPage() {
                   // Skeleton rows
                   Array.from({ length: Math.min(pageSize, 8) }).map((_, i) => (
                     <tr key={i} className="animate-pulse">
-                      <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: 130 }}>
-                        <div className="h-3 bg-slate-100 rounded w-20" />
-                      </td>
-                      <td className="px-4 py-3 sticky bg-white border-r border-slate-200" style={{ left: 130, minWidth: 200 }}>
+                      <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: 200 }}>
                         <div className="flex items-center gap-2.5">
                           <div className="h-7 w-7 rounded-full bg-slate-100 shrink-0" />
                           <div className="h-3 bg-slate-100 rounded w-32" />
                         </div>
                       </td>
-                      {COLS.slice(2, -1).map((h) => (
+                      {COLS.slice(1, -1).map((h) => (
                         <td key={h} className="px-4 py-3 border-r border-slate-100">
                           <div className="h-3 bg-slate-100 rounded w-16" />
                         </td>
@@ -474,10 +467,7 @@ export default function ContractorsPage() {
                   </tr>
                 ) : rows.map((c) => (
                   <tr key={c.uid} className="hover:bg-slate-50 transition-colors group">
-                    <td className="px-4 py-2.5 text-sm text-slate-500 font-mono whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 130 }}>
-                      {c.uid}
-                    </td>
-                    <td className="px-4 py-2.5 whitespace-nowrap sticky z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ left: 130, minWidth: 200 }}>
+                    <td className="px-4 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 200 }}>
                       <div className="flex items-center gap-2.5">
                         <div className={`h-7 w-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(c.uid)}`}>
                           {c.avatar || (c.firstName[0] ?? "") + (c.surname[0] ?? "")}
@@ -513,9 +503,6 @@ export default function ContractorsPage() {
                       {c.equipmentProvided
                         ? <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-100 text-teal-700">Yes</span>
                         : <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500">No</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-sm text-slate-500 font-mono whitespace-nowrap border-r border-slate-100">
-                      {c.worksnapId || <span className="text-slate-300">—</span>}
                     </td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{fmtDate(c.createdOn)}</td>
                     <td className="px-4 py-2.5 text-sm whitespace-nowrap border-r border-slate-100">

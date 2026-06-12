@@ -325,18 +325,25 @@ export function HolidayCalendar() {
           <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Holidays</h4>
           <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
         </div>
-        <div className="space-y-1 flex-1">
+        <div className="space-y-3 flex-1">
           {upcoming.length === 0 ? (
             <p className="text-sm text-slate-400 italic">No upcoming holidays.</p>
-          ) : upcoming.map((h) => (
-            <div key={h.id} className="flex items-center justify-between p-2 hover:bg-slate-50 rounded-lg transition-colors">
-              <div className="flex items-center gap-3">
-                <LuFlag size={16} strokeWidth={1.75} className={FLAG_COLORS[h.country] ?? "text-slate-400"} />
-                <span className="text-sm font-medium text-slate-700">{h.country}</span>
+          ) : upcoming.map((h) => {
+            const [y, mo, d] = h.date.split("-");
+            const dateLabel = `${MONTHS[parseInt(mo)-1].slice(0,3)} ${parseInt(d)}, ${y}`;
+            return (
+              <div key={h.id} className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <LuFlag size={15} strokeWidth={1.75} className={`shrink-0 ${FLAG_COLORS[h.country] ?? "text-slate-400"}`} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide leading-none mb-0.5">{h.country}</p>
+                    <p className="text-sm font-medium text-slate-700 truncate">{h.name}</p>
+                  </div>
+                </div>
+                <span className="text-xs text-slate-400 shrink-0 tabular-nums">{dateLabel}</span>
               </div>
-              <span className="text-xs text-slate-500">{h.name}</span>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <button
           onClick={() => setShowModal(true)}
