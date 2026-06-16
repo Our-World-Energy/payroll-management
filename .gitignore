@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# worksnap sync local artifacts
+worksnap_*.log
+worksnap_week_*.csv
+dev_server.log
