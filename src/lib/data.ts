@@ -1,11 +1,14 @@
 export type Contractor = {
   id: string;
   name: string;
+  email: string;
+  department: string;
   role: string;
   region: "US" | "Philippines" | "Mexico" | "India";
   site: string;
   status: "Active" | "On Leave" | "Inactive";
   cert: "Certified" | "Expiring" | "Expired";
+  hireDate: string;
 };
 
 export type AttendanceRecord = {
@@ -51,18 +54,18 @@ export type TimeOffRequest = {
 };
 
 export const CONTRACTORS: Contractor[] = [
-  { id: "C001", name: "Sarah Jenkins",  role: "Solar Technician",    region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified" },
-  { id: "C002", name: "Michael Chen",   role: "Safety Officer",      region: "US",          site: "Wind Farm East",status: "Active",   cert: "Expiring"  },
-  { id: "C003", name: "Priya Sharma",   role: "Electrical Engineer", region: "India",       site: "Hydro Beta",    status: "Active",   cert: "Certified" },
-  { id: "C004", name: "Carlos Rivera",  role: "Site Manager",        region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Certified" },
-  { id: "C005", name: "Ana Santos",     role: "Logistics Lead",      region: "Philippines", site: "HQ Support",    status: "On Leave", cert: "Certified" },
-  { id: "C006", name: "James Okoye",    role: "Grid Technician",     region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified" },
-  { id: "C007", name: "Li Wei",         role: "Data Analyst",        region: "India",       site: "Remote",        status: "Inactive", cert: "Expired"   },
-  { id: "C008", name: "Maria Lopez",    role: "Field Engineer",      region: "Mexico",      site: "Solar Array C", status: "Active",   cert: "Certified" },
-  { id: "C009", name: "John Reyes",     role: "Solar Technician",    region: "Philippines", site: "Solar Array D", status: "Active",   cert: "Certified" },
-  { id: "C010", name: "Aisha Patel",    role: "Project Manager",     region: "India",       site: "HQ India",      status: "Active",   cert: "Certified" },
-  { id: "C011", name: "Tom Bradley",    role: "Grid Technician",     region: "US",          site: "Wind Farm East",status: "Active",   cert: "Certified" },
-  { id: "C012", name: "Rosa Mendez",    role: "Field Engineer",      region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Expiring"  },
+  { id: "C001", name: "Sarah Jenkins",  email: "sarah.jenkins@example.com", department: "Field Operations", role: "Solar Technician",    region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-03-18" },
+  { id: "C002", name: "Michael Chen",   email: "michael.chen@example.com",  department: "Safety",           role: "Safety Officer",      region: "US",          site: "Wind Farm East",status: "Active",   cert: "Expiring",  hireDate: "2023-11-06" },
+  { id: "C003", name: "Priya Sharma",   email: "priya.sharma@example.com",  department: "Engineering",      role: "Electrical Engineer", region: "India",       site: "Hydro Beta",    status: "Active",   cert: "Certified", hireDate: "2022-07-25" },
+  { id: "C004", name: "Carlos Rivera",  email: "carlos.rivera@example.com", department: "Operations",       role: "Site Manager",        region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Certified", hireDate: "2021-09-14" },
+  { id: "C005", name: "Ana Santos",     email: "ana.santos@example.com",    department: "Logistics",        role: "Logistics Lead",      region: "Philippines", site: "HQ Support",    status: "On Leave", cert: "Certified", hireDate: "2023-01-30" },
+  { id: "C006", name: "James Okoye",    email: "james.okoye@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-05-13" },
+  { id: "C007", name: "Li Wei",         email: "li.wei@example.com",        department: "Analytics",        role: "Data Analyst",        region: "India",       site: "Remote",        status: "Inactive", cert: "Expired",   hireDate: "2020-10-21" },
+  { id: "C008", name: "Maria Lopez",    email: "maria.lopez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array C", status: "Active",   cert: "Certified", hireDate: "2023-06-05" },
+  { id: "C009", name: "John Reyes",     email: "john.reyes@example.com",    department: "Field Operations", role: "Solar Technician",    region: "Philippines", site: "Solar Array D", status: "Active",   cert: "Certified", hireDate: "2024-02-12" },
+  { id: "C010", name: "Aisha Patel",    email: "aisha.patel@example.com",   department: "Project Delivery", role: "Project Manager",     region: "India",       site: "HQ India",      status: "Active",   cert: "Certified", hireDate: "2022-04-04" },
+  { id: "C011", name: "Tom Bradley",    email: "tom.bradley@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Wind Farm East",status: "Active",   cert: "Certified", hireDate: "2023-08-28" },
+  { id: "C012", name: "Rosa Mendez",    email: "rosa.mendez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Expiring",  hireDate: "2024-01-16" },
 ];
 
 export const ATTENDANCE: AttendanceRecord[] = [
