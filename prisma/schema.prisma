@@ -6,8 +6,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")      // pooled (pgbouncer / Supavisor — port 6543)
-  directUrl = env("DIRECT_URL")        // direct connection (port 5432) for migrations
+  url       = env("DATABASE_URL") // pooled (pgbouncer / Supavisor — port 6543)
+  directUrl = env("DIRECT_URL") // direct connection (port 5432) for migrations
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────
@@ -51,28 +51,28 @@ enum ActivityKind {
 
 /// Mirror of Supabase auth.users — keyed by the auth user UUID.
 model Profile {
-  id          String   @id @db.Uuid                     // auth.users.id
-  email       String   @unique
-  fullName    String?
-  avatarUrl   String?
-  role        Role     @default(FIELD)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @db.Uuid // auth.users.id
+  email     String   @unique
+  fullName  String?
+  avatarUrl String?
+  role      Role     @default(FIELD)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  contractor  Contractor?
+  contractor Contractor?
 
   @@map("profiles")
 }
 
 model Site {
-  id          String    @id @default(uuid()) @db.Uuid
-  name        String    @unique
-  kind        SiteKind
-  region      String?
-  active      Boolean   @default(true)
-  capacity    Int?                                       // headcount target
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  kind      SiteKind
+  region    String?
+  active    Boolean  @default(true)
+  capacity  Int? // headcount target
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   shifts      Shift[]
   contractors Contractor[]
@@ -93,27 +93,39 @@ model Contractor {
   certExpiresAt   DateTime?
   homeSiteId      String?   @db.Uuid
   homeSite        Site?     @relation(fields: [homeSiteId], references: [id], onDelete: SetNull)
+
+  // ── Contract detail (shown in the attendance Action popup) ──────────
+  department        String?
+  location          String?
+  shiftType         String?
+  employmentStatus  String?                          // Active | Inactive | On Leave …
+  offsetCredits     Decimal  @default(0) @db.Decimal(6, 2)
+  ptoCredits        Decimal  @default(0) @db.Decimal(6, 2)
+  sickLeaveCredits  Decimal  @default(0) @db.Decimal(6, 2)
+  targetMinutes     Int      @default(2400)              // weekly target (Fixed & Flexible)
+  timezone          String   @default("America/Phoenix") // IANA tz for In/Out display (per location)
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  shifts          Shift[]
-  timeOff         TimeOff[]
-  payrollEntries  PayrollEntry[]
+  shifts         Shift[]
+  timeOff        TimeOff[]
+  payrollEntries PayrollEntry[]
 
   @@index([homeSiteId])
   @@map("contractors")
 }
 
 model Shift {
-  id            String    @id @default(uuid()) @db.Uuid
-  contractorId  String    @db.Uuid
-  contractor    Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  siteId        String    @db.Uuid
-  site          Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  startedAt     DateTime
-  endedAt       DateTime?
-  notes         String?
-  createdAt     DateTime  @default(now())
+  id           String     @id @default(uuid()) @db.Uuid
+  contractorId String     @db.Uuid
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  siteId       String     @db.Uuid
+  site         Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  startedAt    DateTime
+  endedAt      DateTime?
+  notes        String?
+  createdAt    DateTime   @default(now())
 
   @@index([contractorId, startedAt])
   @@index([siteId, startedAt])
@@ -121,47 +133,47 @@ model Shift {
 }
 
 model TimeOff {
-  id            String        @id @default(uuid()) @db.Uuid
-  contractorId  String        @db.Uuid
-  contractor    Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  startDate     DateTime      @db.Date
-  endDate       DateTime      @db.Date
-  reason        String?
-  status        TimeOffStatus @default(PENDING)
-  decidedById   String?       @db.Uuid
-  decidedAt     DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id           String        @id @default(uuid()) @db.Uuid
+  contractorId String        @db.Uuid
+  contractor   Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  startDate    DateTime      @db.Date
+  endDate      DateTime      @db.Date
+  reason       String?
+  status       TimeOffStatus @default(PENDING)
+  decidedById  String?       @db.Uuid
+  decidedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   @@index([contractorId, status])
   @@map("time_off_requests")
 }
 
 model PayrollRun {
-  id            String         @id @default(uuid()) @db.Uuid
-  periodStart   DateTime       @db.Date
-  periodEnd     DateTime       @db.Date
-  status        PayrollStatus  @default(DRAFT)
-  totalCents    BigInt         @default(0)
-  approvedAt    DateTime?
-  paidAt        DateTime?
-  createdAt     DateTime       @default(now())
+  id          String        @id @default(uuid()) @db.Uuid
+  periodStart DateTime      @db.Date
+  periodEnd   DateTime      @db.Date
+  status      PayrollStatus @default(DRAFT)
+  totalCents  BigInt        @default(0)
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
 
-  entries       PayrollEntry[]
+  entries PayrollEntry[]
 
   @@unique([periodStart, periodEnd])
   @@map("payroll_runs")
 }
 
 model PayrollEntry {
-  id            String       @id @default(uuid()) @db.Uuid
-  runId         String       @db.Uuid
-  run           PayrollRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
-  contractorId  String       @db.Uuid
-  contractor    Contractor   @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  hoursWorked   Decimal      @db.Decimal(10, 2)
-  grossCents    BigInt
-  notes         String?
+  id           String     @id @default(uuid()) @db.Uuid
+  runId        String     @db.Uuid
+  run          PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  contractorId String     @db.Uuid
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  hoursWorked  Decimal    @db.Decimal(10, 2)
+  grossCents   BigInt
+  notes        String?
 
   @@unique([runId, contractorId])
   @@map("payroll_entries")
@@ -178,4 +190,113 @@ model Activity {
 
   @@index([createdAt])
   @@map("activity_log")
+}
+
+/// Worksnap time-tracking data, synced from the Worksnaps manager_report API.
+/// One row per user × project × task × date × type (the granularity of the
+/// summary report line items). Re-syncs upsert on the natural key below.
+model WorksnapEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  worksnapUserId Int // Worksnaps user id
+  email          String   @default("") // join key → Profile.email (platform user)
+  userName       String
+  projectId      Int
+  projectName    String
+  taskId         Int      @default(0)
+  taskName       String   @default("")
+  category       String   @default("Work") // Work | Break | Meeting/Training
+  type           String // online | offline
+  entryDate      DateTime @db.Date
+  durationMins   Int // duration_in_minutes
+  syncedAt       DateTime @default(now())
+
+  @@unique([worksnapUserId, projectId, taskId, entryDate, type], name: "worksnap_natural_key")
+  @@index([entryDate])
+  @@index([worksnapUserId, entryDate])
+  @@index([projectId, entryDate])
+  @@index([email, entryDate])
+  @@map("worksnap_entries")
+}
+
+/// Per-user per-task per-week rollup, DERIVED from worksnap_entries (one row per
+/// user × project × task × week). Preserves the actual task each user worked on,
+/// with its category — so Work/Break/Meeting totals are a GROUP BY away and no
+/// separate category rollup is needed. The sync rebuilds the synced window's
+/// weeks on every run (delete + re-insert), so it exactly mirrors the detail
+/// table — no stale rows. Keyed on worksnapUserId (not email) so users without a
+/// mapped Profile email are never dropped.
+model WorksnapWeeklyTask {
+  id             String   @id @default(uuid()) @db.Uuid
+  worksnapUserId Int
+  email          String   @default("") // join key → Profile.email (may be empty)
+  userName       String
+  weekStart      DateTime @db.Date // Monday of the week
+  projectId      Int
+  projectName    String
+  taskId         Int      @default(0)
+  taskName       String   @default("")
+  category       String   @default("Work") // Work | Break | Meeting/Training
+  totalMins      Int      @default(0)
+  daysLogged     Int      @default(0)
+  syncedAt       DateTime @default(now())
+
+  @@unique([worksnapUserId, weekStart, projectId, taskId], name: "worksnap_weekly_task_key")
+  @@index([weekStart])
+  @@index([email, weekStart])
+  @@map("worksnap_weekly_task")
+}
+
+enum TimeOffKind {
+  HO_HOLIDAY          // HO / Holiday
+  PTO
+  SICK_LEAVE_HALF_DAY
+  PTO_HALF_DAY
+  OPEN
+  NOT_SET
+}
+
+enum AttendanceRequestStatus {
+  APPROVED
+  REJECTED
+  OPEN
+  NOT_SET
+}
+
+/// Per-employee per-week attendance workflow status, set by admins from the
+/// attendance view. Keyed on worksnapUserId + weekStart (Sunday). `email` is
+/// kept for convenience / joining to Profile.
+model AttendanceWeekStatus {
+  id             String                  @id @default(uuid()) @db.Uuid
+  worksnapUserId Int
+  email          String                  @default("")
+  weekStart      DateTime                @db.Date
+  timeOffStatus        TimeOffKind             @default(NOT_SET)
+  requestStatus        AttendanceRequestStatus @default(NOT_SET)
+  manualAdjustmentTime Int                     @default(0) // ± minutes
+  note                 String?                             // manual_adjustment_note
+  updatedAt            DateTime                @updatedAt @default(now())
+
+  @@unique([worksnapUserId, weekStart], name: "attendance_week_key")
+  @@index([weekStart])
+  @@index([email, weekStart])
+  @@map("attendance_week_status")
+}
+
+/// Per-employee per-DAY time-off + manual adjustment, set from the Action popup
+/// (admin picks the date). Aggregated up to the weekly row: time_off_time and
+/// manual_adjustment_time are sums across the week's days.
+model AttendanceDayStatus {
+  id                   String      @id @default(uuid()) @db.Uuid
+  worksnapUserId       Int
+  email                String      @default("")
+  date                 DateTime    @db.Date
+  timeOffStatus        TimeOffKind @default(NOT_SET)
+  manualAdjustmentTime Int         @default(0)
+  note                 String?
+  updatedAt            DateTime    @updatedAt @default(now())
+
+  @@unique([worksnapUserId, date], name: "attendance_day_key")
+  @@index([date])
+  @@index([email, date])
+  @@map("attendance_day_status")
 }
