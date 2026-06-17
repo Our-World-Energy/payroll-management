@@ -1,4 +1,4 @@
-import { runWorksnapSync } from "@/app/api/cron/worksnap-sync/route";
+import { runWorksnapSync } from "@/lib/worksnap-sync";
 import { requireAdmin } from "@/lib/auth";
 
 /**
