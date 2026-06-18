@@ -216,7 +216,7 @@ export function ImportContractorsModal({ onClose, onImport }: Props) {
   function toggleExpand(row: number) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(row) ? next.delete(row) : next.add(row);
+      if (next.has(row)) { next.delete(row); } else { next.add(row); }
       return next;
     });
   }

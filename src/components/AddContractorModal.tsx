@@ -37,6 +37,7 @@ for (let h = 0; h < 24; h++) {
 }
 
 // Pay period: always Sun–Sat of current week
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPayPeriod() {
   const today = new Date();
   const sun   = new Date(today); sun.setDate(today.getDate() - today.getDay());

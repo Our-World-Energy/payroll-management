@@ -2,21 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays,
-  LuUsers, LuTrendingUp, LuShieldCheck, LuChevronRight,
+  LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
+  LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuFileText, LuCalendarPlus,
 } from "react-icons/lu";
 import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 import { fetchAllContractors } from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
 
 const PTO_MONTHLY_ACCRUAL = 6.67;
-const PTO_HALF_MONTH_ACCRUAL = 3.33;
 const SICK_LEAVE_MONTHLY_ACCRUAL = 3.33;
-const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.665;
 const HOURS_PER_DAY = 8;
+const BIRTHDAY_LEAVE_HOURS = 8; // 1 day advance birthday leave
+const ADVANCE_SICK_LEAVE_HOURS = 8; // 1 day advance sick leave
 const TODAY = new Date();
 
-type RequestDecision = "Approved" | "Pending" | "Rejected";
+type RequestDecision = "Approved" | "Pending" | "Declined";
 type RequestDecisionMap = Record<string, RequestDecision>;
 
 type TimeOffRow = {
@@ -36,6 +36,9 @@ type TimeOffRow = {
   sickLeaveBalance: number;
   sickLeaveUsed: number;
   sickLeaveAvailable: number;
+  birthdayLeave: number;       // advance birthday leave (hrs)
+  advanceSickLeave: number;    // advance sick leave (hrs)
+  unusedSickLeave: number;     // carry-forward from prior year before Mar 1 reset
 };
 
 function fmtDate(date: string) {
@@ -55,6 +58,12 @@ function addMonths(date: Date, months: number) {
   return result;
 }
 
+// First day of the month AFTER the given date's month
+function firstOfNextMonth(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+}
+
+// How many complete months have elapsed from start → end (both on 1st of month)
 function calendarMonthDiff(start: Date, end: Date) {
   return Math.max(
     (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth(),
@@ -62,9 +71,12 @@ function calendarMonthDiff(start: Date, end: Date) {
   );
 }
 
-function accrualPeriodStartFor(date: Date) {
+// Sick leave accrual period resets on March 1 each year
+function sickLeaveYearStart(date: Date): Date {
   const marchFirst = new Date(date.getFullYear(), 2, 1);
-  return date >= marchFirst ? new Date(date.getFullYear(), 0, 1) : new Date(date.getFullYear() - 1, 2, 1);
+  return date >= marchFirst
+    ? new Date(date.getFullYear(), 2, 1)
+    : new Date(date.getFullYear() - 1, 2, 1);
 }
 
 function roundBalance(value: number) {
@@ -78,37 +90,110 @@ function fmtBalance(value: number) {
   });
 }
 
-function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number) {
+/**
+ * Accrual rule:
+ *  - 6-month eligibility date = hireDate + 6 months
+ *  - Accrual starts on the 1st of the month AFTER the eligibility date's month
+ *    e.g. hired 2025-12-16 → eligible 2026-06-16 → accrual starts 2026-07-01
+ *  - Each full month that has started (i.e. TODAY >= 1st of that month) earns monthlyAccrual
+ *  - We count complete months from accrualStart up to but not including the current month
+ *    (current month accrues on the 1st, so if TODAY >= 1st of month N, month N is counted)
+ */
+function calculatePolicyBalance(hireDate: string, monthlyAccrual: number): number {
   const startDate = parseDate(hireDate);
   if (!startDate) return 0;
-  const accrualStartDate = addMonths(startDate, 6);
-  const oneYearDate = addMonths(startDate, 12);
-  if (TODAY < accrualStartDate) return 0;
-  if (TODAY < oneYearDate) {
-    const firstYearAccrual = accrualStartDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
-    const firstYearAdditionalMonths = calendarMonthDiff(accrualStartDate, TODAY);
-    return roundBalance(firstYearAccrual + firstYearAdditionalMonths * monthlyAccrual);
-  }
-  const currentPeriodStart = accrualPeriodStartFor(TODAY);
-  const effectiveStartDate = accrualStartDate > currentPeriodStart ? accrualStartDate : currentPeriodStart;
-  const firstAccrual = effectiveStartDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
-  const additionalAccrualMonths = calendarMonthDiff(effectiveStartDate, TODAY);
-  return roundBalance(firstAccrual + additionalAccrualMonths * monthlyAccrual);
+
+  // 6-month eligibility date (exact calendar date)
+  const eligibilityDate = addMonths(startDate, 6);
+
+  // Accrual begins on the 1st of the month following the eligibility month
+  const accrualStart = firstOfNextMonth(eligibilityDate);
+
+  // Not yet eligible
+  if (TODAY < accrualStart) return 0;
+
+  // Count how many months have started since accrualStart (inclusive of current month
+  // only if TODAY is on or after the 1st of that month — which is always true since
+  // accrualStart is already a 1st-of-month and calendarMonthDiff counts full months)
+  const todayFirstOfMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
+  const monthsAccrued = calendarMonthDiff(accrualStart, todayFirstOfMonth);
+
+  return roundBalance(monthsAccrued * monthlyAccrual);
 }
 
 function calculatePtoBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, PTO_MONTHLY_ACCRUAL, PTO_HALF_MONTH_ACCRUAL);
+  return calculatePolicyBalance(hireDate, PTO_MONTHLY_ACCRUAL);
 }
 
 function calculateSickLeaveBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL);
+  return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL);
 }
 
-function effectiveRequestStatus(request: TimeOffRequest, decisions: RequestDecisionMap) {
-  return decisions[request.id] ?? request.status;
+/**
+ * Unused sick leave from the PREVIOUS year (before the most recent March 1 reset).
+ * Any sick leave balance that was accrued before the current March 1 cutoff and
+ * not used is captured here as a carry-forward credit.
+ */
+function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number): number {
+  const startDate = parseDate(hireDate);
+  if (!startDate) return 0;
+
+  const eligibilityDate = addMonths(startDate, 6);
+  const accrualStart = firstOfNextMonth(eligibilityDate);
+
+  // Current sick leave year started on this March 1
+  const currentYearStart = sickLeaveYearStart(TODAY);
+
+  // Previous year ended on currentYearStart - 1 day
+  const prevYearEnd = new Date(currentYearStart.getTime() - 86400000);
+  const prevYearStart = new Date(currentYearStart.getFullYear() - 1, 2, 1); // Mar 1 prev year
+
+  // Effective start of previous year accrual
+  const effectiveStart = accrualStart > prevYearStart ? accrualStart : prevYearStart;
+
+  // If accrual hadn't started before current year began, no prior-year balance
+  if (effectiveStart >= currentYearStart) return 0;
+
+  const prevYearEndFirst = new Date(prevYearEnd.getFullYear(), prevYearEnd.getMonth(), 1);
+  const monthsInPrevYear = calendarMonthDiff(effectiveStart, prevYearEndFirst) + 1;
+  const prevYearAccrued = roundBalance(monthsInPrevYear * SICK_LEAVE_MONTHLY_ACCRUAL);
+
+  // Unused = what was accrued in prior year minus what was used (approximate: all used hours attributed to prior year)
+  const unused = Math.max(prevYearAccrued - sickLeaveUsedHours, 0);
+  return roundBalance(unused);
 }
 
-function approvedHoursFor(name: string, type: "Annual Leave" | "Sick Leave", decisions: RequestDecisionMap) {
+/**
+ * Birthday leave: 1 day (8 hrs) advance credit — granted once eligible (after 6-month wait + next month start)
+ */
+function calculateBirthdayLeave(hireDate: string): number {
+  const startDate = parseDate(hireDate);
+  if (!startDate) return 0;
+  const eligibilityDate = addMonths(startDate, 6);
+  const accrualStart = firstOfNextMonth(eligibilityDate);
+  return TODAY >= accrualStart ? BIRTHDAY_LEAVE_HOURS : 0;
+}
+
+/**
+ * Advance sick leave: 1 day (8 hrs) credit — granted once eligible
+ */
+function calculateAdvanceSickLeave(hireDate: string): number {
+  const startDate = parseDate(hireDate);
+  if (!startDate) return 0;
+  const eligibilityDate = addMonths(startDate, 6);
+  const accrualStart = firstOfNextMonth(eligibilityDate);
+  return TODAY >= accrualStart ? ADVANCE_SICK_LEAVE_HOURS : 0;
+}
+
+function effectiveRequestStatus(request: TimeOffRequest, decisions: RequestDecisionMap): RequestDecision | "-" {
+  const override = decisions[request.id];
+  if (override) return override;
+  // Map legacy "Rejected" from data to "Declined"
+  if (request.status === "Rejected") return "Declined";
+  return request.status as RequestDecision;
+}
+
+function approvedHoursFor(name: string, type: "Annual Leave" | "Sick Leave", decisions: RequestDecisionMap): number {
   return TIME_OFF
     .filter((r) => r.name === name && r.type === type && effectiveRequestStatus(r, decisions) === "Approved")
     .reduce((total, r) => total + r.days * HOURS_PER_DAY, 0);
@@ -160,13 +245,13 @@ function BalanceBar({ used, total, color }: { used: number; total: number; color
 const REVIEW_BADGE: Record<RequestDecision, string> = {
   Approved: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   Pending:  "bg-amber-50 text-amber-700 border border-amber-200",
-  Rejected: "bg-red-50 text-red-600 border border-red-200",
+  Declined: "bg-red-50 text-red-600 border border-red-200",
 };
 
 const REVIEW_ICON: Record<RequestDecision, React.ReactNode> = {
   Approved: <LuCircleCheck size={11} />,
   Pending:  <LuClock size={11} />,
-  Rejected: <LuCircleX size={11} />,
+  Declined: <LuCircleX size={11} />,
 };
 
 export default function TimeOffPage() {
@@ -180,6 +265,9 @@ export default function TimeOffPage() {
   const [editStatus,  setEditStatus]  = useState("PTO Leave");
   const [editHours,   setEditHours]   = useState("");
   const [editReason,  setEditReason]  = useState("");
+  const [editFrom,    setEditFrom]    = useState("");
+  const [editTo,      setEditTo]      = useState("");
+  const [modalTab,    setModalTab]    = useState<"details" | "history">("details");
 
   useEffect(() => {
     let active = true;
@@ -215,6 +303,9 @@ export default function TimeOffPage() {
       ptoAvailable: roundBalance(Math.max(ptoBalance - ptoUsed, 0)),
       sickLeaveBalance, sickLeaveUsed,
       sickLeaveAvailable: roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0)),
+      birthdayLeave: calculateBirthdayLeave(c.hireDate),
+      advanceSickLeave: calculateAdvanceSickLeave(c.hireDate),
+      unusedSickLeave: calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
     };
   }), [contractors, requestDecisions]);
 
@@ -235,21 +326,60 @@ export default function TimeOffPage() {
   const approvedRequests = TIME_OFF.filter((r) =>
     effectiveRequestStatus(r, requestDecisions) === "Approved" && visibleNames.has(r.name)
   ).length;
-  const rejectedRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Rejected" && visibleNames.has(r.name)
+  const declinedRequests = TIME_OFF.filter((r) =>
+    effectiveRequestStatus(r, requestDecisions) === "Declined" && visibleNames.has(r.name)
   ).length;
 
   const selectedRow = rows.find((r) => r.id === selectedRowId) ?? null;
 
-  function setSelectedRequestDecision(decision: "Approved" | "Rejected") {
+  function setSelectedRequestDecision(decision: "Approved" | "Declined") {
     if (!selectedRow?.latestRequest) return;
     setRequestDecisions((cur) => ({ ...cur, [selectedRow.latestRequest!.id]: decision }));
+  }
+
+  function revertSelectedRequest() {
+    if (!selectedRow?.latestRequest) return;
+    setRequestDecisions((cur) => {
+      const next = { ...cur };
+      delete next[selectedRow.latestRequest!.id];
+      return next;
+    });
+  }
+
+  function exportCSV() {
+    const headers = [
+      "Name", "Country", "Department", "Hire Date",
+      "PTO Balance (h)", "PTO Used (h)", "PTO Available (h)",
+      "Sick Balance (h)", "Sick Used (h)", "Sick Available (h)",
+      "Birthday Leave (h)", "Advance Sick Leave (h)", "Unused Sick Leave (h)",
+      "Review Status",
+    ];
+    const csvRows = [
+      headers.join(","),
+      ...filteredRows.map((r) =>
+        [
+          `"${r.fullName}"`, `"${r.country}"`, `"${r.department || "Unassigned"}"`, r.hireDate,
+          r.ptoBalance, r.ptoUsed, r.ptoAvailable,
+          r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
+          r.birthdayLeave, r.advanceSickLeave, r.unusedSickLeave,
+          `"${r.reviewStatus === "-" ? "No Request" : r.reviewStatus}"`,
+        ].join(",")
+      ),
+    ];
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `time-off-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   const COLS = [
     "Employee", "Country", "Department", "Hire Date",
     "PTO Balance", "PTO Used", "PTO Available",
     "Sick Balance", "Sick Used", "Sick Available",
+    "Birthday Leave", "Advance Sick Leave", "Unused Sick Leave",
     "Review Status", "Action",
   ];
 
@@ -257,146 +387,276 @@ export default function TimeOffPage() {
     <div className="p-4 sm:p-6 md:p-8 max-w-full">
 
       {/* ── Detail Modal ──────────────────────────────────────────── */}
-      {selectedRow && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedRowId(null)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      {selectedRow && (() => {
+        const employeeHistory = TIME_OFF
+          .filter((r) => r.name === selectedRow.fullName)
+          .sort((a, b) => b.from.localeCompare(a.from));
+        const currentStatus = selectedRow.reviewStatus;
+        const isDecided = currentStatus === "Approved" || currentStatus === "Declined";
 
-            {/* Header */}
-            <div className="px-6 py-5 bg-gradient-to-r from-[#003527] to-[#006b5f] flex items-start justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className={`size-12 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${avatarColor(selectedRow.id)}`}>
-                  {avatarInitials(selectedRow.fullName)}
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedRowId(null)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+
+              {/* Header */}
+              <div className="px-6 py-5 bg-gradient-to-r from-[#003527] to-[#006b5f] flex items-start justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className={`size-12 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${avatarColor(selectedRow.id)}`}>
+                    {avatarInitials(selectedRow.fullName)}
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">{selectedRow.fullName}</h3>
+                    <p className="text-sm text-white/60 mt-0.5">{selectedRow.role || "—"} · {selectedRow.department || "—"}</p>
+                    <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white">{selectedRow.fullName}</h3>
-                  <p className="text-sm text-white/60 mt-0.5">{selectedRow.role || "—"} · {selectedRow.department || "—"}</p>
-                  <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
+                <button onClick={() => setSelectedRowId(null)} className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+                  <LuX size={18} strokeWidth={2} />
+                </button>
+              </div>
+
+              {/* Balance summary bar */}
+              <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100">
+                <div className="px-5 py-3">
+                  <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Available</p>
+                  <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
+                  <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
+                  <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
+                </div>
+                <div className="px-5 py-3">
+                  <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Leave Available</p>
+                  <p className="text-2xl font-black text-orange-600 leading-tight">{fmtBalance(selectedRow.sickLeaveAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
+                  <BalanceBar used={selectedRow.sickLeaveUsed} total={selectedRow.sickLeaveBalance} color="bg-orange-400" />
+                  <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.sickLeaveUsed)}h used of {fmtBalance(selectedRow.sickLeaveBalance)}h</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedRowId(null)} className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
-                <LuX size={18} strokeWidth={2} />
-              </button>
-            </div>
 
-            {/* Balance summary bar */}
-            <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100">
-              <div className="px-5 py-3">
-                <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Available</p>
-                <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
-                <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
-                <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
+              {/* Tabs */}
+              <div className="flex border-b border-slate-100 px-6">
+                {(["details", "history"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setModalTab(tab)}
+                    className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold capitalize border-b-2 transition-colors ${
+                      modalTab === tab
+                        ? "border-[#003527] text-[#003527]"
+                        : "border-transparent text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    {tab === "details" ? <LuFileText size={13} /> : <LuHistory size={13} />}
+                    {tab === "details" ? "Details & Request" : `History (${employeeHistory.length})`}
+                  </button>
+                ))}
               </div>
-              <div className="px-5 py-3">
-                <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Leave Available</p>
-                <p className="text-2xl font-black text-orange-600 leading-tight">{fmtBalance(selectedRow.sickLeaveAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
-                <BalanceBar used={selectedRow.sickLeaveUsed} total={selectedRow.sickLeaveBalance} color="bg-orange-400" />
-                <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.sickLeaveUsed)}h used of {fmtBalance(selectedRow.sickLeaveBalance)}h</p>
-              </div>
-            </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-              {/* Info grid */}
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Contractor Info</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    ["Country",      selectedRow.country],
-                    ["Hire Date",    fmtDate(selectedRow.hireDate)],
-                    ["Request ID",   selectedRow.latestRequest?.id ?? "—"],
-                    ["Request From", selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.from) : "—"],
-                    ["Request To",   selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.to) : "—"],
-                  ].map(([label, value]) => (
-                    <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
-                      <p className="text-sm font-medium text-slate-700 mt-0.5 break-words">{value}</p>
+                {modalTab === "details" ? (<>
+                  {/* Additional leave balances */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Birthday Leave</p>
+                      <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
+                        {selectedRow.birthdayLeave > 0 ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></> : <span className="text-sm text-pink-300">Not eligible</span>}
+                      </p>
                     </div>
-                  ))}
-
-                  {/* Status Request — dropdown */}
-                  <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Status Request</p>
-                    <select
-                      value={editStatus}
-                      onChange={(e) => setEditStatus(e.target.value)}
-                      className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    >
-                      <option>PTO Leave</option>
-                      <option>Sick Leave</option>
-                      <option>Half Day Off</option>
-                    </select>
+                    <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
+                      <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
+                        {selectedRow.advanceSickLeave > 0 ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></> : <span className="text-sm text-blue-300">Not eligible</span>}
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 rounded-xl border border-amber-200 px-3 py-2.5">
+                      <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Unused Sick Leave</p>
+                      <p className="text-xl font-black text-amber-700 leading-tight mt-0.5">
+                        {selectedRow.unusedSickLeave > 0 ? <>{fmtBalance(selectedRow.unusedSickLeave)}<span className="text-xs font-semibold ml-0.5 text-amber-400">hrs</span></> : <span className="text-sm text-amber-300">—</span>}
+                      </p>
+                    </div>
                   </div>
 
-                  {/* Request Hours — text input */}
-                  <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Request Hours</p>
-                    <input
-                      type="text"
-                      value={editHours}
-                      onChange={(e) => setEditHours(e.target.value)}
-                      placeholder="e.g. 8"
-                      className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                    />
+                  {/* Info grid */}
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Contractor Info</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        ["Country",   selectedRow.country],
+                        ["Hire Date", fmtDate(selectedRow.hireDate)],
+                      ] as [string, string][]).map(([label, value]) => (
+                        <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+                          <p className="text-sm font-medium text-slate-700 mt-0.5">{value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Reason — full width textarea */}
-                <div className="mt-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
-                  <textarea
-                    value={editReason}
-                    onChange={(e) => setEditReason(e.target.value)}
-                    placeholder="Enter reason for time-off request..."
-                    rows={3}
-                    className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-                  />
-                </div>
-              </div>
+                  {/* Time-Off Request form */}
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                      <LuCalendarPlus size={13} /> Time-Off Request
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {/* Leave Type */}
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Type</p>
+                        <select
+                          value={editStatus}
+                          onChange={(e) => setEditStatus(e.target.value)}
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        >
+                          <option>PTO Leave</option>
+                          <option>Sick Leave</option>
+                          <option>Half Day Off</option>
+                        </select>
+                      </div>
 
-              {/* Current request status */}
-              <div className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Review Status</p>
-                  <div className="mt-1.5">
-                    {selectedRow.reviewStatus === "-" ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No request</span>
+                      {/* Request Hours */}
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Request Hours</p>
+                        <input
+                          type="text"
+                          value={editHours}
+                          onChange={(e) => setEditHours(e.target.value)}
+                          placeholder="e.g. 8"
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
+
+                      {/* From date */}
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">From Date</p>
+                        <input
+                          type="date"
+                          value={editFrom}
+                          onChange={(e) => setEditFrom(e.target.value)}
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
+
+                      {/* To date */}
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">To Date</p>
+                        <input
+                          type="date"
+                          value={editTo}
+                          onChange={(e) => setEditTo(e.target.value)}
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Reason */}
+                    <div className="mt-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
+                      <textarea
+                        value={editReason}
+                        onChange={(e) => setEditReason(e.target.value)}
+                        placeholder="Enter reason for time-off request..."
+                        rows={3}
+                        className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Current review status */}
+                  <div className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Review Status</p>
+                      <div className="mt-1.5">
+                        {currentStatus === "-" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No request</span>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[currentStatus]}`}>
+                            {REVIEW_ICON[currentStatus]}
+                            {currentStatus}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <LuCalendarDays size={28} className="text-slate-200" />
+                  </div>
+                </>) : (
+                  /* History tab */
+                  <div>
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">All Time-Off Requests</p>
+                    {employeeHistory.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-12 text-slate-300">
+                        <LuHistory size={32} strokeWidth={1.5} />
+                        <p className="mt-3 text-sm font-medium">No request history</p>
+                      </div>
                     ) : (
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[selectedRow.reviewStatus]}`}>
-                        {REVIEW_ICON[selectedRow.reviewStatus]}
-                        {selectedRow.reviewStatus}
-                      </span>
+                      <div className="space-y-2">
+                        {employeeHistory.map((req) => {
+                          const st = effectiveRequestStatus(req, requestDecisions);
+                          return (
+                            <div key={req.id} className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-mono text-slate-400">{req.id}</span>
+                                  <span className="text-xs font-semibold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{req.type}</span>
+                                </div>
+                                <p className="text-sm font-semibold text-slate-700 mt-1">
+                                  {fmtDate(req.from)} → {fmtDate(req.to)}
+                                  <span className="text-xs text-slate-400 font-normal ml-2">{req.days} day{req.days !== 1 ? "s" : ""}</span>
+                                </p>
+                                {req.reason && <p className="text-xs text-slate-400 mt-0.5 truncate">{req.reason}</p>}
+                              </div>
+                              {st !== "-" && (
+                                <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[st]}`}>
+                                  {REVIEW_ICON[st]}
+                                  {st}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
+                )}
+              </div>
+
+              {/* Footer actions */}
+              <div className="shrink-0 px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+                {/* Revert — only shown when a decision has been made */}
+                <div>
+                  {isDecided && (
+                    <button
+                      onClick={revertSelectedRequest}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-500 hover:text-amber-700 hover:bg-amber-50 border border-slate-200 hover:border-amber-200 rounded-lg transition-colors"
+                    >
+                      <LuRotateCcw size={14} strokeWidth={2} />
+                      Revert to Pending
+                    </button>
+                  )}
                 </div>
-                <LuCalendarDays size={28} className="text-slate-200" />
+
+                <div className="flex items-center gap-3">
+                  <button onClick={() => setSelectedRowId(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+                    Close
+                  </button>
+                  <button
+                    onClick={() => setSelectedRequestDecision("Declined")}
+                    disabled={!selectedRow.latestRequest || currentStatus === "Declined"}
+                    className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
+                  >
+                    <LuCircleX size={15} strokeWidth={2} /> Decline
+                  </button>
+                  <button
+                    onClick={() => setSelectedRequestDecision("Approved")}
+                    disabled={!selectedRow.latestRequest || currentStatus === "Approved"}
+                    className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
+                  >
+                    <LuCircleCheck size={15} strokeWidth={2} /> Approve
+                  </button>
+                </div>
               </div>
             </div>
-
-            {/* Footer actions */}
-            <div className="shrink-0 px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button onClick={() => setSelectedRowId(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
-                Close
-              </button>
-              <button
-                onClick={() => setSelectedRequestDecision("Rejected")}
-                disabled={!selectedRow.latestRequest}
-                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
-              >
-                <LuCircleX size={15} strokeWidth={2} /> Reject
-              </button>
-              <button
-                onClick={() => setSelectedRequestDecision("Approved")}
-                disabled={!selectedRow.latestRequest}
-                className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
-              >
-                <LuCircleCheck size={15} strokeWidth={2} /> Approve
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Page header ───────────────────────────────────────────── */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
@@ -414,18 +674,7 @@ export default function TimeOffPage() {
       </div>
 
       {/* ── Stat cards ────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-start justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Contractors</p>
-            <p className="text-3xl font-black text-[#003527] mt-1">{filteredRows.length}</p>
-            <p className="text-xs text-slate-400 mt-1">Visible in view</p>
-          </div>
-          <div className="size-9 rounded-xl bg-[#003527]/10 flex items-center justify-center shrink-0">
-            <LuUsers size={18} className="text-[#003527]" />
-          </div>
-        </div>
-
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
         <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4 flex items-start justify-between">
           <div>
             <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
@@ -450,9 +699,9 @@ export default function TimeOffPage() {
 
         <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-4 flex items-start justify-between">
           <div>
-            <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Rejected</p>
-            <p className="text-3xl font-black text-red-600 mt-1">{rejectedRequests}</p>
-            <p className="text-xs text-red-300 mt-1">Requests rejected</p>
+            <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Declined</p>
+            <p className="text-3xl font-black text-red-600 mt-1">{declinedRequests}</p>
+            <p className="text-xs text-red-300 mt-1">Requests declined</p>
           </div>
           <div className="size-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
             <LuCircleX size={18} className="text-red-500" />
@@ -494,9 +743,19 @@ export default function TimeOffPage() {
           </button>
         )}
 
-        <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
-          <LuShieldCheck size={14} className="text-teal-500" />
-          <span>{filteredRows.length} contractors shown</span>
+        <div className="ml-auto flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <LuShieldCheck size={14} className="text-teal-500" />
+            <span>{filteredRows.length} contractors shown</span>
+          </div>
+          <button
+            onClick={exportCSV}
+            disabled={loading || filteredRows.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#003527] border border-[#003527]/30 bg-white hover:bg-[#003527] hover:text-white rounded-lg transition-colors disabled:opacity-40"
+          >
+            <LuDownload size={13} strokeWidth={2} />
+            Export CSV
+          </button>
         </div>
       </div>
 
@@ -505,7 +764,7 @@ export default function TimeOffPage() {
         <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
           <table
             className="w-full text-left"
-            style={{ minWidth: "1600px", borderCollapse: "separate", borderSpacing: 0 }}
+            style={{ minWidth: "1960px", borderCollapse: "separate", borderSpacing: 0 }}
           >
             <thead>
               <tr style={{ background: "#003527" }}>
@@ -601,6 +860,23 @@ export default function TimeOffPage() {
                     </div>
                   </td>
 
+                  {/* Birthday / Advance Sick / Unused Sick */}
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                    {row.birthdayLeave > 0
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                    {row.advanceSickLeave > 0
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">{fmtBalance(row.advanceSickLeave)}h</span>
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                    {row.unusedSickLeave > 0
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">{fmtBalance(row.unusedSickLeave)}h</span>
+                      : <span className="text-slate-300">—</span>}
+                  </td>
+
                   {/* Review status */}
                   <td className="px-4 py-3 whitespace-nowrap border-r border-slate-100">
                     {row.reviewStatus === "-" ? (
@@ -618,8 +894,11 @@ export default function TimeOffPage() {
                     <button
                       onClick={() => {
                         setSelectedRowId(row.id);
+                        setModalTab("details");
                         setEditStatus(row.requestStatus === "-" ? "PTO Leave" : row.requestStatus);
                         setEditHours(row.latestRequest ? String(row.latestRequest.days * HOURS_PER_DAY) : "");
+                        setEditFrom(row.latestRequest?.from ?? "");
+                        setEditTo(row.latestRequest?.to ?? "");
                         setEditReason(row.latestRequest?.reason ?? "");
                       }}
                       title="View details"
