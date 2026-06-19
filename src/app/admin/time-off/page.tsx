@@ -261,24 +261,8 @@ export default function TimeOffPage() {
     const ptoUsed        = approvedHoursFor(fullName, "Annual Leave", requestDecisions);
     const sickLeaveUsed  = approvedHoursFor(fullName, "Sick Leave",  requestDecisions);
 
-    // Total advance hours granted this session
-    const advancePtoGranted  = calculateBirthdayLeave(c.hireDate)    + (advanceGrants[c.uid]?.pto  ?? 0);
-    const advanceSickGranted = calculateAdvanceSickLeave(c.hireDate) + (advanceGrants[c.uid]?.sick ?? 0);
-
-    // Each month of accrual first repays the advance debt before building usable balance.
-    // Remaining debt = max(advanceGranted - accrualBalance, 0)
-    // i.e. once accrual >= advance, the debt is fully covered.
-    const advancePtoDebt  = Math.max(advancePtoGranted  - ptoBalance,       0);
-    const advanceSickDebt = Math.max(advanceSickGranted - sickLeaveBalance, 0);
-
-    // PTO available: balance minus used minus any still-outstanding advance PTO debt
-    const ptoAvailable = roundBalance(Math.max(ptoBalance - ptoUsed - advancePtoDebt, 0));
-
-    // Sick Leave available: balance minus used minus still-outstanding advance sick debt
-    // AND minus any still-outstanding advance PTO/birthday debt (per spec)
-    const sickLeaveAvailable = roundBalance(
-      Math.max(sickLeaveBalance - sickLeaveUsed - advanceSickDebt - advancePtoDebt, 0)
-    );
+    const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
+    const sickLeaveAvailable = roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0));
 
     return {
       id: c.uid, fullName, email: c.email,
@@ -288,8 +272,8 @@ export default function TimeOffPage() {
       reviewStatus: latestRequest ? effectiveRequestStatus(latestRequest, requestDecisions) : "-",
       latestRequest, ptoBalance, ptoUsed, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
-      birthdayLeave:    advancePtoGranted,
-      advanceSickLeave: advanceSickGranted,
+      birthdayLeave:    calculateBirthdayLeave(c.hireDate) + (advanceGrants[c.uid]?.pto  ?? 0),
+      advanceSickLeave: calculateAdvanceSickLeave(c.hireDate) + (advanceGrants[c.uid]?.sick ?? 0),
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
     };
   }), [contractors, requestDecisions, advanceGrants]);
