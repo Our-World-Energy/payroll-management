@@ -379,8 +379,8 @@ export default function TimeOffPage() {
   function exportCSV() {
     const headers = [
       "Name", "Country", "Department", "Hire Date",
-      "PTO Balance (h)", "PTO Used (h)", "PTO Available (h)",
-      "Sick Balance (h)", "Sick Used (h)", "Sick Available (h)",
+      "PTO Accrual (h)", "PTO Used (h)", "PTO Accrual Available (h)",
+      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Accrual Available (h)",
       "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
       "Review Status",
     ];
@@ -407,8 +407,8 @@ export default function TimeOffPage() {
 
   const COLS = [
     "Employee", "Country", "Department", "Hire Date",
-    "PTO Balance", "PTO Used", "PTO Available",
-    "Sick Balance", "Sick Used", "Sick Available",
+    "PTO Accrual", "PTO Used", "PTO Accrual Available",
+    "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
     "Advance PTO/Birthday Leave", "Advance Sick Leave",
     "Review Status", "Action",
   ];
@@ -449,13 +449,13 @@ export default function TimeOffPage() {
               {/* Balance summary bar */}
               <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100">
                 <div className="px-5 py-3">
-                  <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Available</p>
+                  <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Accrual Available</p>
                   <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
                   <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
                   <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
                 </div>
                 <div className="px-5 py-3">
-                  <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Leave Available</p>
+                  <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Accrual Available</p>
                   <p className="text-2xl font-black text-orange-600 leading-tight">{fmtBalance(selectedRow.sickLeaveAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
                   <BalanceBar used={selectedRow.sickLeaveUsed} total={selectedRow.sickLeaveBalance} color="bg-orange-400" />
                   <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.sickLeaveUsed)}h used of {fmtBalance(selectedRow.sickLeaveBalance)}h</p>
@@ -514,9 +514,9 @@ export default function TimeOffPage() {
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
                       <div className="grid grid-cols-3 gap-2">
                         {([
-                          ["PTO Balance",   `${fmtBalance(selectedRow.ptoBalance)}h`,   "teal"],
+                          ["PTO Accrual",   `${fmtBalance(selectedRow.ptoBalance)}h`,   "teal"],
                           ["PTO Used",      `${fmtBalance(selectedRow.ptoUsed)}h`,       "teal"],
-                          ["PTO Available", `${fmtBalance(selectedRow.ptoAvailable)}h`,  "teal"],
+                          ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`,  "teal"],
                         ] as [string, string, string][]).map(([label, value]) => (
                           <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
                             <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
@@ -531,9 +531,9 @@ export default function TimeOffPage() {
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
                       <div className="grid grid-cols-3 gap-2">
                         {([
-                          ["Sick Leave Balance",   `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
+                          ["Sick Leave Accrual",   `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
                           ["Sick Leave Used",      `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
-                          ["Sick Leave Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
+                          ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
                         ] as [string, string][]).map(([label, value]) => (
                           <div key={label} className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2.5">
                             <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wider">{label}</p>
