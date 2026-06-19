@@ -7,11 +7,10 @@ import {
   LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuCalendarPlus,
 } from "react-icons/lu";
 import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
+import { calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
 import { fetchAllContractors } from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
 
-const PTO_MONTHLY_ACCRUAL = 6.67;
-const SICK_LEAVE_MONTHLY_ACCRUAL = 3.33;
 const HOURS_PER_DAY = 8;
 const BIRTHDAY_LEAVE_HOURS = 8; // 1 day advance birthday leave
 const ADVANCE_SICK_LEAVE_HOURS = 8; // 1 day advance sick leave
@@ -91,50 +90,7 @@ function fmtBalance(value: number) {
   });
 }
 
-/**
- * Accrual rule:
- *  - 6-month eligibility date = hireDate + 6 months
- *  - Accrual starts on the 1st of the month AFTER the eligibility date's month
- *    e.g. hired 2025-12-16 → eligible 2026-06-16 → accrual starts 2026-07-01
- *  - Each full month that has started (i.e. TODAY >= 1st of that month) earns monthlyAccrual
- *  - We count complete months from accrualStart up to but not including the current month
- *    (current month accrues on the 1st, so if TODAY >= 1st of month N, month N is counted)
- */
-function calculatePolicyBalance(hireDate: string, monthlyAccrual: number): number {
-  const startDate = parseDate(hireDate);
-  if (!startDate) return 0;
 
-  // 6-month eligibility date (exact calendar date)
-  const eligibilityDate = addMonths(startDate, 6);
-
-  // Accrual begins on the 1st of the month following the eligibility month
-  const accrualStart = firstOfNextMonth(eligibilityDate);
-
-  // Not yet eligible
-  if (TODAY < accrualStart) return 0;
-
-  // A month's leave is credited on the LAST day of that month.
-  // e.g. July accrual is credited on July 31, not Aug 1.
-  // Last day of the current month = new Date(year, month+1, 0).
-  // If today has not yet reached the last day of the current month, only months up to
-  // last month are fully credited. If today IS the last day of the current month,
-  // the current month is also credited.
-  const lastDayOfCurrentMonth = new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 0);
-  const creditThroughMonth = TODAY >= lastDayOfCurrentMonth
-    ? new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 1)  // include current month
-    : new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);      // exclude current month
-  const monthsAccrued = calendarMonthDiff(accrualStart, creditThroughMonth);
-
-  return roundBalance(monthsAccrued * monthlyAccrual);
-}
-
-function calculatePtoBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, PTO_MONTHLY_ACCRUAL);
-}
-
-function calculateSickLeaveBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL);
-}
 
 /**
  * Unused sick leave from the PREVIOUS year (before the most recent March 1 reset).
@@ -163,7 +119,7 @@ function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number):
 
   const prevYearEndFirst = new Date(prevYearEnd.getFullYear(), prevYearEnd.getMonth(), 1);
   const monthsInPrevYear = calendarMonthDiff(effectiveStart, prevYearEndFirst) + 1;
-  const prevYearAccrued = roundBalance(monthsInPrevYear * SICK_LEAVE_MONTHLY_ACCRUAL);
+  const prevYearAccrued = roundBalance(monthsInPrevYear * 3.33);
 
   // Unused = what was accrued in prior year minus what was used (approximate: all used hours attributed to prior year)
   const unused = Math.max(prevYearAccrued - sickLeaveUsedHours, 0);
