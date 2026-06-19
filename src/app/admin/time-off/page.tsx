@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuCalendarPlus,
@@ -112,11 +113,17 @@ function calculatePolicyBalance(hireDate: string, monthlyAccrual: number): numbe
   // Not yet eligible
   if (TODAY < accrualStart) return 0;
 
-  // Count how many months have started since accrualStart (inclusive of current month
-  // only if TODAY is on or after the 1st of that month — which is always true since
-  // accrualStart is already a 1st-of-month and calendarMonthDiff counts full months)
-  const todayFirstOfMonth = new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);
-  const monthsAccrued = calendarMonthDiff(accrualStart, todayFirstOfMonth);
+  // A month's leave is credited on the LAST day of that month.
+  // e.g. July accrual is credited on July 31, not Aug 1.
+  // Last day of the current month = new Date(year, month+1, 0).
+  // If today has not yet reached the last day of the current month, only months up to
+  // last month are fully credited. If today IS the last day of the current month,
+  // the current month is also credited.
+  const lastDayOfCurrentMonth = new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 0);
+  const creditThroughMonth = TODAY >= lastDayOfCurrentMonth
+    ? new Date(TODAY.getFullYear(), TODAY.getMonth() + 1, 1)  // include current month
+    : new Date(TODAY.getFullYear(), TODAY.getMonth(), 1);      // exclude current month
+  const monthsAccrued = calendarMonthDiff(accrualStart, creditThroughMonth);
 
   return roundBalance(monthsAccrued * monthlyAccrual);
 }
@@ -255,6 +262,7 @@ const REVIEW_ICON: Record<RequestDecision, React.ReactNode> = {
 };
 
 export default function TimeOffPage() {
+  const router = useRouter();
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [loading, setLoading]         = useState(true);
   const [loadError, setLoadError]     = useState("");
@@ -268,7 +276,7 @@ export default function TimeOffPage() {
   const [editReason,    setEditReason]    = useState("");
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
-  const [modalTab,      setModalTab]      = useState<"details" | "history">("details");
+  const [modalTab,      setModalTab]      = useState<"details" | "history" | "info">("details");
   // Tracks how many advance hours have been granted per row (in-session only)
   const [advanceGrants, setAdvanceGrants] = useState<Record<string, { sick: number; pto: number }>>({});
 
@@ -456,18 +464,21 @@ export default function TimeOffPage() {
 
               {/* Tabs */}
               <div className="flex border-b border-slate-100 px-6">
-                {(["details", "history"] as const).map((tab) => (
+                {([
+                  { key: "info",    label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
+                  { key: "details", label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
+                  { key: "history", label: `History (${employeeHistory.length})`, icon: <LuHistory size={13} /> },
+                ] as const).map(({ key, label, icon }) => (
                   <button
-                    key={tab}
-                    onClick={() => setModalTab(tab)}
-                    className={`flex items-center gap-1.5 px-4 py-3 text-xs font-semibold capitalize border-b-2 transition-colors ${
-                      modalTab === tab
+                    key={key}
+                    onClick={() => setModalTab(key)}
+                    className={`flex items-center gap-1.5 px-3 py-3 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap ${
+                      modalTab === key
                         ? "border-[#003527] text-[#003527]"
                         : "border-transparent text-slate-400 hover:text-slate-600"
                     }`}
                   >
-                    {tab === "details" ? <LuCalendarPlus size={13} /> : <LuHistory size={13} />}
-                    {tab === "details" ? "Advance Leave Request" : `History (${employeeHistory.length})`}
+                    {icon}{label}
                   </button>
                 ))}
               </div>
@@ -475,7 +486,86 @@ export default function TimeOffPage() {
               {/* Body */}
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-                {modalTab === "details" ? (() => {
+                {modalTab === "info" ? (
+                  /* ── Contractor Time-Off Detail tab ── */
+                  <div className="space-y-4">
+                    {/* Info fields grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                      {([
+                        ["Role",           selectedRow.role        || "—"],
+                        ["Hire Date",      fmtDate(selectedRow.hireDate)],
+                        ["Status Request", selectedRow.requestStatus === "-" ? "—" : selectedRow.requestStatus],
+                        ["Request Hours",  selectedRow.latestRequest ? `${fmtBalance(selectedRow.latestRequest.days * HOURS_PER_DAY)}h` : "—"],
+                        ["Review Status",  currentStatus === "-" ? "—" : currentStatus],
+                        ["Request ID",     selectedRow.latestRequest?.id ?? "—"],
+                        ["Request From",   selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.from) : "—"],
+                        ["Request To",     selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.to)   : "—"],
+                        ["Request Reason", selectedRow.latestRequest?.reason ?? "—"],
+                      ] as [string, string][]).map(([label, value]) => (
+                        <div key={label} className={`bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 ${label === "Request Reason" ? "col-span-2" : ""}`}>
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+                          <p className="text-sm font-medium text-slate-700 mt-0.5 break-words">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* PTO section */}
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          ["PTO Balance",   `${fmtBalance(selectedRow.ptoBalance)}h`,   "teal"],
+                          ["PTO Used",      `${fmtBalance(selectedRow.ptoUsed)}h`,       "teal"],
+                          ["PTO Available", `${fmtBalance(selectedRow.ptoAvailable)}h`,  "teal"],
+                        ] as [string, string, string][]).map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
+                            <p className="text-lg font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Sick Leave section */}
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          ["Sick Leave Balance",   `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
+                          ["Sick Leave Used",      `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
+                          ["Sick Leave Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
+                        ] as [string, string][]).map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wider">{label}</p>
+                            <p className="text-lg font-bold text-orange-700 mt-0.5 tabular-nums">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Current review status */}
+                    <div className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Current Review Status</p>
+                        {currentStatus === "-" ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No request</span>
+                        ) : (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[currentStatus]}`}>
+                            {REVIEW_ICON[currentStatus]}
+                            {currentStatus}
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => router.push(`/admin/time-off/${selectedRow.id}`)}
+                        title="View all requests"
+                        className="p-1 rounded-lg hover:bg-slate-200 transition-colors"
+                      >
+                        <LuEye size={24} className="text-slate-300 hover:text-[#003527]" />
+                      </button>
+                    </div>
+                  </div>
+                ) : modalTab === "details" ? (() => {
                   // Contractor is eligible for advance leave only if they have NO regular balance yet
                   const hasNoPtoBalance    = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
                   const hasNoSickBalance   = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
@@ -681,37 +771,10 @@ export default function TimeOffPage() {
               </div>
 
               {/* Footer actions */}
-              <div className="shrink-0 px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
-                {/* Revert — only shown when a decision has been made */}
-                <div>
-                  {isDecided && (
-                    <button
-                      onClick={revertSelectedRequest}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-slate-500 hover:text-amber-700 hover:bg-amber-50 border border-slate-200 hover:border-amber-200 rounded-lg transition-colors"
-                    >
-                      <LuRotateCcw size={14} strokeWidth={2} />
-                      Revert to Pending
-                    </button>
-                  )}
-                </div>
-
+              <div className="shrink-0 px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
                 <div className="flex items-center gap-3">
                   <button onClick={() => setSelectedRowId(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                     Close
-                  </button>
-                  <button
-                    onClick={() => setSelectedRequestDecision("Declined")}
-                    disabled={!selectedRow.latestRequest || currentStatus === "Declined"}
-                    className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
-                  >
-                    <LuCircleX size={15} strokeWidth={2} /> Decline
-                  </button>
-                  <button
-                    onClick={() => setSelectedRequestDecision("Approved")}
-                    disabled={!selectedRow.latestRequest || currentStatus === "Approved"}
-                    className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm disabled:opacity-40 flex items-center gap-2"
-                  >
-                    <LuCircleCheck size={15} strokeWidth={2} /> Approve
                   </button>
                 </div>
               </div>
@@ -965,7 +1028,7 @@ export default function TimeOffPage() {
                     <button
                       onClick={() => {
                         setSelectedRowId(row.id);
-                        setModalTab("details");
+                        setModalTab("info");
                         setEditLeaveType("Advance Sick Leave");
                         setEditHours("");
                         setEditFrom("");
