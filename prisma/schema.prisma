@@ -1,7 +1,9 @@
 // Prisma schema — Our World Energy Contractor Suite
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "native" for local; rhel-openssl-3.0.x for Netlify/AWS Lambda functions
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -228,4 +230,103 @@ model ContractorProfile {
   worksnapId        String   @default("")
 
   @@map("contractor_profiles")
+}
+
+// ── Worksnaps sync + attendance (tables already exist via migrations) ───
+
+enum TimeOffKind {
+  HO_HOLIDAY
+  PTO
+  SICK_LEAVE_HALF_DAY
+  PTO_HALF_DAY
+  OPEN
+  NOT_SET
+}
+
+enum AttendanceRequestStatus {
+  APPROVED
+  REJECTED
+  OPEN
+  NOT_SET
+}
+
+/// Worksnap time-tracking detail — one row per user × project × task × date × type.
+model WorksnapEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  worksnapUserId Int
+  email          String   @default("")
+  userName       String
+  projectId      Int
+  projectName    String
+  taskId         Int      @default(0)
+  taskName       String   @default("")
+  category       String   @default("Work")
+  type           String
+  entryDate      DateTime @db.Date
+  durationMins   Int
+  syncedAt       DateTime @default(now())
+
+  @@unique([worksnapUserId, projectId, taskId, entryDate, type], name: "worksnap_natural_key")
+  @@index([entryDate])
+  @@index([worksnapUserId, entryDate])
+  @@index([projectId, entryDate])
+  @@index([email, entryDate])
+  @@map("worksnap_entries")
+}
+
+/// Per-user per-task per-week rollup, derived from worksnap_entries.
+model WorksnapWeeklyTask {
+  id             String   @id @default(uuid()) @db.Uuid
+  worksnapUserId Int
+  email          String   @default("")
+  userName       String
+  weekStart      DateTime @db.Date
+  projectId      Int
+  projectName    String
+  taskId         Int      @default(0)
+  taskName       String   @default("")
+  category       String   @default("Work")
+  totalMins      Int      @default(0)
+  daysLogged     Int      @default(0)
+  syncedAt       DateTime @default(now())
+
+  @@unique([worksnapUserId, weekStart, projectId, taskId], name: "worksnap_weekly_task_key")
+  @@index([weekStart])
+  @@index([email, weekStart])
+  @@map("worksnap_weekly_task")
+}
+
+/// Per-employee per-week attendance workflow status (request status set by admin).
+model AttendanceWeekStatus {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  worksnapUserId       Int
+  email                String                  @default("")
+  weekStart            DateTime                @db.Date
+  timeOffStatus        TimeOffKind             @default(NOT_SET)
+  requestStatus        AttendanceRequestStatus @default(NOT_SET)
+  manualAdjustmentTime Int                     @default(0)
+  note                 String?
+  updatedAt            DateTime                @updatedAt @default(now())
+
+  @@unique([worksnapUserId, weekStart], name: "attendance_week_key")
+  @@index([weekStart])
+  @@index([email, weekStart])
+  @@map("attendance_week_status")
+}
+
+/// Per-employee per-DAY time-off + manual adjustment (admin picks the date).
+model AttendanceDayStatus {
+  id                   String      @id @default(uuid()) @db.Uuid
+  worksnapUserId       Int
+  email                String      @default("")
+  date                 DateTime    @db.Date
+  timeOffStatus        TimeOffKind @default(NOT_SET)
+  manualAdjustmentTime Int         @default(0)
+  note                 String?
+  updatedAt            DateTime    @updatedAt @default(now())
+
+  @@unique([worksnapUserId, date], name: "attendance_day_key")
+  @@index([date])
+  @@index([email, date])
+  @@map("attendance_day_status")
 }
