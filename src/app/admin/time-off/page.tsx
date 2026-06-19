@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuFileText, LuCalendarPlus,
+  LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuCalendarPlus,
 } from "react-icons/lu";
 import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 import { fetchAllContractors } from "../contractors/actions";
@@ -258,16 +258,19 @@ export default function TimeOffPage() {
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [loading, setLoading]         = useState(true);
   const [loadError, setLoadError]     = useState("");
-  const [countryFilter, setCountryFilter]       = useState("All Countries");
-  const [departmentFilter, setDepartmentFilter] = useState("All Departments");
+  const [countryFilter, setCountryFilter]         = useState("All Countries");
+  const [departmentFilter, setDepartmentFilter]   = useState("All Departments");
+  const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
   const [selectedRowId, setSelectedRowId]       = useState<string | null>(null);
   const [requestDecisions, setRequestDecisions] = useState<RequestDecisionMap>({});
-  const [editStatus,  setEditStatus]  = useState("PTO Leave");
-  const [editHours,   setEditHours]   = useState("");
-  const [editReason,  setEditReason]  = useState("");
-  const [editFrom,    setEditFrom]    = useState("");
-  const [editTo,      setEditTo]      = useState("");
-  const [modalTab,    setModalTab]    = useState<"details" | "history">("details");
+  const [editLeaveType, setEditLeaveType] = useState<"Advance Sick Leave" | "Advance PTO/Birthday Leave">("Advance Sick Leave");
+  const [editHours,     setEditHours]     = useState("");
+  const [editReason,    setEditReason]    = useState("");
+  const [editFrom,      setEditFrom]      = useState("");
+  const [editTo,        setEditTo]        = useState("");
+  const [modalTab,      setModalTab]      = useState<"details" | "history">("details");
+  // Tracks how many advance hours have been granted per row (in-session only)
+  const [advanceGrants, setAdvanceGrants] = useState<Record<string, { sick: number; pto: number }>>({});
 
   useEffect(() => {
     let active = true;
@@ -289,34 +292,53 @@ export default function TimeOffPage() {
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
     const latestRequest = latestRequestFor(fullName);
-    const ptoBalance = calculatePtoBalance(c.hireDate);
+    const ptoBalance      = calculatePtoBalance(c.hireDate);
     const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
-    const ptoUsed = approvedHoursFor(fullName, "Annual Leave", requestDecisions);
-    const sickLeaveUsed = approvedHoursFor(fullName, "Sick Leave", requestDecisions);
+    const ptoUsed        = approvedHoursFor(fullName, "Annual Leave", requestDecisions);
+    const sickLeaveUsed  = approvedHoursFor(fullName, "Sick Leave",  requestDecisions);
+
+    // Total advance hours granted this session
+    const advancePtoGranted  = calculateBirthdayLeave(c.hireDate)    + (advanceGrants[c.uid]?.pto  ?? 0);
+    const advanceSickGranted = calculateAdvanceSickLeave(c.hireDate) + (advanceGrants[c.uid]?.sick ?? 0);
+
+    // Each month of accrual first repays the advance debt before building usable balance.
+    // Remaining debt = max(advanceGranted - accrualBalance, 0)
+    // i.e. once accrual >= advance, the debt is fully covered.
+    const advancePtoDebt  = Math.max(advancePtoGranted  - ptoBalance,       0);
+    const advanceSickDebt = Math.max(advanceSickGranted - sickLeaveBalance, 0);
+
+    // PTO available: balance minus used minus any still-outstanding advance PTO debt
+    const ptoAvailable = roundBalance(Math.max(ptoBalance - ptoUsed - advancePtoDebt, 0));
+
+    // Sick Leave available: balance minus used minus still-outstanding advance sick debt
+    // AND minus any still-outstanding advance PTO/birthday debt (per spec)
+    const sickLeaveAvailable = roundBalance(
+      Math.max(sickLeaveBalance - sickLeaveUsed - advanceSickDebt - advancePtoDebt, 0)
+    );
+
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, role: c.role, hireDate: c.hireDate,
       requestStatus: "PTO Leave",
       reviewStatus: latestRequest ? effectiveRequestStatus(latestRequest, requestDecisions) : "-",
-      latestRequest, ptoBalance, ptoUsed,
-      ptoAvailable: roundBalance(Math.max(ptoBalance - ptoUsed, 0)),
-      sickLeaveBalance, sickLeaveUsed,
-      sickLeaveAvailable: roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0)),
-      birthdayLeave: calculateBirthdayLeave(c.hireDate),
-      advanceSickLeave: calculateAdvanceSickLeave(c.hireDate),
-      unusedSickLeave: calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
+      latestRequest, ptoBalance, ptoUsed, ptoAvailable,
+      sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
+      birthdayLeave:    advancePtoGranted,
+      advanceSickLeave: advanceSickGranted,
+      unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
     };
-  }), [contractors, requestDecisions]);
+  }), [contractors, requestDecisions, advanceGrants]);
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = countryFilter !== "All Countries" || departmentFilter !== "All Departments";
+  const filtersActive = countryFilter !== "All Countries" || departmentFilter !== "All Departments" || reviewStatusFilter !== "All Statuses";
 
   const filteredRows = rows.filter((r) => {
-    const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
-    const dm = departmentFilter === "All Departments" || (r.department || "Unassigned") === departmentFilter;
-    return cm && dm;
+    const cm = countryFilter      === "All Countries"   || r.country === countryFilter;
+    const dm = departmentFilter   === "All Departments" || (r.department || "Unassigned") === departmentFilter;
+    const sm = reviewStatusFilter === "All Statuses"    || r.reviewStatus === reviewStatusFilter;
+    return cm && dm && sm;
   });
 
   const visibleNames   = new Set(filteredRows.map((r) => r.fullName));
@@ -351,7 +373,7 @@ export default function TimeOffPage() {
       "Name", "Country", "Department", "Hire Date",
       "PTO Balance (h)", "PTO Used (h)", "PTO Available (h)",
       "Sick Balance (h)", "Sick Used (h)", "Sick Available (h)",
-      "Birthday Leave (h)", "Advance Sick Leave (h)", "Unused Sick Leave (h)",
+      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
       "Review Status",
     ];
     const csvRows = [
@@ -361,7 +383,7 @@ export default function TimeOffPage() {
           `"${r.fullName}"`, `"${r.country}"`, `"${r.department || "Unassigned"}"`, r.hireDate,
           r.ptoBalance, r.ptoUsed, r.ptoAvailable,
           r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
-          r.birthdayLeave, r.advanceSickLeave, r.unusedSickLeave,
+          r.birthdayLeave, r.advanceSickLeave,
           `"${r.reviewStatus === "-" ? "No Request" : r.reviewStatus}"`,
         ].join(",")
       ),
@@ -379,7 +401,7 @@ export default function TimeOffPage() {
     "Employee", "Country", "Department", "Hire Date",
     "PTO Balance", "PTO Used", "PTO Available",
     "Sick Balance", "Sick Used", "Sick Available",
-    "Birthday Leave", "Advance Sick Leave", "Unused Sick Leave",
+    "Advance PTO/Birthday Leave", "Advance Sick Leave",
     "Review Status", "Action",
   ];
 
@@ -444,8 +466,8 @@ export default function TimeOffPage() {
                         : "border-transparent text-slate-400 hover:text-slate-600"
                     }`}
                   >
-                    {tab === "details" ? <LuFileText size={13} /> : <LuHistory size={13} />}
-                    {tab === "details" ? "Details & Request" : `History (${employeeHistory.length})`}
+                    {tab === "details" ? <LuCalendarPlus size={13} /> : <LuHistory size={13} />}
+                    {tab === "details" ? "Advance Leave Request" : `History (${employeeHistory.length})`}
                   </button>
                 ))}
               </div>
@@ -453,30 +475,51 @@ export default function TimeOffPage() {
               {/* Body */}
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
-                {modalTab === "details" ? (<>
-                  {/* Additional leave balances */}
-                  <div className="grid grid-cols-3 gap-2">
+                {modalTab === "details" ? (() => {
+                  // Contractor is eligible for advance leave only if they have NO regular balance yet
+                  const hasNoPtoBalance    = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
+                  const hasNoSickBalance   = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
+                  const advanceEligible    = hasNoPtoBalance && hasNoSickBalance;
+                  const isPto = editLeaveType === "Advance PTO/Birthday Leave";
+
+                  function applyAdvanceGrant() {
+                    const hoursToAdd = isPto ? 8 : (parseFloat(editHours) || 0);
+                    if (!isPto && hoursToAdd <= 0) return;
+                    setAdvanceGrants((cur) => {
+                      const prev = cur[selectedRow.id] ?? { sick: 0, pto: 0 };
+                      return {
+                        ...cur,
+                        [selectedRow.id]: {
+                          sick: prev.sick + (isPto ? 0 : hoursToAdd),
+                          pto:  prev.pto  + (isPto ? 8 : 0),
+                        },
+                      };
+                    });
+                    if (!isPto) setEditHours("");
+                  }
+
+                  return (<>
+                  {/* Leave balance cards */}
+                  <div className="grid grid-cols-2 gap-2">
                     <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
-                      <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Birthday Leave</p>
+                      <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
                       <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
-                        {selectedRow.birthdayLeave > 0 ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></> : <span className="text-sm text-pink-300">Not eligible</span>}
+                        {selectedRow.birthdayLeave > 0
+                          ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
+                          : <span className="text-sm text-pink-300">Not eligible</span>}
                       </p>
                     </div>
                     <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
                       <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
                       <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
-                        {selectedRow.advanceSickLeave > 0 ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></> : <span className="text-sm text-blue-300">Not eligible</span>}
-                      </p>
-                    </div>
-                    <div className="bg-amber-50 rounded-xl border border-amber-200 px-3 py-2.5">
-                      <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Unused Sick Leave</p>
-                      <p className="text-xl font-black text-amber-700 leading-tight mt-0.5">
-                        {selectedRow.unusedSickLeave > 0 ? <>{fmtBalance(selectedRow.unusedSickLeave)}<span className="text-xs font-semibold ml-0.5 text-amber-400">hrs</span></> : <span className="text-sm text-amber-300">—</span>}
+                        {selectedRow.advanceSickLeave > 0
+                          ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></>
+                          : <span className="text-sm text-blue-300">Not eligible</span>}
                       </p>
                     </div>
                   </div>
 
-                  {/* Info grid */}
+                  {/* Contractor info */}
                   <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Contractor Info</p>
                     <div className="grid grid-cols-2 gap-2">
@@ -492,92 +535,111 @@ export default function TimeOffPage() {
                     </div>
                   </div>
 
-                  {/* Time-Off Request form */}
+                  {/* Advance Leave Request */}
                   <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                      <LuCalendarPlus size={13} /> Time-Off Request
+                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                      <LuCalendarPlus size={13} /> Advance Leave Request
                     </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {/* Leave Type */}
-                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Type</p>
-                        <select
-                          value={editStatus}
-                          onChange={(e) => setEditStatus(e.target.value)}
-                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+
+                    {!advanceEligible ? (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
+                        <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Advance leave is only available to contractors who have <strong>no regular PTO or sick leave balance</strong>. This contractor has an existing leave balance and is not eligible for advance leave.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          {/* Advance Leave Type */}
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
+                            <select
+                              value={editLeaveType}
+                              onChange={(e) => {
+                                setEditLeaveType(e.target.value as typeof editLeaveType);
+                                setEditHours("");
+                              }}
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            >
+                              <option value="Advance Sick Leave">Advance Sick Leave</option>
+                              <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>
+                            </select>
+                          </div>
+
+                          {/* Request Hours — only for Advance Sick Leave */}
+                          {!isPto && (
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                                Request Hours <span className="text-red-400">*</span>
+                              </p>
+                              <input
+                                type="number"
+                                min="1"
+                                value={editHours}
+                                onChange={(e) => setEditHours(e.target.value)}
+                                placeholder="Enter hours e.g. 8"
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                              />
+                            </div>
+                          )}
+
+                          {/* PTO auto-note */}
+                          {isPto && (
+                            <div className="col-span-2 rounded-lg bg-pink-50 border border-pink-200 px-3 py-2 text-xs text-pink-700">
+                              <strong>Auto:</strong> 8 hours will be added to the Advance PTO/Birthday Leave balance upon apply.
+                            </div>
+                          )}
+
+                          {/* From date */}
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">From Date</p>
+                            <input
+                              type="date"
+                              value={editFrom}
+                              onChange={(e) => setEditFrom(e.target.value)}
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            />
+                          </div>
+
+                          {/* To date */}
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">To Date</p>
+                            <input
+                              type="date"
+                              value={editTo}
+                              onChange={(e) => setEditTo(e.target.value)}
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Reason */}
+                        <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
+                          <textarea
+                            value={editReason}
+                            onChange={(e) => setEditReason(e.target.value)}
+                            placeholder="Enter reason for advance leave request..."
+                            rows={2}
+                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                          />
+                        </div>
+
+                        {/* Apply button */}
+                        <button
+                          onClick={applyAdvanceGrant}
+                          disabled={!isPto && (!editHours || parseFloat(editHours) <= 0)}
+                          className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
                         >
-                          <option>PTO Leave</option>
-                          <option>Sick Leave</option>
-                          <option>Half Day Off</option>
-                        </select>
+                          <LuCircleCheck size={15} strokeWidth={2} />
+                          Apply Advance Leave
+                        </button>
                       </div>
-
-                      {/* Request Hours */}
-                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Request Hours</p>
-                        <input
-                          type="text"
-                          value={editHours}
-                          onChange={(e) => setEditHours(e.target.value)}
-                          placeholder="e.g. 8"
-                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-
-                      {/* From date */}
-                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">From Date</p>
-                        <input
-                          type="date"
-                          value={editFrom}
-                          onChange={(e) => setEditFrom(e.target.value)}
-                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-
-                      {/* To date */}
-                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">To Date</p>
-                        <input
-                          type="date"
-                          value={editTo}
-                          onChange={(e) => setEditTo(e.target.value)}
-                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Reason */}
-                    <div className="mt-2 bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                      <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
-                      <textarea
-                        value={editReason}
-                        onChange={(e) => setEditReason(e.target.value)}
-                        placeholder="Enter reason for time-off request..."
-                        rows={3}
-                        className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-                      />
-                    </div>
+                    )}
                   </div>
-
-                  {/* Current review status */}
-                  <div className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Review Status</p>
-                      <div className="mt-1.5">
-                        {currentStatus === "-" ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No request</span>
-                        ) : (
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[currentStatus]}`}>
-                            {REVIEW_ICON[currentStatus]}
-                            {currentStatus}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <LuCalendarDays size={28} className="text-slate-200" />
-                  </div>
-                </>) : (
+                  </>);
+                })() : (
                   /* History tab */
                   <div>
                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">All Time-Off Requests</p>
@@ -733,9 +795,22 @@ export default function TimeOffPage() {
           {departmentOptions.map((d) => <option key={d}>{d}</option>)}
         </select>
 
+        <select
+          value={reviewStatusFilter}
+          onChange={(e) => setReviewStatusFilter(e.target.value)}
+          disabled={loading}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+        >
+          <option value="All Statuses">All Statuses</option>
+          <option value="Pending">Pending</option>
+          <option value="Approved">Approved</option>
+          <option value="Declined">Declined</option>
+          <option value="-">No Request</option>
+        </select>
+
         {filtersActive && (
           <button
-            onClick={() => { setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); }}
+            onClick={() => { setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
             title="Clear filters"
           >
@@ -764,7 +839,7 @@ export default function TimeOffPage() {
         <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
           <table
             className="w-full text-left"
-            style={{ minWidth: "1960px", borderCollapse: "separate", borderSpacing: 0 }}
+            style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}
           >
             <thead>
               <tr style={{ background: "#003527" }}>
@@ -860,20 +935,16 @@ export default function TimeOffPage() {
                     </div>
                   </td>
 
-                  {/* Birthday / Advance Sick / Unused Sick */}
+                  {/* Advance PTO/Birthday Leave */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                     {row.birthdayLeave > 0
                       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
                       : <span className="text-slate-300">—</span>}
                   </td>
+                  {/* Advance Sick Leave */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                     {row.advanceSickLeave > 0
                       ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">{fmtBalance(row.advanceSickLeave)}h</span>
-                      : <span className="text-slate-300">—</span>}
-                  </td>
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                    {row.unusedSickLeave > 0
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">{fmtBalance(row.unusedSickLeave)}h</span>
                       : <span className="text-slate-300">—</span>}
                   </td>
 
@@ -895,11 +966,11 @@ export default function TimeOffPage() {
                       onClick={() => {
                         setSelectedRowId(row.id);
                         setModalTab("details");
-                        setEditStatus(row.requestStatus === "-" ? "PTO Leave" : row.requestStatus);
-                        setEditHours(row.latestRequest ? String(row.latestRequest.days * HOURS_PER_DAY) : "");
-                        setEditFrom(row.latestRequest?.from ?? "");
-                        setEditTo(row.latestRequest?.to ?? "");
-                        setEditReason(row.latestRequest?.reason ?? "");
+                        setEditLeaveType("Advance Sick Leave");
+                        setEditHours("");
+                        setEditFrom("");
+                        setEditTo("");
+                        setEditReason("");
                       }}
                       title="View details"
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
