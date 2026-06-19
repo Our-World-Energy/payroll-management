@@ -152,7 +152,10 @@ function rowToContractor(data: Record<string, string>): Contractor {
     monthlyRate:   monthly             || "—",
     weeklyRate:    weekly,
     hourlyRate:    hourly,
-    dismissalDate: data.status === "Dismissed" ? (data.dismissal_date ?? "") : "",
+    dismissalDate:      data.status === "Dismissed" ? (data.dismissal_date   ?? "") : "",
+    dismissalReason:    data.status === "Dismissed" ? (data.dismissal_reason ?? "") : "",
+    equipmentProvided:  data.equipment_provided === "yes" || data.equipment_provided === "true",
+    worksnapId:         String(data.worksnap_id ?? ""),
   };
 }
 
@@ -213,7 +216,7 @@ export function ImportContractorsModal({ onClose, onImport }: Props) {
   function toggleExpand(row: number) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(row) ? next.delete(row) : next.add(row);
+      if (next.has(row)) { next.delete(row); } else { next.add(row); }
       return next;
     });
   }

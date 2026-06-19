@@ -58,11 +58,15 @@ const DEFAULT_DEPT_TREE: DeptTree = {
   },
 };
 
+const DEFAULT_MANAGERS = ["Colten Warnock", "Dillard Blanton"];
+
 type ContractorConfig = {
   officeLocations: string[];
   setOfficeLocations: (v: string[]) => void;
   deptTree: DeptTree;
   setDeptTree: (v: DeptTree) => void;
+  managers: string[];
+  setManagers: (v: string[]) => void;
 };
 
 const ContractorConfigContext = createContext<ContractorConfig>({
@@ -70,14 +74,17 @@ const ContractorConfigContext = createContext<ContractorConfig>({
   setOfficeLocations: () => {},
   deptTree: DEFAULT_DEPT_TREE,
   setDeptTree: () => {},
+  managers: DEFAULT_MANAGERS,
+  setManagers: () => {},
 });
 
 export function ContractorConfigProvider({ children }: { children: React.ReactNode }) {
   const [officeLocations, setOfficeLocations] = useState<string[]>(DEFAULT_OFFICE_LOCATIONS);
   const [deptTree, setDeptTree]               = useState<DeptTree>(DEFAULT_DEPT_TREE);
+  const [managers, setManagers]               = useState<string[]>(DEFAULT_MANAGERS);
 
   return (
-    <ContractorConfigContext.Provider value={{ officeLocations, setOfficeLocations, deptTree, setDeptTree }}>
+    <ContractorConfigContext.Provider value={{ officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers }}>
       {children}
     </ContractorConfigContext.Provider>
   );

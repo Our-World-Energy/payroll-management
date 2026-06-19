@@ -28,6 +28,9 @@ export type Contractor = {
   shiftType: string;
   createdOn: string;
   dismissalDate: string;
+  dismissalReason: string;
+  equipmentProvided: boolean;
+  worksnapId: string;
 };
 
 export type ColumnDef = {
@@ -63,7 +66,10 @@ export const COLUMNS: ColumnDef[] = [
   { key: "manager",        label: "Manager",         type: "string" },
   { key: "payPeriod",      label: "Pay Period",      type: "string" },
   { key: "createdOn",      label: "Created On",      type: "date"   },
-  { key: "dismissalDate", label: "Dismissal Date",  type: "date"   },
+  { key: "dismissalDate",   label: "Dismissal Date",   type: "date"   },
+  { key: "dismissalReason",    label: "Dismissal Reason",    type: "string" },
+  { key: "equipmentProvided", label: "Equipment Provided", type: "string" },
+  { key: "worksnapId",        label: "Worksnap ID",        type: "string" },
 ];
 
 export type FilterRule = {

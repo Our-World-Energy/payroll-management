@@ -192,111 +192,40 @@ model Activity {
   @@map("activity_log")
 }
 
-/// Worksnap time-tracking data, synced from the Worksnaps manager_report API.
-/// One row per user × project × task × date × type (the granularity of the
-/// summary report line items). Re-syncs upsert on the natural key below.
-model WorksnapEntry {
-  id             String   @id @default(uuid()) @db.Uuid
-  worksnapUserId Int // Worksnaps user id
-  email          String   @default("") // join key → Profile.email (platform user)
-  userName       String
-  projectId      Int
-  projectName    String
-  taskId         Int      @default(0)
-  taskName       String   @default("")
-  category       String   @default("Work") // Work | Break | Meeting/Training
-  type           String // online | offline
-  entryDate      DateTime @db.Date
-  durationMins   Int // duration_in_minutes
-  syncedAt       DateTime @default(now())
+model ContractorProfile {
+  id                String   @id @default(uuid()) @db.Uuid
+  uid               String   @unique
+  firstName         String   @default("")
+  middleName        String   @default("")
+  surname           String   @default("")
+  fullName          String   @default("")
+  avatar            String   @default("")
+  dob               String   @default("")
+  gender            String   @default("Not Specified")
+  contractorId      String   @default("")
+  department        String   @default("")
+  subDepartment     String   @default("")
+  role              String   @default("")
+  location          String   @default("")
+  status            String   @default("Active")
+  hireDate          String   @default("")
+  officeLocation    String   @default("")
+  currency          String   @default("USD")
+  monthlyRate       String   @default("")
+  weeklyRate        String   @default("")
+  hourlyRate        String   @default("")
+  email             String   @default("")
+  payCategory       String   @default("")
+  shiftHours        String   @default("")
+  restDay           String   @default("")
+  manager           String   @default("")
+  payPeriod         String   @default("Sunday – Saturday")
+  shiftType         String   @default("Fixed")
+  createdOn         String   @default("")
+  dismissalDate     String   @default("")
+  dismissalReason   String   @default("")
+  equipmentProvided Boolean  @default(false)
+  worksnapId        String   @default("")
 
-  @@unique([worksnapUserId, projectId, taskId, entryDate, type], name: "worksnap_natural_key")
-  @@index([entryDate])
-  @@index([worksnapUserId, entryDate])
-  @@index([projectId, entryDate])
-  @@index([email, entryDate])
-  @@map("worksnap_entries")
-}
-
-/// Per-user per-task per-week rollup, DERIVED from worksnap_entries (one row per
-/// user × project × task × week). Preserves the actual task each user worked on,
-/// with its category — so Work/Break/Meeting totals are a GROUP BY away and no
-/// separate category rollup is needed. The sync rebuilds the synced window's
-/// weeks on every run (delete + re-insert), so it exactly mirrors the detail
-/// table — no stale rows. Keyed on worksnapUserId (not email) so users without a
-/// mapped Profile email are never dropped.
-model WorksnapWeeklyTask {
-  id             String   @id @default(uuid()) @db.Uuid
-  worksnapUserId Int
-  email          String   @default("") // join key → Profile.email (may be empty)
-  userName       String
-  weekStart      DateTime @db.Date // Monday of the week
-  projectId      Int
-  projectName    String
-  taskId         Int      @default(0)
-  taskName       String   @default("")
-  category       String   @default("Work") // Work | Break | Meeting/Training
-  totalMins      Int      @default(0)
-  daysLogged     Int      @default(0)
-  syncedAt       DateTime @default(now())
-
-  @@unique([worksnapUserId, weekStart, projectId, taskId], name: "worksnap_weekly_task_key")
-  @@index([weekStart])
-  @@index([email, weekStart])
-  @@map("worksnap_weekly_task")
-}
-
-enum TimeOffKind {
-  HO_HOLIDAY          // HO / Holiday
-  PTO
-  SICK_LEAVE_HALF_DAY
-  PTO_HALF_DAY
-  OPEN
-  NOT_SET
-}
-
-enum AttendanceRequestStatus {
-  APPROVED
-  REJECTED
-  OPEN
-  NOT_SET
-}
-
-/// Per-employee per-week attendance workflow status, set by admins from the
-/// attendance view. Keyed on worksnapUserId + weekStart (Sunday). `email` is
-/// kept for convenience / joining to Profile.
-model AttendanceWeekStatus {
-  id             String                  @id @default(uuid()) @db.Uuid
-  worksnapUserId Int
-  email          String                  @default("")
-  weekStart      DateTime                @db.Date
-  timeOffStatus        TimeOffKind             @default(NOT_SET)
-  requestStatus        AttendanceRequestStatus @default(NOT_SET)
-  manualAdjustmentTime Int                     @default(0) // ± minutes
-  note                 String?                             // manual_adjustment_note
-  updatedAt            DateTime                @updatedAt @default(now())
-
-  @@unique([worksnapUserId, weekStart], name: "attendance_week_key")
-  @@index([weekStart])
-  @@index([email, weekStart])
-  @@map("attendance_week_status")
-}
-
-/// Per-employee per-DAY time-off + manual adjustment, set from the Action popup
-/// (admin picks the date). Aggregated up to the weekly row: time_off_time and
-/// manual_adjustment_time are sums across the week's days.
-model AttendanceDayStatus {
-  id                   String      @id @default(uuid()) @db.Uuid
-  worksnapUserId       Int
-  email                String      @default("")
-  date                 DateTime    @db.Date
-  timeOffStatus        TimeOffKind @default(NOT_SET)
-  manualAdjustmentTime Int         @default(0)
-  note                 String?
-  updatedAt            DateTime    @updatedAt @default(now())
-
-  @@unique([worksnapUserId, date], name: "attendance_day_key")
-  @@index([date])
-  @@index([email, date])
-  @@map("attendance_day_status")
+  @@map("contractor_profiles")
 }

@@ -54,6 +54,7 @@ export function AdminSidebar() {
               key={href}
               href={href}
               onClick={close}
+              prefetch={true}
               className={[
                 "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-all rounded-lg",
                 active

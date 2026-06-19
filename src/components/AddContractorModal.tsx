@@ -20,7 +20,6 @@ const COUNTRY_STATES: Record<string, string[]> = {
 };
 const COUNTRIES = Object.keys(COUNTRY_STATES);
 
-const MANAGERS       = ["Colten Warnock", "Dillard Blanton"];
 const PAY_CATEGORIES = ["Hourly", "Fixed"];
 const CURRENCIES     = ["PHP", "INR", "MXN", "USD"];
 const STATUSES       = ["Active", "Dismissed"] as const;
@@ -38,6 +37,7 @@ for (let h = 0; h < 24; h++) {
 }
 
 // Pay period: always Sun–Sat of current week
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPayPeriod() {
   const today = new Date();
   const sun   = new Date(today); sun.setDate(today.getDate() - today.getDay());
@@ -65,7 +65,7 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
-  const { officeLocations, deptTree } = useContractorConfig();
+  const { officeLocations, deptTree, managers } = useContractorConfig();
   const DEPARTMENTS = Object.keys(deptTree);
 
   const parseLocation = (loc?: string) => {
@@ -93,7 +93,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     country:        initLoc.country,
     state:          initLoc.state,
     officeLocation: initial?.officeLocation ?? officeLocations[0],
-    manager:        initial?.manager        ?? MANAGERS[0],
+    manager:        initial?.manager        ?? managers[0] ?? "",
     hireDate:       initial?.hireDate       ?? "",
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
     payCategory:    initial?.payCategory    ?? PAY_CATEGORIES[0],
@@ -105,7 +105,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     monthlyRate:    initial?.monthlyRate    ?? "",
     weeklyRate:     initial?.weeklyRate     ?? "",
     hourlyRate:     initial?.hourlyRate     ?? "",
-    dismissalDate:  initial?.dismissalDate  ?? "",
+    dismissalDate:      initial?.dismissalDate      ?? "",
+    dismissalReason:    initial?.dismissalReason    ?? "",
+    equipmentProvided:  initial?.equipmentProvided  ?? false,
+    worksnapId:         initial?.worksnapId         ?? "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -175,7 +178,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       monthlyRate:    form.monthlyRate || "—",
       weeklyRate:     form.weeklyRate  || "—",
       hourlyRate:     form.hourlyRate  || "—",
-      dismissalDate:  form.status === "Dismissed" ? (form.dismissalDate || "") : "",
+      dismissalDate:      form.status === "Dismissed" ? (form.dismissalDate   || "") : "",
+      dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
+      equipmentProvided:  form.equipmentProvided,
+      worksnapId:         form.worksnapId,
     };
 
     onSave(contractor);
@@ -248,6 +254,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 <input type="email" className={INPUT} value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="name@company.com" />
                 {errors.email && <span className="text-xs text-red-500">{errors.email}</span>}
               </FIELD>
+
             </div>
           </section>
 
@@ -307,7 +314,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
               <FIELD label="Manager">
                 <select className={SELECT} value={form.manager} onChange={(e) => set("manager", e.target.value)}>
-                  {MANAGERS.map((m) => <option key={m}>{m}</option>)}
+                  {managers.map((m) => <option key={m}>{m}</option>)}
                 </select>
               </FIELD>
             </div>
@@ -316,47 +323,54 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           {/* ── Employment ── */}
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+
+            {/* Row 1: Hire Date · Pay Category · Pay Period */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <FIELD label="Hire Date" required>
                 <input type="date" className={INPUT} value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
                 {errors.hireDate && <span className="text-xs text-red-500">{errors.hireDate}</span>}
               </FIELD>
-
-              {/* Status: Active or Dismissed only */}
-              <FIELD label="Status">
-                <select className={SELECT} value={form.status} onChange={(e) => set("status", e.target.value as typeof STATUSES[number])}>
-                  {STATUSES.map((s) => <option key={s}>{s}</option>)}
-                </select>
-              </FIELD>
-
-              {/* Pay Category: Hourly or Fixed */}
               <FIELD label="Pay Category">
                 <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
                   {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </FIELD>
-
-              {/* Dismissal Date — only when Dismissed */}
-              {form.status === "Dismissed" && (
-                <FIELD label="Dismissal Date">
-                  <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
-                </FIELD>
-              )}
-
-              {/* Pay Period — static days only, read-only */}
               <FIELD label="Pay Period">
                 <input className={READONLY} readOnly value="Sunday – Saturday" />
               </FIELD>
+            </div>
 
-              {/* Shift Type */}
+            {/* Row 2: Status · Dismissal Date · Dismissal Reason (conditional) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <FIELD label="Status">
+                <select className={SELECT} value={form.status} onChange={(e) => set("status", e.target.value as typeof STATUSES[number])}>
+                  {STATUSES.map((s) => <option key={s}>{s}</option>)}
+                </select>
+              </FIELD>
+              {form.status === "Dismissed" && (
+                <>
+                  <FIELD label="Dismissal Date">
+                    <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
+                  </FIELD>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
+                    <textarea rows={3} className={INPUT + " resize-none"}
+                      placeholder="Describe the reason for dismissal…"
+                      value={form.dismissalReason}
+                      onChange={(e) => set("dismissalReason", e.target.value)} />
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Row 3: Shift Type · Shift Start · Shift End */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <FIELD label="Shift Type">
                 <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
                   <option value="Fixed">Fixed</option>
                   <option value="Flexible">Flexible</option>
                 </select>
               </FIELD>
-
-              {/* Shift Start / End — only shown when Fixed */}
               {form.shiftType === "Fixed" && (
                 <>
                   <FIELD label="Shift Start">
@@ -371,9 +385,30 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   </FIELD>
                 </>
               )}
+            </div>
 
-              {/* Rest Days — multi-select pill buttons */}
-              <div className="sm:col-span-3 flex flex-col gap-1.5">
+            {/* Row 4: Equipment Provided */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <FIELD label="Equipment Provided">
+                <div className="flex items-center gap-4 py-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === true}
+                      onChange={() => setForm((f) => ({ ...f, equipmentProvided: true }))}
+                      className="w-4 h-4 accent-teal-600" />
+                    <span className="text-sm text-slate-700 font-medium">Yes</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === false}
+                      onChange={() => setForm((f) => ({ ...f, equipmentProvided: false }))}
+                      className="w-4 h-4 accent-teal-600" />
+                    <span className="text-sm text-slate-700 font-medium">No</span>
+                  </label>
+                </div>
+              </FIELD>
+            </div>
+
+            {/* Rest Days */}
+            <div className="mt-4 flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Rest Days</label>
                 <div className="flex flex-wrap gap-2">
                   {WEEK_DAYS.map((day) => {
@@ -391,7 +426,6 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   })}
                 </div>
               </div>
-            </div>
           </section>
 
           {/* ── Compensation ── */}
