@@ -78,10 +78,11 @@ export default function ContractorTimeOffPage() {
 
   if (loading) {
     return (
-      <div className="p-8">
-        <div className="h-6 w-48 bg-slate-100 rounded animate-pulse mb-4" />
-        <div className="h-10 w-64 bg-slate-100 rounded animate-pulse mb-2" />
-        <div className="h-4 w-40 bg-slate-100 rounded animate-pulse" />
+      <div className="fixed inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="size-12 rounded-full border-4 border-slate-200 border-t-[#003527] animate-spin" />
+          <p className="text-sm font-medium text-slate-500">Loading...</p>
+        </div>
       </div>
     );
   }
