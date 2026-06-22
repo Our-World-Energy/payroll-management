@@ -7,6 +7,12 @@ import {
   LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle,
 } from "react-icons/lu";
 import type { Contractor, FilterRule } from "./types";
+import {
+  approvedHoursFor,
+  calculatePtoBalance,
+  calculateSickLeaveBalance,
+  fmtBalance,
+} from "@/lib/timeOffBalances";
 import { AddContractorModal } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
@@ -57,25 +63,47 @@ function fmtDate(d: string) {
   return m && day ? `${m}-${day}-${y}` : d;
 }
 
+function contractorFullName(contractor: Contractor) {
+  return contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ");
+}
+
+function getContractorTimeOff(contractor: Contractor) {
+  const fullName = contractorFullName(contractor);
+
+  return {
+    ptoBalance: calculatePtoBalance(contractor.hireDate),
+    ptoUsed: approvedHoursFor(fullName, "Annual Leave"),
+    sickLeaveBalance: calculateSickLeaveBalance(contractor.hireDate),
+    sickLeaveUsed: approvedHoursFor(fullName, "Sick Leave"),
+  };
+}
+
 // Export all filtered rows as CSV
 function exportCSV(rows: Contractor[]) {
   const headers = [
     "Unique ID","First Name","Middle Name","Surname","Full Name","DOB","Gender",
     "Contractor ID","Department","Sub-Department","Role","Location","Status",
-    "Hire Date","Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate",
+    "Hire Date","PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
+    "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate",
     "Email","Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Shift Type",
     "Equipment Provided","Created On","Dismissal Date","Dismissal Reason",
   ];
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
   const lines = [
     headers.join(","),
-    ...rows.map((c) => [
-      c.uid, c.firstName, c.middleName, c.surname, c.fullName, c.dob, c.gender,
-      c.contractorId, c.department, c.subDepartment, c.role, c.location, c.status,
-      c.hireDate, c.officeLocation, c.currency, c.monthlyRate, c.weeklyRate, c.hourlyRate,
-      c.email, c.payCategory, c.shiftHours, c.restDay, c.manager, c.payPeriod, c.shiftType,
-      c.equipmentProvided ? "Yes" : "No", c.createdOn, c.dismissalDate, c.dismissalReason,
-    ].map(escape).join(",")),
+    ...rows.map((c) => {
+      const timeOff = getContractorTimeOff(c);
+
+      return [
+        c.uid, c.firstName, c.middleName, c.surname, c.fullName, c.dob, c.gender,
+        c.contractorId, c.department, c.subDepartment, c.role, c.location, c.status,
+        c.hireDate, fmtBalance(timeOff.ptoBalance), fmtBalance(timeOff.ptoUsed),
+        fmtBalance(timeOff.sickLeaveBalance), fmtBalance(timeOff.sickLeaveUsed),
+        c.officeLocation, c.currency, c.monthlyRate, c.weeklyRate, c.hourlyRate,
+        c.email, c.payCategory, c.shiftHours, c.restDay, c.manager, c.payPeriod, c.shiftType,
+        c.equipmentProvided ? "Yes" : "No", c.createdOn, c.dismissalDate, c.dismissalReason,
+      ].map(escape).join(",");
+    }),
   ];
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
@@ -101,6 +129,7 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
 const COLS = [
   "Full Name","Date of Birth","Gender",
   "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
+  "PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
   "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
   "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Equipment Provided",
   "Created On","Dismissal Date","Dismissal Reason","Action",
@@ -418,7 +447,7 @@ export default function ContractorsPage() {
           <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
             <table
               className="w-full text-left"
-              style={{ minWidth: "2580px", borderCollapse: "separate", borderSpacing: 0 }}
+              style={{ minWidth: "3120px", borderCollapse: "separate", borderSpacing: 0 }}
             >
               <thead>
                 <tr style={{ background: "#003527" }}>
@@ -465,7 +494,10 @@ export default function ContractorsPage() {
                       }
                     </td>
                   </tr>
-                ) : rows.map((c) => (
+                ) : rows.map((c) => {
+                  const timeOff = getContractorTimeOff(c);
+
+                  return (
                   <tr key={c.uid} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-4 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 200 }}>
                       <div className="flex items-center gap-2.5">
@@ -488,6 +520,10 @@ export default function ContractorsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{fmtDate(c.hireDate)}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.ptoBalance)}h</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.ptoUsed)}h</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.sickLeaveBalance)}h</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.sickLeaveUsed)}h</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.officeLocation}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.currency}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.monthlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
@@ -534,7 +570,8 @@ export default function ContractorsPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

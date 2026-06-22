@@ -9,6 +9,7 @@ export type Contractor = {
   status: "Active" | "On Leave" | "Inactive";
   cert: "Certified" | "Expiring" | "Expired";
   hireDate: string;
+  restDays: string[];
 };
 
 export type AttendanceRecord = {
@@ -25,7 +26,7 @@ export type AttendanceRecord = {
   // Weekly tracking
   standardMinutes: number;
   actualMinutes: number;
-  weeklyStatus: "Standard Met" | "Approval Needed" | "Review Needed" | "On Leave";
+  weeklyStatus: "Standard Met" | "For Review" | "On Leave";
 };
 
 export type PayrollRecord = {
@@ -54,33 +55,33 @@ export type TimeOffRequest = {
 };
 
 export const CONTRACTORS: Contractor[] = [
-  { id: "C001", name: "Sarah Jenkins",  email: "sarah.jenkins@example.com", department: "Field Operations", role: "Solar Technician",    region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-03-18" },
-  { id: "C002", name: "Michael Chen",   email: "michael.chen@example.com",  department: "Safety",           role: "Safety Officer",      region: "US",          site: "Wind Farm East",status: "Active",   cert: "Expiring",  hireDate: "2023-11-06" },
-  { id: "C003", name: "Priya Sharma",   email: "priya.sharma@example.com",  department: "Engineering",      role: "Electrical Engineer", region: "India",       site: "Hydro Beta",    status: "Active",   cert: "Certified", hireDate: "2022-07-25" },
-  { id: "C004", name: "Carlos Rivera",  email: "carlos.rivera@example.com", department: "Operations",       role: "Site Manager",        region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Certified", hireDate: "2021-09-14" },
-  { id: "C005", name: "Ana Santos",     email: "ana.santos@example.com",    department: "Logistics",        role: "Logistics Lead",      region: "Philippines", site: "HQ Support",    status: "On Leave", cert: "Certified", hireDate: "2023-01-30" },
-  { id: "C006", name: "James Okoye",    email: "james.okoye@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-05-13" },
-  { id: "C007", name: "Li Wei",         email: "li.wei@example.com",        department: "Analytics",        role: "Data Analyst",        region: "India",       site: "Remote",        status: "Inactive", cert: "Expired",   hireDate: "2020-10-21" },
-  { id: "C008", name: "Maria Lopez",    email: "maria.lopez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array C", status: "Active",   cert: "Certified", hireDate: "2023-06-05" },
-  { id: "C009", name: "John Reyes",     email: "john.reyes@example.com",    department: "Field Operations", role: "Solar Technician",    region: "Philippines", site: "Solar Array D", status: "Active",   cert: "Certified", hireDate: "2024-02-12" },
-  { id: "C010", name: "Aisha Patel",    email: "aisha.patel@example.com",   department: "Project Delivery", role: "Project Manager",     region: "India",       site: "HQ India",      status: "Active",   cert: "Certified", hireDate: "2022-04-04" },
-  { id: "C011", name: "Tom Bradley",    email: "tom.bradley@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Wind Farm East",status: "Active",   cert: "Certified", hireDate: "2023-08-28" },
-  { id: "C012", name: "Rosa Mendez",    email: "rosa.mendez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Expiring",  hireDate: "2024-01-16" },
+  { id: "C001", name: "Sarah Jenkins",  email: "sarah.jenkins@example.com", department: "Field Operations", role: "Solar Technician",    region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-03-18", restDays: ["Saturday", "Sunday"] },
+  { id: "C002", name: "Michael Chen",   email: "michael.chen@example.com",  department: "Safety",           role: "Safety Officer",      region: "US",          site: "Wind Farm East",status: "Active",   cert: "Expiring",  hireDate: "2023-11-06", restDays: ["Saturday", "Sunday"] },
+  { id: "C003", name: "Priya Sharma",   email: "priya.sharma@example.com",  department: "Engineering",      role: "Electrical Engineer", region: "India",       site: "Hydro Beta",    status: "Active",   cert: "Certified", hireDate: "2022-07-25", restDays: ["Sunday"] },
+  { id: "C004", name: "Carlos Rivera",  email: "carlos.rivera@example.com", department: "Operations",       role: "Site Manager",        region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Certified", hireDate: "2021-09-14", restDays: ["Saturday", "Sunday"] },
+  { id: "C005", name: "Ana Santos",     email: "ana.santos@example.com",    department: "Logistics",        role: "Logistics Lead",      region: "Philippines", site: "HQ Support",    status: "On Leave", cert: "Certified", hireDate: "2023-01-30", restDays: ["Saturday", "Sunday"] },
+  { id: "C006", name: "James Okoye",    email: "james.okoye@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Solar Array A", status: "Active",   cert: "Certified", hireDate: "2024-05-13", restDays: ["Saturday", "Sunday"] },
+  { id: "C007", name: "Li Wei",         email: "li.wei@example.com",        department: "Analytics",        role: "Data Analyst",        region: "India",       site: "Remote",        status: "Inactive", cert: "Expired",   hireDate: "2020-10-21", restDays: ["Sunday"] },
+  { id: "C008", name: "Maria Lopez",    email: "maria.lopez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array C", status: "Active",   cert: "Certified", hireDate: "2023-06-05", restDays: ["Saturday", "Sunday"] },
+  { id: "C009", name: "John Reyes",     email: "john.reyes@example.com",    department: "Field Operations", role: "Solar Technician",    region: "Philippines", site: "Solar Array D", status: "Active",   cert: "Certified", hireDate: "2024-02-12", restDays: ["Saturday", "Sunday"] },
+  { id: "C010", name: "Aisha Patel",    email: "aisha.patel@example.com",   department: "Project Delivery", role: "Project Manager",     region: "India",       site: "HQ India",      status: "Active",   cert: "Certified", hireDate: "2022-04-04", restDays: ["Sunday"] },
+  { id: "C011", name: "Tom Bradley",    email: "tom.bradley@example.com",   department: "Field Operations", role: "Grid Technician",     region: "US",          site: "Wind Farm East",status: "Active",   cert: "Certified", hireDate: "2023-08-28", restDays: ["Saturday", "Sunday"] },
+  { id: "C012", name: "Rosa Mendez",    email: "rosa.mendez@example.com",   department: "Engineering",      role: "Field Engineer",      region: "Mexico",      site: "Solar Array B", status: "Active",   cert: "Expiring",  hireDate: "2024-01-16", restDays: ["Saturday", "Sunday"] },
 ];
 
 export const ATTENDANCE: AttendanceRecord[] = [
-  { contractorId: "C001", name: "Sarah Jenkins",  role: "Solar Technician",    avatar: "SJ", region: "US",          date: "2026-05-15", checkIn: "08:02", checkOut: "17:05", hours: "9h 03m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-  { contractorId: "C002", name: "Michael Chen",   role: "Safety Officer",      avatar: "MC", region: "US",          date: "2026-05-15", checkIn: "08:45", checkOut: "17:00", hours: "8h 15m", status: "Present",  standardMinutes: 2400, actualMinutes: 2610, weeklyStatus: "Approval Needed"  },
-  { contractorId: "C003", name: "Priya Sharma",   role: "Electrical Engineer", avatar: "PS", region: "India",       date: "2026-05-15", checkIn: "09:10", checkOut: "—",     hours: "—",      status: "Late",     standardMinutes: 2400, actualMinutes: 2180, weeklyStatus: "Review Needed"    },
-  { contractorId: "C004", name: "Carlos Rivera",  role: "Site Manager",        avatar: "CR", region: "Mexico",      date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-  { contractorId: "C005", name: "Ana Santos",     role: "Logistics Lead",      avatar: "AS", region: "Philippines", date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "On Leave", standardMinutes: 2400, actualMinutes: 0,    weeklyStatus: "On Leave"         },
-  { contractorId: "C006", name: "James Okoye",    role: "Grid Technician",     avatar: "JO", region: "US",          date: "2026-05-15", checkIn: "07:58", checkOut: "17:02", hours: "9h 04m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-  { contractorId: "C007", name: "Li Wei",         role: "Data Analyst",        avatar: "LW", region: "India",       date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2400, actualMinutes: 2150, weeklyStatus: "Review Needed"    },
-  { contractorId: "C008", name: "Maria Lopez",    role: "Field Engineer",      avatar: "ML", region: "Mexico",      date: "2026-05-15", checkIn: "08:30", checkOut: "17:30", hours: "9h 00m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-  { contractorId: "C009", name: "John Reyes",     role: "Solar Technician",    avatar: "JR", region: "Philippines", date: "2026-05-15", checkIn: "08:15", checkOut: "17:10", hours: "8h 55m", status: "Present",  standardMinutes: 2400, actualMinutes: 2580, weeklyStatus: "Approval Needed"  },
-  { contractorId: "C010", name: "Aisha Patel",    role: "Project Manager",     avatar: "AP", region: "India",       date: "2026-05-15", checkIn: "08:50", checkOut: "17:45", hours: "8h 55m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-  { contractorId: "C011", name: "Tom Bradley",    role: "Grid Technician",     avatar: "TB", region: "US",          date: "2026-05-15", checkIn: "09:30", checkOut: "17:00", hours: "7h 30m", status: "Late",     standardMinutes: 2400, actualMinutes: 2220, weeklyStatus: "Review Needed"    },
-  { contractorId: "C012", name: "Rosa Mendez",    role: "Field Engineer",      avatar: "RM", region: "Mexico",      date: "2026-05-15", checkIn: "08:05", checkOut: "17:05", hours: "9h 00m", status: "Present",  standardMinutes: 2400, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C001", name: "Sarah Jenkins",  role: "Solar Technician",    avatar: "SJ", region: "US",          date: "2026-05-15", checkIn: "08:02", checkOut: "17:05", hours: "9h 03m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C002", name: "Michael Chen",   role: "Safety Officer",      avatar: "MC", region: "US",          date: "2026-05-15", checkIn: "08:45", checkOut: "17:00", hours: "8h 15m", status: "Present",  standardMinutes: 2700, actualMinutes: 2610, weeklyStatus: "For Review"  },
+  { contractorId: "C003", name: "Priya Sharma",   role: "Electrical Engineer", avatar: "PS", region: "India",       date: "2026-05-15", checkIn: "09:10", checkOut: "—",     hours: "—",      status: "Late",     standardMinutes: 2700, actualMinutes: 2180, weeklyStatus: "For Review"    },
+  { contractorId: "C004", name: "Carlos Rivera",  role: "Site Manager",        avatar: "CR", region: "Mexico",      date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C005", name: "Ana Santos",     role: "Logistics Lead",      avatar: "AS", region: "Philippines", date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "On Leave", standardMinutes: 2700, actualMinutes: 0,    weeklyStatus: "On Leave"         },
+  { contractorId: "C006", name: "James Okoye",    role: "Grid Technician",     avatar: "JO", region: "US",          date: "2026-05-15", checkIn: "07:58", checkOut: "17:02", hours: "9h 04m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C007", name: "Li Wei",         role: "Data Analyst",        avatar: "LW", region: "India",       date: "2026-05-15", checkIn: "—",     checkOut: "—",     hours: "—",      status: "Absent",   standardMinutes: 2700, actualMinutes: 2150, weeklyStatus: "For Review"    },
+  { contractorId: "C008", name: "Maria Lopez",    role: "Field Engineer",      avatar: "ML", region: "Mexico",      date: "2026-05-15", checkIn: "08:30", checkOut: "17:30", hours: "9h 00m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C009", name: "John Reyes",     role: "Solar Technician",    avatar: "JR", region: "Philippines", date: "2026-05-15", checkIn: "08:15", checkOut: "17:10", hours: "8h 55m", status: "Present",  standardMinutes: 2700, actualMinutes: 2580, weeklyStatus: "For Review"  },
+  { contractorId: "C010", name: "Aisha Patel",    role: "Project Manager",     avatar: "AP", region: "India",       date: "2026-05-15", checkIn: "08:50", checkOut: "17:45", hours: "8h 55m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
+  { contractorId: "C011", name: "Tom Bradley",    role: "Grid Technician",     avatar: "TB", region: "US",          date: "2026-05-15", checkIn: "09:30", checkOut: "17:00", hours: "7h 30m", status: "Late",     standardMinutes: 2700, actualMinutes: 2220, weeklyStatus: "For Review"    },
+  { contractorId: "C012", name: "Rosa Mendez",    role: "Field Engineer",      avatar: "RM", region: "Mexico",      date: "2026-05-15", checkIn: "08:05", checkOut: "17:05", hours: "9h 00m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
 ];
 
 export const PAYROLL: PayrollRecord[] = [
