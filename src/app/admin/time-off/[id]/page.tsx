@@ -2,28 +2,48 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuChevronLeft, LuCircleCheck, LuCircleX, LuClock } from "react-icons/lu";
+import { LuChevronLeft, LuClock } from "react-icons/lu";
 import { fetchAllContractors } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
+import { calculatePtoBalance, calculateSickLeaveBalance, roundBalance, fmtBalance } from "@/lib/timeOffBalances";
 
 type RequestDecision = "Approved" | "Pending" | "Declined";
 type RequestDecisionMap = Record<string, RequestDecision>;
+
+type LeaveType = "Annual Leave" | "Sick Leave" | "Unpaid Leave";
 
 type DummyRequest = {
   id: string;
   from: string;
   to: string;
   reason: string;
+  type: LeaveType;
+  days: number;
   status: RequestDecision;
 };
 
 const DUMMY_REQUESTS: DummyRequest[] = [
-  { id: "TOR-001", from: "2026-01-06", to: "2026-01-08", reason: "Family vacation planned in advance.", status: "Approved" },
-  { id: "TOR-002", from: "2026-02-14", to: "2026-02-14", reason: "Personal day off.", status: "Pending" },
-  { id: "TOR-003", from: "2026-03-03", to: "2026-03-05", reason: "Medical appointment and recovery.", status: "Declined" },
-  { id: "TOR-004", from: "2026-04-21", to: "2026-04-23", reason: "Attending a family event out of town.", status: "Approved" },
-  { id: "TOR-005", from: "2026-05-18", to: "2026-05-18", reason: "Sick leave — fever.", status: "Pending" },
+  { id: "TOR-001", from: "2026-01-06", to: "2026-01-08", reason: "Family vacation planned in advance.", type: "Annual Leave",  days: 3,   status: "Approved" },
+  { id: "TOR-002", from: "2026-02-14", to: "2026-02-14", reason: "Personal day off.",                  type: "Annual Leave",  days: 0.5, status: "Pending"  },
+  { id: "TOR-003", from: "2026-03-03", to: "2026-03-05", reason: "Medical appointment and recovery.",  type: "Sick Leave",    days: 3,   status: "Declined" },
+  { id: "TOR-004", from: "2026-04-21", to: "2026-04-23", reason: "Attending a family event out of town.", type: "Annual Leave", days: 3, status: "Approved" },
+  { id: "TOR-005", from: "2026-05-18", to: "2026-05-18", reason: "Sick leave — fever.",               type: "Sick Leave",    days: 0.5, status: "Pending"  },
 ];
+
+const DUMMY_HISTORY: DummyRequest[] = [
+  { id: "TOR-H01", from: "2025-03-10", to: "2025-03-12", reason: "Annual family trip.",               type: "Annual Leave",  days: 3,   status: "Approved" },
+  { id: "TOR-H02", from: "2025-05-05", to: "2025-05-05", reason: "Doctor visit.",                     type: "Sick Leave",    days: 1,   status: "Approved" },
+  { id: "TOR-H03", from: "2025-07-14", to: "2025-07-18", reason: "Summer vacation.",                  type: "Annual Leave",  days: 5,   status: "Approved" },
+  { id: "TOR-H04", from: "2025-09-22", to: "2025-09-22", reason: "Personal errand.",                  type: "Annual Leave",  days: 0.5, status: "Declined" },
+  { id: "TOR-H05", from: "2025-11-03", to: "2025-11-05", reason: "Extended sick leave.",              type: "Sick Leave",    days: 3,   status: "Approved" },
+  { id: "TOR-H06", from: "2025-12-24", to: "2025-12-26", reason: "Holiday travel.",                   type: "Unpaid Leave",  days: 3,   status: "Approved" },
+];
+
+function deriveLeaveStatus(req: DummyRequest): string {
+  if (req.type === "Annual Leave") return req.days <= 0.5 ? "PTO Half Day" : "PTO";
+  if (req.type === "Sick Leave")   return req.days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
+  return "Unpaid Leave";
+}
 
 function fmtDate(date: string) {
   if (!date) return "-";
@@ -31,11 +51,6 @@ function fmtDate(date: string) {
   return year && month && day ? `${month}-${day}-${year}` : date;
 }
 
-const STATUS_BADGE: Record<RequestDecision, string> = {
-  Approved: "bg-emerald-50 text-emerald-700 border border-emerald-200",
-  Pending:  "bg-amber-50 text-amber-600 border border-amber-200",
-  Declined: "bg-red-50 text-red-600 border border-red-200",
-};
 
 export default function ContractorTimeOffPage() {
   const { id } = useParams<{ id: string }>();
@@ -102,7 +117,7 @@ export default function ContractorTimeOffPage() {
     <div className="p-6 md:p-8 w-full">
       {/* Back */}
       <button
-        onClick={() => router.back()}
+        onClick={() => router.push(`/admin/time-off?open=${id}`)}
         className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#003527] mb-6 transition-colors"
       >
         <LuChevronLeft size={16} /> Back
@@ -110,8 +125,50 @@ export default function ContractorTimeOffPage() {
 
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-3xl font-bold text-[#003527]">Time-Off Request</h1>
+        <h1 className="text-3xl font-bold text-[#003527]">Current / New Request Data</h1>
         <p className="text-slate-500 text-sm mt-1">{fullName}</p>
+      </div>
+
+      {/* Score Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+        {/* PTO Accrual */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
+          <p className="text-2xl font-black text-[#003527]">
+            {contractor.hireDate ? `${fmtBalance(calculatePtoBalance(contractor.hireDate))}h` : "—"}
+          </p>
+        </div>
+        {/* PTO Used */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
+          <p className="text-2xl font-black text-slate-700">0h</p>
+        </div>
+        {/* PTO Accrual Available */}
+        <div className="bg-emerald-50 rounded-2xl border border-emerald-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">PTO Available</p>
+          <p className="text-2xl font-black text-emerald-700">
+            {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "—"}
+          </p>
+        </div>
+        {/* Sick Leave Accrual */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
+          <p className="text-2xl font-black text-[#003527]">
+            {contractor.hireDate ? `${fmtBalance(calculateSickLeaveBalance(contractor.hireDate))}h` : "—"}
+          </p>
+        </div>
+        {/* Sick Leave Used */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Used</p>
+          <p className="text-2xl font-black text-slate-700">0h</p>
+        </div>
+        {/* Sick Leave Available */}
+        <div className="bg-amber-50 rounded-2xl border border-amber-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1">Sick Leave Available</p>
+          <p className="text-2xl font-black text-amber-700">
+            {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculateSickLeaveBalance(contractor.hireDate), 0)))}h` : "—"}
+          </p>
+        </div>
       </div>
 
       {/* Table */}
@@ -120,7 +177,7 @@ export default function ContractorTimeOffPage() {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date", "Reason", "Status", "Action"].map((h) => (
+                {["Name", "Start Date", "End Date", "Reason", "PTO Available", "Sick Leave Available", "Status", "Action"].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -130,7 +187,7 @@ export default function ContractorTimeOffPage() {
             <tbody className="divide-y divide-slate-100">
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={8} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     No time-off requests found.
                   </td>
@@ -145,13 +202,27 @@ export default function ContractorTimeOffPage() {
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
+                    <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
+                      {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "-"}
+                    </td>
+                    <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
+                      {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculateSickLeaveBalance(contractor.hireDate), 0)))}h` : "-"}
+                    </td>
                     <td className="px-5 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${STATUS_BADGE[status]}`}>
-                        {status === "Approved" && <LuCircleCheck size={11} />}
-                        {status === "Pending"  && <LuClock size={11} />}
-                        {status === "Declined" && <LuCircleX size={11} />}
-                        {status}
-                      </span>
+                      {(() => {
+                        const ls = deriveLeaveStatus(req);
+                        return (
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            ls === "PTO"                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                            ls === "PTO Half Day"        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
+                            ls === "Sick Leave"          ? "bg-amber-50 text-amber-700 border border-amber-200"       :
+                            ls === "Sick Leave Half Day" ? "bg-amber-50 text-amber-600 border border-amber-200"       :
+                                                          "bg-slate-100 text-slate-600 border border-slate-200"
+                          }`}>
+                            {ls}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-5 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
@@ -176,6 +247,71 @@ export default function ContractorTimeOffPage() {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Historical Data Table */}
+      <div className="mt-10">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold text-[#003527]">Historical Request Data</h2>
+          <p className="text-slate-400 text-sm mt-0.5">Previous time-off requests for {fullName}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  {["Name", "Start Date", "End Date", "Reason", "Status", "Review"].map((h) => (
+                    <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {DUMMY_HISTORY.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-5 py-16 text-center text-sm text-slate-400">
+                      <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
+                      No historical requests found.
+                    </td>
+                  </tr>
+                ) : DUMMY_HISTORY.map((req) => {
+                  const ls = deriveLeaveStatus(req);
+                  return (
+                    <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
+                        <span className="line-clamp-2">{req.reason || "-"}</span>
+                      </td>
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                          ls === "PTO"                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                          ls === "PTO Half Day"        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
+                          ls === "Sick Leave"          ? "bg-amber-50 text-amber-700 border border-amber-200"       :
+                          ls === "Sick Leave Half Day" ? "bg-amber-50 text-amber-600 border border-amber-200"       :
+                                                        "bg-slate-100 text-slate-600 border border-slate-200"
+                        }`}>
+                          {ls}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                          req.status === "Approved" ? "bg-green-50 text-green-700 border border-green-200" :
+                          req.status === "Declined" ? "bg-red-50 text-red-600 border border-red-200"       :
+                                                      "bg-amber-50 text-amber-600 border border-amber-200"
+                        }`}>
+                          {req.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

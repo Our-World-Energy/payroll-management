@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuCalendarPlus,
@@ -27,7 +27,7 @@ type TimeOffRow = {
   department: string;
   role: string;
   hireDate: string;
-  requestStatus: "PTO Leave" | "Sick Leave" | "-";
+  requestStatus: "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Leave" | "-";
   reviewStatus: RequestDecision | "-";
   latestRequest: TimeOffRequest | null;
   ptoBalance: number;
@@ -164,8 +164,16 @@ function approvedHoursFor(name: string, type: "Annual Leave" | "Sick Leave", dec
 
 function latestRequestFor(name: string) {
   return TIME_OFF
-    .filter((item) => item.name === name && (item.type === "Annual Leave" || item.type === "Sick Leave"))
+    .filter((item) => item.name === name && (item.type === "Annual Leave" || item.type === "Sick Leave" || item.type === "Unpaid Leave"))
     .sort((a, b) => b.from.localeCompare(a.from))[0] ?? null;
+}
+
+function deriveRequestStatus(req: TimeOffRequest | null): "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Leave" | "-" {
+  if (!req) return "-";
+  if (req.type === "Annual Leave") return req.days <= 0.5 ? "PTO Half Day" : "PTO";
+  if (req.type === "Sick Leave")   return req.days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
+  if (req.type === "Unpaid Leave") return "Unpaid Leave";
+  return "-";
 }
 
 function countryFromLocation(location: string) {
@@ -219,6 +227,7 @@ const REVIEW_ICON: Record<RequestDecision, React.ReactNode> = {
 
 export default function TimeOffPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [contractors, setContractors] = useState<Contractor[]>([]);
   const [loading, setLoading]         = useState(true);
   const [loadError, setLoadError]     = useState("");
@@ -268,7 +277,7 @@ export default function TimeOffPage() {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, role: c.role, hireDate: c.hireDate,
-      requestStatus: "PTO Leave",
+      requestStatus: deriveRequestStatus(latestRequest),
       reviewStatus: latestRequest ? effectiveRequestStatus(latestRequest, requestDecisions) : "-",
       latestRequest, ptoBalance, ptoUsed, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
@@ -285,7 +294,7 @@ export default function TimeOffPage() {
   const filteredRows = rows.filter((r) => {
     const cm = countryFilter      === "All Countries"   || r.country === countryFilter;
     const dm = departmentFilter   === "All Departments" || (r.department || "Unassigned") === departmentFilter;
-    const sm = reviewStatusFilter === "All Statuses"    || r.reviewStatus === reviewStatusFilter;
+    const sm = reviewStatusFilter === "All Statuses"    || r.requestStatus === reviewStatusFilter;
     return cm && dm && sm;
   });
 
@@ -301,6 +310,16 @@ export default function TimeOffPage() {
   ).length;
 
   const selectedRow = rows.find((r) => r.id === selectedRowId) ?? null;
+
+  // Auto-open modal when navigating back from [id] page with ?open=<id>
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (openId && rows.length > 0 && !selectedRowId) {
+      setSelectedRowId(openId);
+      setModalTab("details");
+      router.replace("/admin/time-off");
+    }
+  }, [searchParams, rows]);
 
   function setSelectedRequestDecision(decision: "Approved" | "Declined") {
     if (!selectedRow?.latestRequest) return;
@@ -322,7 +341,7 @@ export default function TimeOffPage() {
       "PTO Accrual (h)", "PTO Used (h)", "PTO Accrual Available (h)",
       "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Accrual Available (h)",
       "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
-      "Review Status",
+      "Status",
     ];
     const csvRows = [
       headers.join(","),
@@ -332,7 +351,7 @@ export default function TimeOffPage() {
           r.ptoBalance, r.ptoUsed, r.ptoAvailable,
           r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
           r.birthdayLeave, r.advanceSickLeave,
-          `"${r.reviewStatus === "-" ? "No Request" : r.reviewStatus}"`,
+          `"${r.requestStatus === "-" ? "No Request" : r.requestStatus}"`,
         ].join(",")
       ),
     ];
@@ -350,7 +369,7 @@ export default function TimeOffPage() {
     "PTO Accrual", "PTO Used", "PTO Accrual Available",
     "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
     "Advance PTO/Birthday Leave", "Advance Sick Leave",
-    "Review Status", "Action",
+    "Status", "Action",
   ];
 
   return (
@@ -377,7 +396,7 @@ export default function TimeOffPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-bold text-white">{selectedRow.fullName}</h3>
-                    <p className="text-sm text-white/60 mt-0.5">{selectedRow.role || "—"} · {selectedRow.department || "—"}</p>
+                    <p className="text-sm text-white/60 mt-0.5">{selectedRow.department || "—"}</p>
                     <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
                   </div>
                 </div>
@@ -432,14 +451,10 @@ export default function TimeOffPage() {
                     {/* Info fields grid */}
                     <div className="grid grid-cols-2 gap-2">
                       {([
-                        ["Role",           selectedRow.role        || "—"],
                         ["Hire Date",      fmtDate(selectedRow.hireDate)],
                         ["Status Request", selectedRow.requestStatus === "-" ? "—" : selectedRow.requestStatus],
                         ["Request Hours",  selectedRow.latestRequest ? `${fmtBalance(selectedRow.latestRequest.days * HOURS_PER_DAY)}h` : "—"],
                         ["Review Status",  currentStatus === "-" ? "—" : currentStatus],
-                        ["Request ID",     selectedRow.latestRequest?.id ?? "—"],
-                        ["Request From",   selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.from) : "—"],
-                        ["Request To",     selectedRow.latestRequest ? fmtDate(selectedRow.latestRequest.to)   : "—"],
                         ["Request Reason", selectedRow.latestRequest?.reason ?? "—"],
                       ] as [string, string][]).map(([label, value]) => (
                         <div key={label} className={`bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 ${label === "Request Reason" ? "col-span-2" : ""}`}>
@@ -805,9 +820,11 @@ export default function TimeOffPage() {
           className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
         >
           <option value="All Statuses">All Statuses</option>
-          <option value="Pending">Pending</option>
-          <option value="Approved">Approved</option>
-          <option value="Declined">Declined</option>
+          <option value="PTO">PTO</option>
+          <option value="PTO Half Day">PTO Half Day</option>
+          <option value="Sick Leave">Sick Leave</option>
+          <option value="Sick Leave Half Day">Sick Leave Half Day</option>
+          <option value="Unpaid Leave">Unpaid Leave</option>
           <option value="-">No Request</option>
         </select>
 
@@ -951,14 +968,19 @@ export default function TimeOffPage() {
                       : <span className="text-slate-300">—</span>}
                   </td>
 
-                  {/* Review status */}
+                  {/* Status */}
                   <td className="px-4 py-3 whitespace-nowrap border-r border-slate-100">
-                    {row.reviewStatus === "-" ? (
+                    {row.requestStatus === "-" ? (
                       <span className="text-slate-300 text-sm">—</span>
                     ) : (
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${REVIEW_BADGE[row.reviewStatus]}`}>
-                        {REVIEW_ICON[row.reviewStatus]}
-                        {row.reviewStatus}
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        row.requestStatus === "PTO"                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
+                        row.requestStatus === "PTO Half Day"         ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
+                        row.requestStatus === "Sick Leave"           ? "bg-amber-50 text-amber-700 border border-amber-200"       :
+                        row.requestStatus === "Sick Leave Half Day"  ? "bg-amber-50 text-amber-600 border border-amber-200"       :
+                                                                       "bg-slate-100 text-slate-600 border border-slate-200"
+                      }`}>
+                        {row.requestStatus}
                       </span>
                     )}
                   </td>
