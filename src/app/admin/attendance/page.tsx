@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable react-hooks/set-state-in-effect -- data-fetching effects set loading/result state on mount */
 
 import { useState, useEffect } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX } from "react-icons/lu";
@@ -660,15 +661,56 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
               </p>
             </div>
           </div>
+
+          {/* Per-day editor: pick the date, set time off + manual adjustment */}
           <div>
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Review Note</label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={3}
-              placeholder="Add a review note or approval reason..."
-              className="w-full mt-1 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-            />
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Per-Day Time Off &amp; Manual Adjustment</p>
+            {loading ? <p className="text-sm text-slate-400 py-4 text-center">Loading…</p> : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full text-sm" style={{ minWidth: "640px" }}>
+                  <thead className="bg-slate-50">
+                    <tr>
+                      {["Date", "Actual", "Time Off Status", "Manual Adj (±min)", "Note"].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {days.map((d, i) => {
+                      const h = dayHeader(d.date);
+                      return (
+                        <tr key={d.date}>
+                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-700">{h.dow} {h.day} {h.mon}</td>
+                          <td className={`px-3 py-2 tabular-nums ${d.actualMins ? "text-slate-700" : "text-slate-300"}`}>{d.actualMins || "·"}</td>
+                          <td className="px-3 py-2">
+                            <select value={d.timeOffStatus} onChange={(e) => updateDay(i, { timeOffStatus: e.target.value })}
+                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+                              {TIME_OFF_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="number" value={d.manualAdjustmentTime} onChange={(e) => updateDay(i, { manualAdjustmentTime: Number(e.target.value) || 0 })}
+                              className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input type="text" value={d.note} onChange={(e) => updateDay(i, { note: e.target.value })} placeholder="reason…"
+                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="sm:max-w-xs">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Attendance Request Status (week)</label>
+            <select value={requestStatus} onChange={(e) => setRequestStatus(e.target.value)}
+              className="mt-1 w-full border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
+              {REQUEST_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
         </div>
         <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
@@ -687,6 +729,11 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
     </div>
   );
 }
+
+const COLS = [
+  "Name", "Location", "Shift Type", "Target Time", "Worksnap Actual Time", "Fixed Evaluated Time", "Flexible Evaluated Time",
+  "Manual Adjustment Time", "Time Off Time", "Completion Time", "Status", "Time Off Status", "Request Status", "Manual Adjustment Note", "Action",
+];
 
 export default function AttendancePage() {
   const [activeWeek, setActiveWeek] = useState("w26");
@@ -760,24 +807,23 @@ export default function AttendancePage() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
-      {/* Header */}
+    <div className="p-4 sm:p-6 md:p-8 max-w-400 mx-auto">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6 md:mb-8">
         <div>
           <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
           <p className="text-sm md:text-base text-slate-600 mt-1">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
         </div>
-        <div className="flex flex-wrap gap-2 sm:gap-3">
-          <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50 transition-colors">
-            <LuFileText size={16} strokeWidth={2} />
-            <span className="hidden sm:inline">Export Timesheet</span>
-            <span className="sm:hidden">Export</span>
-          </button>
-          <button className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold transition-all shadow-md">
-            <LuRefreshCw size={16} strokeWidth={2} />
-            <span className="hidden sm:inline">Sync All Data</span>
-            <span className="sm:hidden">Sync</span>
-          </button>
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-wrap gap-2 sm:gap-3">
+            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
+              <LuFileText size={16} /><span className="hidden sm:inline">Export Timesheet</span><span className="sm:hidden">Export</span>
+            </button>
+            <button onClick={handleSync} disabled={syncing}
+              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold shadow-md disabled:opacity-50">
+              <LuRefreshCw size={16} className={syncing ? "animate-spin" : ""} /><span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span><span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
+            </button>
+          </div>
+          <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
         </div>
       </div>
 
@@ -785,18 +831,12 @@ export default function AttendancePage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
           <div key={label} className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 flex items-center gap-3 md:gap-4">
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}>
-              <Icon size={20} strokeWidth={1.75} />
-            </div>
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p>
-              <p className={`text-xl md:text-2xl font-bold mt-0.5 ${color}`}>{value}</p>
-            </div>
+            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={20} strokeWidth={1.75} /></div>
+            <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl md:text-2xl font-bold mt-0.5 ${color}`}>{value}</p></div>
           </div>
         ))}
       </div>
 
-      {/* Weekly Time Tracking Table */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {/* Table header toolbar */}
         <div className="p-4 md:p-6 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50">
