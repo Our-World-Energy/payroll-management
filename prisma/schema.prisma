@@ -6,8 +6,8 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("DATABASE_URL")      // pooled (pgbouncer / Supavisor — port 6543)
-  directUrl = env("DIRECT_URL")        // direct connection (port 5432) for migrations
+  url       = env("DATABASE_URL") // pooled (pgbouncer / Supavisor — port 6543)
+  directUrl = env("DIRECT_URL") // direct connection (port 5432) for migrations
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────
@@ -51,28 +51,28 @@ enum ActivityKind {
 
 /// Mirror of Supabase auth.users — keyed by the auth user UUID.
 model Profile {
-  id          String   @id @db.Uuid                     // auth.users.id
-  email       String   @unique
-  fullName    String?
-  avatarUrl   String?
-  role        Role     @default(FIELD)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @db.Uuid // auth.users.id
+  email     String   @unique
+  fullName  String?
+  avatarUrl String?
+  role      Role     @default(FIELD)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  contractor  Contractor?
+  contractor Contractor?
 
   @@map("profiles")
 }
 
 model Site {
-  id          String    @id @default(uuid()) @db.Uuid
-  name        String    @unique
-  kind        SiteKind
-  region      String?
-  active      Boolean   @default(true)
-  capacity    Int?                                       // headcount target
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  kind      SiteKind
+  region    String?
+  active    Boolean  @default(true)
+  capacity  Int? // headcount target
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   shifts      Shift[]
   contractors Contractor[]
@@ -93,27 +93,39 @@ model Contractor {
   certExpiresAt   DateTime?
   homeSiteId      String?   @db.Uuid
   homeSite        Site?     @relation(fields: [homeSiteId], references: [id], onDelete: SetNull)
+
+  // ── Contract detail (shown in the attendance Action popup) ──────────
+  department        String?
+  location          String?
+  shiftType         String?
+  employmentStatus  String?                          // Active | Inactive | On Leave …
+  offsetCredits     Decimal  @default(0) @db.Decimal(6, 2)
+  ptoCredits        Decimal  @default(0) @db.Decimal(6, 2)
+  sickLeaveCredits  Decimal  @default(0) @db.Decimal(6, 2)
+  targetMinutes     Int      @default(2400)              // weekly target (Fixed & Flexible)
+  timezone          String   @default("America/Phoenix") // IANA tz for In/Out display (per location)
+
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  shifts          Shift[]
-  timeOff         TimeOff[]
-  payrollEntries  PayrollEntry[]
+  shifts         Shift[]
+  timeOff        TimeOff[]
+  payrollEntries PayrollEntry[]
 
   @@index([homeSiteId])
   @@map("contractors")
 }
 
 model Shift {
-  id            String    @id @default(uuid()) @db.Uuid
-  contractorId  String    @db.Uuid
-  contractor    Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  siteId        String    @db.Uuid
-  site          Site      @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  startedAt     DateTime
-  endedAt       DateTime?
-  notes         String?
-  createdAt     DateTime  @default(now())
+  id           String     @id @default(uuid()) @db.Uuid
+  contractorId String     @db.Uuid
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  siteId       String     @db.Uuid
+  site         Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  startedAt    DateTime
+  endedAt      DateTime?
+  notes        String?
+  createdAt    DateTime   @default(now())
 
   @@index([contractorId, startedAt])
   @@index([siteId, startedAt])
@@ -121,47 +133,47 @@ model Shift {
 }
 
 model TimeOff {
-  id            String        @id @default(uuid()) @db.Uuid
-  contractorId  String        @db.Uuid
-  contractor    Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  startDate     DateTime      @db.Date
-  endDate       DateTime      @db.Date
-  reason        String?
-  status        TimeOffStatus @default(PENDING)
-  decidedById   String?       @db.Uuid
-  decidedAt     DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id           String        @id @default(uuid()) @db.Uuid
+  contractorId String        @db.Uuid
+  contractor   Contractor    @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  startDate    DateTime      @db.Date
+  endDate      DateTime      @db.Date
+  reason       String?
+  status       TimeOffStatus @default(PENDING)
+  decidedById  String?       @db.Uuid
+  decidedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   @@index([contractorId, status])
   @@map("time_off_requests")
 }
 
 model PayrollRun {
-  id            String         @id @default(uuid()) @db.Uuid
-  periodStart   DateTime       @db.Date
-  periodEnd     DateTime       @db.Date
-  status        PayrollStatus  @default(DRAFT)
-  totalCents    BigInt         @default(0)
-  approvedAt    DateTime?
-  paidAt        DateTime?
-  createdAt     DateTime       @default(now())
+  id          String        @id @default(uuid()) @db.Uuid
+  periodStart DateTime      @db.Date
+  periodEnd   DateTime      @db.Date
+  status      PayrollStatus @default(DRAFT)
+  totalCents  BigInt        @default(0)
+  approvedAt  DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime      @default(now())
 
-  entries       PayrollEntry[]
+  entries PayrollEntry[]
 
   @@unique([periodStart, periodEnd])
   @@map("payroll_runs")
 }
 
 model PayrollEntry {
-  id            String       @id @default(uuid()) @db.Uuid
-  runId         String       @db.Uuid
-  run           PayrollRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
-  contractorId  String       @db.Uuid
-  contractor    Contractor   @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  hoursWorked   Decimal      @db.Decimal(10, 2)
-  grossCents    BigInt
-  notes         String?
+  id           String     @id @default(uuid()) @db.Uuid
+  runId        String     @db.Uuid
+  run          PayrollRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  contractorId String     @db.Uuid
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  hoursWorked  Decimal    @db.Decimal(10, 2)
+  grossCents   BigInt
+  notes        String?
 
   @@unique([runId, contractorId])
   @@map("payroll_entries")
