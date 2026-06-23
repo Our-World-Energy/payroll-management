@@ -26,7 +26,7 @@ export type AttendanceRecord = {
   // Weekly tracking
   standardMinutes: number;
   actualMinutes: number;
-  weeklyStatus: "Standard Met" | "For Review" | "On Leave";
+  weeklyStatus: "Standard Met" | "For Review" | "On Leave" | "Reviewed";
 };
 
 export type PayrollRecord = {

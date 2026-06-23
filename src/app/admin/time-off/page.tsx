@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LuChevronLeft, LuEye, LuX } from "react-icons/lu";
+import { LuChevronLeft, LuChevronRight, LuCircleCheck, LuCircleX, LuClock, LuEye, LuTrendingUp, LuX } from "react-icons/lu";
 import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 import {
   approvedHoursFor,
@@ -145,7 +145,7 @@ export default function TimeOffPage() {
     const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
     const ptoUsed = approvedHoursFor(fullName, "Annual Leave", requestDecisions);
     const sickLeaveUsed = approvedHoursFor(fullName, "Sick Leave", requestDecisions);
-    const unusedSickLeave = calculateUnusedSickLeaveBalance(fullName, contractor.hireDate, requestDecisions);
+    const unusedSickLeave = calculateUnusedSickLeaveBalance(fullName, c.hireDate, requestDecisions);
 
     return {
       id: c.uid, fullName, email: c.email,
@@ -544,7 +544,7 @@ export default function TimeOffPage() {
                         </div>
                       </div>
                     </td>
-                    {COLS.slice(1, -1).map((h) => (
+                    {columns.slice(1, -1).map((h: string) => (
                       <td key={h} className="px-4 py-3 border-r border-slate-100">
                         <div className="h-3 bg-slate-100 rounded w-16" />
                       </td>
@@ -556,11 +556,11 @@ export default function TimeOffPage() {
                 ))
               ) : loadError ? (
                 <tr>
-                  <td colSpan={COLS.length} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td>
+                  <td colSpan={columns.length} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={COLS.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>
+                  <td colSpan={columns.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>
                     No contractors match the selected filters.
                   </td>
                 </tr>

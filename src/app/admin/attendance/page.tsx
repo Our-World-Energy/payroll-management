@@ -1,19 +1,19 @@
 "use client";
-/* eslint-disable react-hooks/set-state-in-effect -- data-fetching effects set loading/result state on mount */
+/* test eslint-disable react-hooks/set-state-in-effect -- data-fetching effects set loading/result state on mount */
 
 import { useState, useEffect } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX } from "react-icons/lu";
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 
 const WEEKS = [
-  { label: "Week 26 (Jun 21 - 27)", key: "w26", from: "2026-06-21", to: "2026-06-27" },
-  { label: "Week 25 (Jun 14 - 20)", key: "w25", from: "2026-06-14", to: "2026-06-20" },
-  { label: "Week 24 (Jun 7 - 13)",  key: "w24", from: "2026-06-07", to: "2026-06-13" },
-  { label: "Week 23 (May 31 - Jun 6)", key: "w23", from: "2026-05-31", to: "2026-06-06" },
-  { label: "Week 22 (May 24 - 30)", key: "w22", from: "2026-05-24", to: "2026-05-30" },
-  { label: "Week 21 (May 17 - 23)", key: "w21", from: "2026-05-17", to: "2026-05-23" },
-  { label: "Week 20 (May 10 - 16)", key: "w20", from: "2026-05-10", to: "2026-05-16" },
-  { label: "Week 19 (May 3 - 9)",   key: "w19", from: "2026-05-03", to: "2026-05-09" },
+  { label: "Week 26 (Jun 21 - 27, 2026)", key: "w26", from: "2026-06-21", to: "2026-06-27" },
+  { label: "Week 25 (Jun 14 - 20, 2026)", key: "w25", from: "2026-06-14", to: "2026-06-20" },
+  { label: "Week 24 (Jun 7 - 13, 2026)",  key: "w24", from: "2026-06-07", to: "2026-06-13" },
+  { label: "Week 23 (May 31 - Jun 6, 2026)", key: "w23", from: "2026-05-31", to: "2026-06-06" },
+  { label: "Week 22 (May 24 - 30, 2026)", key: "w22", from: "2026-05-24", to: "2026-05-30" },
+  { label: "Week 21 (May 17 - 23, 2026)", key: "w21", from: "2026-05-17", to: "2026-05-23" },
+  { label: "Week 20 (May 10 - 16, 2026)", key: "w20", from: "2026-05-10", to: "2026-05-16" },
+  { label: "Week 19 (May 3 - 9, 2026)",   key: "w19", from: "2026-05-03", to: "2026-05-09" },
 ];
 
 
@@ -59,6 +59,7 @@ type ReviewModalProps = {
   record: AttendanceRow;
   weekDates: string[];
   onClose: () => void;
+  onSave: (contractorId: string, completionMinutes: number) => void;
 };
 
 type WorksnapEntry = {
@@ -249,6 +250,56 @@ function worksnapTotalMinutesFor(weekDates: string[], dailyWorksnapMinutes: Reco
   return weekDates.reduce((total, date) => total + timeValueToMinutes(worksnapTimeForDate(dailyWorksnapMinutes, date)), 0);
 }
 
+function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
+  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+  const restDaysStr = restDaysForAttendanceRow(row);
+
+  return weekDates.reduce((total, date) => {
+    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+    const isRestDay = isRestDayDate(date, restDaysStr);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, "No Status", isRestDay);
+
+    const timeOffRequest = TIME_OFF.find((item) =>
+      item.name === row.name && date >= item.from && date <= item.to
+    );
+    let timeOffStatus = "No Time Off";
+    if (timeOffRequest) {
+      if (timeOffRequest.type === "Sick Leave") timeOffStatus = "Sick Leave";
+      else if (timeOffRequest.type === "Unpaid Leave") timeOffStatus = "Unpaid Leave";
+      else timeOffStatus = "PTO";
+    }
+
+    const timeOffTime = timeOffTimeFor(timeOffStatus);
+    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, "", timeOffTime));
+  }, 0);
+}
+
+function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
+  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+  const restDaysStr = restDaysForAttendanceRow(row);
+
+  return weekDates.reduce((total, date) => {
+    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+    if (worksnapTime === "-") return total;
+
+    const isRestDay = isRestDayDate(date, restDaysStr);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, "Approved", isRestDay);
+
+    const timeOffRequest = TIME_OFF.find((item) =>
+      item.name === row.name && date >= item.from && date <= item.to
+    );
+    let timeOffStatus = "No Time Off";
+    if (timeOffRequest) {
+      if (timeOffRequest.type === "Sick Leave") timeOffStatus = "Sick Leave";
+      else if (timeOffRequest.type === "Unpaid Leave") timeOffStatus = "Unpaid Leave";
+      else timeOffStatus = "PTO";
+    }
+
+    const timeOffTime = timeOffTimeFor(timeOffStatus);
+    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, "", timeOffTime));
+  }, 0);
+}
+
 function approvalStatusClassName(status: string) {
   if (status === "Approved") return "text-emerald-600 font-semibold";
   if (status === "Rejected") return "text-red-600 font-semibold";
@@ -286,13 +337,24 @@ type AttendanceRow = AttendanceRecord & {
   department?: string;
   restDay?: string;
   dailyWorksnapMinutes?: Record<string, number>;
+  completionMinutes?: number;
+  savedDailyDecisionStatuses?: Record<string, string>;
 };
 
-function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number): AttendanceRow {
+function computeDailyWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string): AttendanceRecord["weeklyStatus"] {
+  for (const date of weekDates) {
+    if (isRestDayDate(date, restDaysStr)) continue;
+    const mins = dailyWorksnapMinutes[date] ?? 0;
+    if (mins > 0 && (mins < 480 || mins > 540)) return "For Review";
+  }
+  return "Standard Met";
+}
+
+function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, weekDates: string[]): AttendanceRow {
   const name = entry.userName?.trim() || entry.email?.trim() || `Worksnap User ${index + 1}`;
   const actualMinutes = Number(entry.durationMins ?? 0) || 0;
-  const weeklyStatus: AttendanceRecord["weeklyStatus"] =
-    (actualMinutes >= 2400 && actualMinutes <= 2700) ? "Standard Met" : "For Review";
+  const restDaysStr = entry.restDay?.trim() || "";
+  const weeklyStatus = computeDailyWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr);
 
   return {
     contractorId: entry.email?.trim() || `worksnap-${index}`,
@@ -314,7 +376,7 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number): A
   };
 }
 
-function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[]) {
+function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
   const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; dailyWorksnapMinutes: Record<string, number> }>();
 
   entries.forEach((entry, index) => {
@@ -336,7 +398,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[]) {
     });
   });
 
-  return Array.from(rowsByUser.values()).map((entry, index) => worksnapEntryToAttendanceRecord(entry, index));
+  return Array.from(rowsByUser.values()).map((entry, index) => worksnapEntryToAttendanceRecord(entry, index, weekDates));
 }
 
 function departmentForAttendanceRow(row: AttendanceRow) {
@@ -364,7 +426,7 @@ function restDaysForAttendanceRow(row: AttendanceRow) {
   return days.length > 0 ? days.join(", ") : "-";
 }
 
-function ReviewModal({ record, weekDates, onClose }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, onSave }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -396,7 +458,10 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
   ];
 
   useEffect(() => {
-    const defaultStatuses = defaultDailyDecisionStatuses(weekDates);
+    const savedStatuses = (record as AttendanceRow).savedDailyDecisionStatuses;
+    const defaultStatuses = savedStatuses
+      ? { ...defaultDailyDecisionStatuses(weekDates), ...savedStatuses }
+      : defaultDailyDecisionStatuses(weekDates);
     setDailyDecisionStatuses(defaultStatuses);
     setDailyTimeOffStatuses(defaultDailyTimeOffStatuses(weekDates, defaultTimeOffStatusFor(record)));
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
@@ -423,6 +488,20 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
       ...current,
       [date]: current[date] === status ? "No Status" : status,
     }));
+  }
+
+  function approveAllDays() {
+    const applicableDates = weekDates.filter((date) =>
+      showDailyDecisionActions(worksnapTimeForDate(dailyWorksnapMinutes, date))
+    );
+    const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
+    setDailyDecisionStatuses((current) => {
+      const next = { ...current };
+      applicableDates.forEach((date) => {
+        next[date] = allApproved ? "No Status" : "Approved";
+      });
+      return next;
+    });
   }
 
   return (
@@ -455,7 +534,17 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
             ))}
           </div>
           <div className="mt-5">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Weekly Days</p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Weekly Days</p>
+              <button
+                type="button"
+                onClick={approveAllDays}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+              >
+                <LuCircleCheck size={13} strokeWidth={2} />
+                Approve All
+              </button>
+            </div>
             <div className="overflow-x-scroll rounded-xl border border-slate-200">
               <table className="w-full text-left text-sm" style={{ minWidth: "1580px", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead className="bg-slate-50 sticky top-0 z-30">
@@ -662,56 +751,6 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
             </div>
           </div>
 
-          {/* Per-day editor: pick the date, set time off + manual adjustment */}
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2">Per-Day Time Off &amp; Manual Adjustment</p>
-            {loading ? <p className="text-sm text-slate-400 py-4 text-center">Loading…</p> : (
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="w-full text-sm" style={{ minWidth: "640px" }}>
-                  <thead className="bg-slate-50">
-                    <tr>
-                      {["Date", "Actual", "Time Off Status", "Manual Adj (±min)", "Note"].map((h) => (
-                        <th key={h} className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {days.map((d, i) => {
-                      const h = dayHeader(d.date);
-                      return (
-                        <tr key={d.date}>
-                          <td className="px-3 py-2 whitespace-nowrap font-semibold text-slate-700">{h.dow} {h.day} {h.mon}</td>
-                          <td className={`px-3 py-2 tabular-nums ${d.actualMins ? "text-slate-700" : "text-slate-300"}`}>{d.actualMins || "·"}</td>
-                          <td className="px-3 py-2">
-                            <select value={d.timeOffStatus} onChange={(e) => updateDay(i, { timeOffStatus: e.target.value })}
-                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
-                              {TIME_OFF_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                            </select>
-                          </td>
-                          <td className="px-3 py-2">
-                            <input type="number" value={d.manualAdjustmentTime} onChange={(e) => updateDay(i, { manualAdjustmentTime: Number(e.target.value) || 0 })}
-                              className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                          </td>
-                          <td className="px-3 py-2">
-                            <input type="text" value={d.note} onChange={(e) => updateDay(i, { note: e.target.value })} placeholder="reason…"
-                              className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="sm:max-w-xs">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Attendance Request Status (week)</label>
-            <select value={requestStatus} onChange={(e) => setRequestStatus(e.target.value)}
-              className="mt-1 w-full border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500">
-              {REQUEST_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </div>
         </div>
         <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
@@ -719,7 +758,7 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => { onSave(record.contractorId, completionTotalMinutes); onClose(); }}
             className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
           >
             Save
@@ -730,10 +769,196 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
   );
 }
 
-const COLS = [
-  "Name", "Location", "Shift Type", "Target Time", "Worksnap Actual Time", "Fixed Evaluated Time", "Flexible Evaluated Time",
-  "Manual Adjustment Time", "Time Off Time", "Completion Time", "Status", "Time Off Status", "Request Status", "Manual Adjustment Note", "Action",
-];
+type BulkApproveModalProps = {
+  allRows: AttendanceRow[];
+  initialWeek: string;
+  onApprove: (ids: Set<string>, weekDates: string[]) => void;
+  onClose: () => void;
+};
+
+function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkApproveModalProps) {
+  const [modalWeek, setModalWeek] = useState(initialWeek);
+  const [modalRows, setModalRows] = useState<AttendanceRow[]>(allRows);
+  const [isLoading, setIsLoading] = useState(false);
+  const [deptFilter, setDeptFilter] = useState("All");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (modalWeek === initialWeek) { setModalRows(allRows); return; }
+    const week = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
+    const dates = datesBetween(week.from, week.to);
+    const from = dates[0] ?? week.from;
+    const to = dates[dates.length - 1] ?? week.to;
+    setIsLoading(true);
+    fetch(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+      .then((r) => r.json())
+      .then((result) => setModalRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], dates)))
+      .finally(() => setIsLoading(false));
+  }, [modalWeek]);
+
+  const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
+  const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
+  const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
+
+  const filteredRows = modalRows.filter((r) =>
+    r.weeklyStatus === "For Review" &&
+    (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter)
+  );
+
+  const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.contractorId));
+
+  function toggleAll() {
+    const ids = filteredRows.map((r) => r.contractorId);
+    setSelectedIds(allSelected ? new Set() : new Set(ids));
+  }
+
+  function toggle(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
+
+  function handleBulkApprovePreview() {
+    const approvals = new Map<string, number>();
+    modalRows.forEach((row) => {
+      if (selectedIds.has(row.contractorId)) {
+        approvals.set(row.contractorId, computeApprovedCompletionMinutes(row, modalWeekDates));
+      }
+    });
+    setProcessedApprovals(approvals);
+  }
+
+  function handleSave() {
+    onApprove(selectedIds, modalWeekDates);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 sm:px-6 sm:py-5 border-b border-slate-100">
+          <div>
+            <h3 className="text-lg font-bold text-[#003527]">Bulk Approve</h3>
+            <p className="text-sm text-slate-500 mt-0.5">Select contractors to approve attendance</p>
+          </div>
+          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" aria-label="Close">
+            <LuX size={18} strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-2 px-5 py-3 sm:px-6 border-b border-slate-100 bg-slate-50">
+          <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
+            <option value="All">All Departments</option>
+            {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value="For Review" disabled className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none opacity-70 cursor-not-allowed">
+            <option value="For Review">For Review</option>
+          </select>
+          <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
+            {WEEKS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+          </select>
+        </div>
+
+        {/* Table */}
+        <div className="min-h-0 overflow-x-auto overflow-y-auto">
+          <table className="w-full text-left text-sm" style={{ minWidth: "860px", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead className="bg-slate-50 sticky top-0 z-30 border-b border-slate-200">
+              <tr>
+                <th className="sticky left-0 z-20 bg-slate-50 px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-slate-300 accent-[#003527] cursor-pointer" aria-label="Select all" />
+                </th>
+                <th className="sticky left-[52px] z-20 bg-slate-50 px-4 py-3 w-[220px] min-w-[220px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Contractor</th>
+                <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
+                {["Weekly Actual (Min)", "Completion Time", "Status"].map((h) => (
+                  <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {isLoading ? (
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
+              ) : filteredRows.length === 0 ? (
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
+              ) : filteredRows.map((row) => {
+                const processedMins = processedApprovals.get(row.contractorId);
+                const completionMins = processedMins ?? computeWeeklyCompletionMinutes(row, modalWeekDates);
+                const isProcessed = processedMins !== undefined;
+                return (
+                <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
+                  <td className="sticky left-0 z-10 bg-white px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                    <input type="checkbox" checked={selectedIds.has(row.contractorId)} onChange={() => toggle(row.contractorId)} className="h-4 w-4 rounded border-slate-300 accent-[#003527] cursor-pointer" aria-label={`Select ${row.name}`} />
+                  </td>
+                  <td className="sticky left-[52px] z-10 bg-white px-4 py-3 w-[220px] min-w-[220px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs font-bold shrink-0">{row.avatar}</div>
+                      <div>
+                        <p className="font-semibold text-slate-900 whitespace-nowrap">{row.name}</p>
+                        <p className="text-xs text-slate-500 whitespace-nowrap">{row.role}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="sticky left-[272px] z-10 bg-white px-4 py-3 w-[160px] min-w-[160px] text-sm text-slate-600 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{departmentForAttendanceRow(row)}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
+                  <td className={`px-4 py-3 text-sm font-semibold border-r border-slate-100 ${isProcessed ? "text-emerald-700 bg-emerald-50" : "text-slate-900"}`}>
+                    {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {row.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}
+                    {row.weeklyStatus === "For Review" && (
+                      <span className="flex items-center gap-1 text-red-600">
+                        <LuCircleAlert size={13} strokeWidth={2} />
+                        <span className="text-[11px] font-bold uppercase">For Review</span>
+                      </span>
+                    )}
+                    {row.weeklyStatus === "On Leave" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">On Leave</span>}
+                    {row.weeklyStatus === "Reviewed" && <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">Reviewed</span>}
+                  </td>
+                </tr>
+              );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50">
+          <p className="text-sm text-slate-500">
+            {processedApprovals.size > 0
+              ? `${processedApprovals.size} contractor${processedApprovals.size !== 1 ? "s" : ""} processed — review then save`
+              : `${selectedIds.size} contractor${selectedIds.size !== 1 ? "s" : ""} selected`}
+          </p>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={handleBulkApprovePreview}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <LuCircleCheck size={14} strokeWidth={2} />
+              Bulk Approve
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={processedApprovals.size === 0}
+              className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function AttendancePage() {
   const [activeWeek, setActiveWeek] = useState("w26");
@@ -744,6 +969,7 @@ export default function AttendancePage() {
   const [nameSearch, setNameSearch] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
   const selectedWeek = WEEKS.find((week) => week.key === activeWeek) ?? WEEKS[0];
   const weekDates = datesBetween(selectedWeek.from, selectedWeek.to);
   const rangeFrom = weekDates[0] ?? selectedWeek.from;
@@ -765,7 +991,7 @@ export default function AttendancePage() {
         setWorksnapRows([]);
         setWorksnapError(result.error ?? "Unable to load Worksnap entries.");
       } else {
-        setWorksnapRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[]));
+        setWorksnapRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates));
       }
 
       setIsLoadingWorksnap(false);
@@ -784,7 +1010,7 @@ export default function AttendancePage() {
     return `${fmt(from)} – ${fmt(to)}`;
   }
 
-  const attendanceRows = worksnapError ? ATTENDANCE : worksnapRows;
+  const attendanceRows: AttendanceRow[] = worksnapError ? ATTENDANCE as AttendanceRow[] : worksnapRows;
   const filteredAttendanceRows = attendanceRows.filter((row) => {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
@@ -795,16 +1021,38 @@ export default function AttendancePage() {
     return matchesName && matchesDepartment && matchesStatus;
   });
   const departmentOptions = Array.from(new Set(attendanceRows.map(departmentForAttendanceRow))).sort();
-  const statusOptions = Array.from(new Set(attendanceRows.map((row) => row.weeklyStatus))).sort();
+
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
-  const varianceFlags    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
-  const pendingReviews   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
+  const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
+  const reviewedCount    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed").length;
 
   const STATS = [
-    { label: "Perfect Standard", value: perfectStandard, color: "text-slate-900",  iconBg: "bg-teal-50",   iconColor: "text-teal-600",  Icon: LuCircleCheck   },
-    { label: "Variance Flags",   value: varianceFlags,   color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",   Icon: LuCircleAlert   },
-    { label: "Pending Reviews",  value: pendingReviews,  color: "text-slate-900",  iconBg: "bg-amber-50",  iconColor: "text-amber-600", Icon: LuClock         },
+    { label: "Perfect Standard",        value: perfectStandard, color: "text-slate-900",  iconBg: "bg-teal-50",   iconColor: "text-teal-600",  Icon: LuCircleCheck   },
+    { label: "For Review",              value: forReviewCount,  color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",   Icon: LuCircleAlert   },
+    { label: "Count of Reviewed",       value: reviewedCount,   color: "text-orange-600", iconBg: "bg-orange-50", iconColor: "text-orange-600", Icon: LuClock         },
   ];
+
+  function handleReviewSave(contractorId: string, completionMinutes: number) {
+    setWorksnapRows((rows) => rows.map((r) =>
+      r.contractorId === contractorId
+        ? { ...r, completionMinutes, weeklyStatus: "Reviewed" as const }
+        : r
+    ));
+  }
+
+  function handleBulkApprove(ids: Set<string>, weekDates: string[]) {
+    setWorksnapRows((rows) => rows.map((r) => {
+      if (!ids.has(r.contractorId)) return r;
+      const approvedMinutes = computeApprovedCompletionMinutes(r, weekDates);
+      const dailyWorksnapMinutes = r.dailyWorksnapMinutes ?? {};
+      const savedDailyDecisionStatuses: Record<string, string> = {};
+      weekDates.forEach((date) => {
+        const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+        savedDailyDecisionStatuses[date] = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
+      });
+      return { ...r, completionMinutes: approvedMinutes, weeklyStatus: "Reviewed" as const, savedDailyDecisionStatuses };
+    }));
+  }
 
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-400 mx-auto">
@@ -815,15 +1063,21 @@ export default function AttendancePage() {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap gap-2 sm:gap-3">
+            <button
+              onClick={() => setShowBulkApproveModal(true)}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors"
+            >
+              <LuCircleCheck size={16} strokeWidth={2} />
+              <span className="hidden sm:inline">Bulk Approve</span>
+              <span className="sm:hidden">Approve</span>
+            </button>
             <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
               <LuFileText size={16} /><span className="hidden sm:inline">Export Timesheet</span><span className="sm:hidden">Export</span>
             </button>
-            <button onClick={handleSync} disabled={syncing}
-              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold shadow-md disabled:opacity-50">
-              <LuRefreshCw size={16} className={syncing ? "animate-spin" : ""} /><span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span><span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
+            <button className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold transition-all shadow-md">
+              <LuRefreshCw size={16} strokeWidth={2} /><span className="hidden sm:inline">Sync All Data</span><span className="sm:hidden">Sync</span>
             </button>
           </div>
-          <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
         </div>
       </div>
 
@@ -881,9 +1135,9 @@ export default function AttendancePage() {
               aria-label="Filter by status"
             >
               <option value="All">All Statuses</option>
-              {statusOptions.map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
+              <option value="For Review">For Review</option>
+              <option value="Reviewed">Reviewed</option>
+              <option value="Standard Met">Standard Met</option>
             </select>
             <select
               value={activeWeek}
@@ -903,10 +1157,10 @@ export default function AttendancePage() {
           <table className="w-full text-left" style={{ minWidth: "720px" }}>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Contractor", "Department", "Weekly Actual (Min)", "Variance", "Status", "Actions"].map((h, i) => (
+                {["Contractor", "Department", "Weekly Actual (Min)", "Completion Time", "Variance", "Status", "Actions"].map((h, i) => (
                   <th
                     key={h}
-                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap ${i === 5 ? "text-right" : ""}`}
+                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap ${i === 6 ? "text-right" : ""}`}
                   >
                     {h}
                   </th>
@@ -916,7 +1170,7 @@ export default function AttendancePage() {
             <tbody className="divide-y divide-slate-100">
               {filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={7} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     {attendanceRows.length === 0 ? "No Worksnap entries found for weekly tracking." : "No weekly tracking rows match your search."}
                   </td>
                 </tr>
@@ -926,6 +1180,8 @@ export default function AttendancePage() {
                 const isOnLeave = row.weeklyStatus === "On Leave";
                 const isStandard = row.weeklyStatus === "Standard Met";
                 const isForReview = row.weeklyStatus === "For Review";
+                const isReviewed = row.weeklyStatus === "Reviewed";
+                const completionMins = row.completionMinutes ?? computeWeeklyCompletionMinutes(row, weekDates);
 
                 return (
                   <tr key={row.contractorId} className="hover:bg-slate-50/80 transition-colors group">
@@ -958,9 +1214,20 @@ export default function AttendancePage() {
                       )}
                     </td>
 
+                    {/* Completion Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4">
+                      {isOnLeave ? (
+                        <span className="text-sm text-slate-400">—</span>
+                      ) : (
+                        <span className="text-sm font-semibold text-slate-900">
+                          {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                        </span>
+                      )}
+                    </td>
+
                     {/* Variance */}
                     <td className="px-4 md:px-6 py-3 md:py-4">
-                      {isOnLeave || isStandard ? (
+                      {isOnLeave || isStandard || isReviewed ? (
                         <span className="text-sm text-slate-400">--</span>
                       ) : (
                         <span className="text-sm font-medium text-red-600">
@@ -987,11 +1254,16 @@ export default function AttendancePage() {
                           On Leave
                         </span>
                       )}
+                      {isReviewed && (
+                        <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
+                          Reviewed
+                        </span>
+                      )}
                     </td>
 
                     {/* Actions */}
                     <td className="px-4 md:px-6 py-3 md:py-4 text-right">
-                      {isStandard && (
+                      {(isStandard || isReviewed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
                           className="text-slate-400 hover:text-[#003527] transition-all"
@@ -1043,6 +1315,17 @@ export default function AttendancePage() {
           record={reviewTarget.record}
           weekDates={weekDates}
           onClose={() => setReviewTarget(null)}
+          onSave={handleReviewSave}
+        />
+      )}
+
+      {/* Bulk Approve Modal */}
+      {showBulkApproveModal && (
+        <BulkApproveModal
+          allRows={attendanceRows}
+          initialWeek={activeWeek}
+          onApprove={handleBulkApprove}
+          onClose={() => setShowBulkApproveModal(false)}
         />
       )}
     </div>
