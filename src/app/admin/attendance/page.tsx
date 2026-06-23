@@ -159,23 +159,16 @@ function isRestDayDate(date: string, restDaysStr: string) {
 }
 
 function evaluatedTimeFor(worksnapTime: string, attendanceStatus = "No Status", restDay = false) {
-  if (restDay && attendanceStatus !== "Approved") return "-";
-
   const worksnapMinutes = timeValueToMinutes(worksnapTime);
   if (!worksnapMinutes) return "-";
 
-  const targetMinutes = 480;
+  if (restDay) return attendanceStatus === "Approved" ? formatMinutesAsMins(worksnapMinutes) : "-";
 
-  if (attendanceStatus === "Approved") {
-    return formatMinutesAsMins(worksnapMinutes);
-  }
+  const approved = attendanceStatus === "Approved";
 
-  if (worksnapMinutes > 540) return formatMinutesAsMins(540);
-  if (attendanceStatus === "No Status" || attendanceStatus === "") return formatMinutesAsMins(worksnapMinutes);
-  if (worksnapMinutes < 180) return formatMinutesAsMins(worksnapMinutes);
-  if (worksnapMinutes > targetMinutes && worksnapMinutes <= 540) return formatMinutesAsMins(worksnapMinutes);
-
-  return formatMinutesAsMins(Math.min(targetMinutes, worksnapMinutes));
+  if (worksnapMinutes < 480) return approved ? formatMinutesAsMins(480) : formatMinutesAsMins(worksnapMinutes);
+  if (worksnapMinutes > 540) return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(540);
+  return formatMinutesAsMins(worksnapMinutes);
 }
 
 function worksnapTimeFor(date: string) {
