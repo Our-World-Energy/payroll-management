@@ -241,7 +241,7 @@ export default function TimeOffPage() {
   const [editReason,    setEditReason]    = useState("");
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
-  const [modalTab,      setModalTab]      = useState<"details" | "history" | "info">("details");
+  const [modalTab,      setModalTab]      = useState<"details" | "history" | "info">("info");
   // Tracks how many advance hours have been granted per row (in-session only)
   const [advanceGrants, setAdvanceGrants] = useState<Record<string, { sick: number; pto: number }>>({});
 
@@ -316,7 +316,7 @@ export default function TimeOffPage() {
     const openId = searchParams.get("open");
     if (openId && rows.length > 0 && !selectedRowId) {
       setSelectedRowId(openId);
-      setModalTab("details");
+      setModalTab("info");
       router.replace("/admin/time-off");
     }
   }, [searchParams, rows]);
@@ -426,7 +426,6 @@ export default function TimeOffPage() {
                 {([
                   { key: "info",    label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
                   { key: "details", label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
-                  { key: "history", label: `History (${employeeHistory.length})`, icon: <LuHistory size={13} /> },
                 ] as const).map(({ key, label, icon }) => (
                   <button
                     key={key}
@@ -528,19 +527,19 @@ export default function TimeOffPage() {
                   const isPto = editLeaveType === "Advance PTO/Birthday Leave";
 
                   function applyAdvanceGrant() {
-                    const hoursToAdd = isPto ? 8 : (parseFloat(editHours) || 0);
-                    if (!isPto && hoursToAdd <= 0) return;
+                    const hoursToAdd = parseFloat(editHours) || 0;
+                    if (hoursToAdd <= 0) return;
                     setAdvanceGrants((cur) => {
                       const prev = cur[selectedRow.id] ?? { sick: 0, pto: 0 };
                       return {
                         ...cur,
                         [selectedRow.id]: {
                           sick: prev.sick + (isPto ? 0 : hoursToAdd),
-                          pto:  prev.pto  + (isPto ? 8 : 0),
+                          pto:  prev.pto  + (isPto ? hoursToAdd : 0),
                         },
                       };
                     });
-                    if (!isPto) setEditHours("");
+                    setEditHours("");
                   }
 
                   return (<>
@@ -612,29 +611,20 @@ export default function TimeOffPage() {
                             </select>
                           </div>
 
-                          {/* Request Hours — only for Advance Sick Leave */}
-                          {!isPto && (
-                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
-                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                                Request Hours <span className="text-red-400">*</span>
-                              </p>
-                              <input
-                                type="number"
-                                min="1"
-                                value={editHours}
-                                onChange={(e) => setEditHours(e.target.value)}
-                                placeholder="Enter hours e.g. 8"
-                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                              />
-                            </div>
-                          )}
-
-                          {/* PTO auto-note */}
-                          {isPto && (
-                            <div className="col-span-2 rounded-lg bg-pink-50 border border-pink-200 px-3 py-2 text-xs text-pink-700">
-                              <strong>Auto:</strong> 8 hours will be added to the Advance PTO/Birthday Leave balance upon apply.
-                            </div>
-                          )}
+                          {/* Request Hours */}
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                              Request Hours <span className="text-red-400">*</span>
+                            </p>
+                            <input
+                              type="number"
+                              min="1"
+                              value={editHours}
+                              onChange={(e) => setEditHours(e.target.value)}
+                              placeholder="Enter hours e.g. 8"
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            />
+                          </div>
 
                           {/* From date */}
                           <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
@@ -674,7 +664,7 @@ export default function TimeOffPage() {
                         {/* Apply button */}
                         <button
                           onClick={applyAdvanceGrant}
-                          disabled={!isPto && (!editHours || parseFloat(editHours) <= 0)}
+                          disabled={!editHours || parseFloat(editHours) <= 0}
                           className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
                         >
                           <LuCircleCheck size={15} strokeWidth={2} />
@@ -684,45 +674,7 @@ export default function TimeOffPage() {
                     )}
                   </div>
                   </>);
-                })() : (
-                  /* History tab */
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">All Time-Off Requests</p>
-                    {employeeHistory.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-12 text-slate-300">
-                        <LuHistory size={32} strokeWidth={1.5} />
-                        <p className="mt-3 text-sm font-medium">No request history</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {employeeHistory.map((req) => {
-                          const st = effectiveRequestStatus(req, requestDecisions);
-                          return (
-                            <div key={req.id} className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="text-xs font-mono text-slate-400">{req.id}</span>
-                                  <span className="text-xs font-semibold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">{req.type}</span>
-                                </div>
-                                <p className="text-sm font-semibold text-slate-700 mt-1">
-                                  {fmtDate(req.from)} → {fmtDate(req.to)}
-                                  <span className="text-xs text-slate-400 font-normal ml-2">{req.days} day{req.days !== 1 ? "s" : ""}</span>
-                                </p>
-                                {req.reason && <p className="text-xs text-slate-400 mt-0.5 truncate">{req.reason}</p>}
-                              </div>
-                              {st !== "-" && (
-                                <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[st]}`}>
-                                  {REVIEW_ICON[st]}
-                                  {st}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                })() : null}
               </div>
 
               {/* Footer actions */}
