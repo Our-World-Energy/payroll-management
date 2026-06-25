@@ -6,14 +6,14 @@ import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, 
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 
 const WEEKS = [
-  { label: "Week 26 (Jun 21 - 27, 2026)", key: "w26", from: "2026-06-21", to: "2026-06-27" },
-  { label: "Week 25 (Jun 14 - 20, 2026)", key: "w25", from: "2026-06-14", to: "2026-06-20" },
-  { label: "Week 24 (Jun 7 - 13, 2026)",  key: "w24", from: "2026-06-07", to: "2026-06-13" },
-  { label: "Week 23 (May 31 - Jun 6, 2026)", key: "w23", from: "2026-05-31", to: "2026-06-06" },
-  { label: "Week 22 (May 24 - 30, 2026)", key: "w22", from: "2026-05-24", to: "2026-05-30" },
-  { label: "Week 21 (May 17 - 23, 2026)", key: "w21", from: "2026-05-17", to: "2026-05-23" },
-  { label: "Week 20 (May 10 - 16, 2026)", key: "w20", from: "2026-05-10", to: "2026-05-16" },
-  { label: "Week 19 (May 3 - 9, 2026)",   key: "w19", from: "2026-05-03", to: "2026-05-09" },
+  { label: "Week 26 (Jun 21 - 27)", key: "w26", from: "2026-06-21", to: "2026-06-27" },
+  { label: "Week 25 (Jun 14 - 20)", key: "w25", from: "2026-06-14", to: "2026-06-20" },
+  { label: "Week 24 (Jun 7 - 13)",  key: "w24", from: "2026-06-07", to: "2026-06-13" },
+  { label: "Week 23 (May 31 - Jun 6)", key: "w23", from: "2026-05-31", to: "2026-06-06" },
+  { label: "Week 22 (May 24 - 30)", key: "w22", from: "2026-05-24", to: "2026-05-30" },
+  { label: "Week 21 (May 17 - 23)", key: "w21", from: "2026-05-17", to: "2026-05-23" },
+  { label: "Week 20 (May 10 - 16)", key: "w20", from: "2026-05-10", to: "2026-05-16" },
+  { label: "Week 19 (May 3 - 9)",   key: "w19", from: "2026-05-03", to: "2026-05-09" },
 ];
 
 
@@ -42,6 +42,11 @@ function datesBetween(from: string, to: string) {
   return dates;
 }
 
+function nextWeekKeyFor(weekKey: string) {
+  const index = WEEKS.findIndex((week) => week.key === weekKey);
+  return index > 0 ? WEEKS[index - 1].key : null;
+}
+
 
 function formatDayLabel(date: string) {
   return parseIsoDate(date).toLocaleDateString("en-US", {
@@ -59,7 +64,8 @@ type ReviewModalProps = {
   record: AttendanceRow;
   weekDates: string[];
   onClose: () => void;
-  onSave: (contractorId: string, completionMinutes: number) => void;
+  appliedOffsetCredit?: number;
+  onSave: (contractorId: string, completionMinutes: number, offsetCreditApplied?: number) => void;
 };
 
 type WorksnapEntry = {
@@ -69,6 +75,8 @@ type WorksnapEntry = {
   entryDate?: string | null;
   department?: string | null;
   restDay?: string | null;
+  location?: string | null;
+  shiftType?: string | null;
   dailyWorksnapMinutes?: Record<string, number>;
 };
 
@@ -158,13 +166,22 @@ function isRestDayDate(date: string, restDaysStr: string) {
   return restDaysStr.split(",").map((d) => d.trim()).includes(dayName);
 }
 
-function evaluatedTimeFor(worksnapTime: string, attendanceStatus = "No Status", restDay = false) {
+function isFlexibleShift(shiftType?: string) {
+  return shiftType?.trim().toLowerCase() === "flexible";
+}
+
+function evaluatedTimeFor(worksnapTime: string, attendanceStatus = "No Status", restDay = false, shiftType?: string) {
   const worksnapMinutes = timeValueToMinutes(worksnapTime);
   if (!worksnapMinutes) return "-";
 
   if (restDay) return attendanceStatus === "Approved" ? formatMinutesAsMins(worksnapMinutes) : "-";
 
   const approved = attendanceStatus === "Approved";
+
+  if (isFlexibleShift(shiftType)) {
+    if (worksnapMinutes > 540) return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(540);
+    return formatMinutesAsMins(worksnapMinutes);
+  }
 
   if (worksnapMinutes < 480) return approved ? formatMinutesAsMins(480) : formatMinutesAsMins(worksnapMinutes);
   if (worksnapMinutes > 540) return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(540);
@@ -245,12 +262,18 @@ function worksnapTotalMinutesFor(weekDates: string[], dailyWorksnapMinutes: Reco
 
 function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
   const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
-  const restDaysStr = restDaysForAttendanceRow(row);
 
+  if (isIndiaContractor(row.region)) {
+    const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
+    return Math.min(total, 2400);
+  }
+
+  const restDaysStr = restDaysForAttendanceRow(row);
+  const shiftType = shiftTypeForAttendanceRow(row);
   return weekDates.reduce((total, date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, "No Status", isRestDay);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, "No Status", isRestDay, shiftType);
 
     const timeOffRequest = TIME_OFF.find((item) =>
       item.name === row.name && date >= item.from && date <= item.to
@@ -269,14 +292,20 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[])
 
 function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
   const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
-  const restDaysStr = restDaysForAttendanceRow(row);
 
+  if (isIndiaContractor(row.region)) {
+    const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
+    return Math.min(total, 2400);
+  }
+
+  const restDaysStr = restDaysForAttendanceRow(row);
+  const shiftType = shiftTypeForAttendanceRow(row);
   return weekDates.reduce((total, date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     if (worksnapTime === "-") return total;
 
     const isRestDay = isRestDayDate(date, restDaysStr);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, "Approved", isRestDay);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, "Approved", isRestDay, shiftType);
 
     const timeOffRequest = TIME_OFF.find((item) =>
       item.name === row.name && date >= item.from && date <= item.to
@@ -329,12 +358,22 @@ function initialsFor(name: string) {
 type AttendanceRow = AttendanceRecord & {
   department?: string;
   restDay?: string;
+  shiftType?: string;
   dailyWorksnapMinutes?: Record<string, number>;
   completionMinutes?: number;
   savedDailyDecisionStatuses?: Record<string, string>;
 };
 
-function computeDailyWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string): AttendanceRecord["weeklyStatus"] {
+function isIndiaContractor(region: string) {
+  return region.trim().toLowerCase().includes("india");
+}
+
+function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string, region: string): AttendanceRecord["weeklyStatus"] {
+  if (isIndiaContractor(region)) {
+    const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
+    if (total < 2400 || total > 2700) return "For Review";
+    return "Standard Met";
+  }
   for (const date of weekDates) {
     if (isRestDayDate(date, restDaysStr)) continue;
     const mins = dailyWorksnapMinutes[date] ?? 0;
@@ -347,14 +386,16 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
   const name = entry.userName?.trim() || entry.email?.trim() || `Worksnap User ${index + 1}`;
   const actualMinutes = Number(entry.durationMins ?? 0) || 0;
   const restDaysStr = entry.restDay?.trim() || "";
-  const weeklyStatus = computeDailyWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr);
+  const region = entry.location?.trim().split(",").at(-1)?.trim() || "Worksnap";
+  const shiftType = entry.shiftType?.trim() || "";
+  const weeklyStatus = computeWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr, region);
 
   return {
     contractorId: entry.email?.trim() || `worksnap-${index}`,
     name,
     role: entry.email?.trim() || "No email",
     avatar: initialsFor(name),
-    region: "Worksnap",
+    region,
     date: "2026-05-15",
     checkIn: "-",
     checkOut: "-",
@@ -365,12 +406,13 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
     weeklyStatus,
     department: entry.department?.trim() || "",
     restDay: entry.restDay?.trim() || "",
+    shiftType,
     dailyWorksnapMinutes: entry.dailyWorksnapMinutes ?? {},
   };
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; dailyWorksnapMinutes: Record<string, number> }>();
+  const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; dailyWorksnapMinutes: Record<string, number> }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -387,6 +429,8 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
       durationMins: (current?.durationMins ?? 0) + durationMins,
       department: current?.department || entry.department || null,
       restDay: current?.restDay || entry.restDay || null,
+      location: current?.location || entry.location || null,
+      shiftType: current?.shiftType || entry.shiftType || null,
       dailyWorksnapMinutes,
     });
   });
@@ -419,7 +463,12 @@ function restDaysForAttendanceRow(row: AttendanceRow) {
   return days.length > 0 ? days.join(", ") : "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, onSave }: ReviewModalProps) {
+function shiftTypeForAttendanceRow(row: AttendanceRow) {
+  if (row.shiftType) return row.shiftType;
+  return "-";
+}
+
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -434,21 +483,31 @@ function ReviewModal({ record, weekDates, onClose, onSave }: ReviewModalProps) {
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
   const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
+  const isIndia = isIndiaContractor(record.region);
+  const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
+  const evaluationShiftType = isIndia ? undefined : shiftType;
+  const [offsetCredit, setOffsetCredit] = useState(0);
   const worksnapTotalMinutes = worksnapTotalMinutesFor(weekDates, dailyWorksnapMinutes);
-const completionTotalMinutes = weekDates.reduce((total, date) => {
-    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr));
-    const adjustedTime = adjustedTimes[date] ?? "";
-    const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-    const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime));
-  }, 0);
+  const indiaTotalMinutes = Math.min(worksnapTotalMinutes, 2400);
+  const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
+const completionTotalMinutes = isIndiaContractor(record.region)
+    ? indiaNetCompletionMinutes
+    : weekDates.reduce((total, date) => {
+        const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+        const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType);
+        const adjustedTime = adjustedTimes[date] ?? "";
+        const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
+        const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
+        return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime));
+      }, 0);
   const details = [
-    ["Shift Type", "Fixed"],
+    ["Shift Type", shiftType],
     ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Evaluated Time", "Adjusted Time", "Holiday Time", "Time Off Status", "Time Off Time", "Completion Time", "Approval Status"]
+    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Time")));
 
   useEffect(() => {
     const savedStatuses = (record as AttendanceRow).savedDailyDecisionStatuses;
@@ -459,14 +518,15 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
     setDailyTimeOffStatuses(defaultDailyTimeOffStatuses(weekDates, defaultTimeOffStatusFor(record)));
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
-  }, [record, weekDates]);
+    setOffsetCredit(0);
+  }, [record, weekDates, appliedOffsetCredit]);
 
   useEffect(() => {
     setAdjustedTimes((current) => weekDates.reduce<Record<string, string>>((times, date) => {
-      times[date] = current[date] ?? evaluatedTimeFor(worksnapTimeForDate(dailyWorksnapMinutes, date), dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr));
+      times[date] = current[date] ?? evaluatedTimeFor(worksnapTimeForDate(dailyWorksnapMinutes, date), dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType);
       return times;
     }, {}));
-  }, [weekDates, dailyDecisionStatuses, dailyWorksnapMinutes]);
+  }, [weekDates, dailyDecisionStatuses, dailyWorksnapMinutes, evaluationShiftType]);
 
   function finishAdjustedEdit(date: string, fallbackValue: string) {
     setAdjustedTimes((current) => ({
@@ -490,11 +550,14 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
     const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
     setDailyDecisionStatuses((current) => {
       const next = { ...current };
-      applicableDates.forEach((date) => {
-        next[date] = allApproved ? "No Status" : "Approved";
-      });
+      applicableDates.forEach((date) => { next[date] = allApproved ? "No Status" : "Approved"; });
       return next;
     });
+  }
+
+  function applyTimeCredit() {
+    const credit = 2400 - completionTotalMinutes;
+    setOffsetCredit(credit);
   }
 
   return (
@@ -527,22 +590,14 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
             ))}
           </div>
           <div className="mt-5">
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center mb-2">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Weekly Days</p>
-              <button
-                type="button"
-                onClick={approveAllDays}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
-              >
-                <LuCircleCheck size={13} strokeWidth={2} />
-                Approve All
-              </button>
             </div>
             <div className="overflow-x-scroll rounded-xl border border-slate-200">
               <table className="w-full text-left text-sm" style={{ minWidth: "1580px", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead className="bg-slate-50 sticky top-0 z-30">
                   <tr>
-                    {["Days", "Decision", "Worksnap Time", "Evaluated Time", "Adjusted Time", "Holiday Time", "Time Off Status", "Time Off Time", "Completion Time", "Approval Status"].map((heading) => (
+                    {weeklyDayHeadings.map((heading) => (
                       <th
                         key={heading}
                         className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100 last:border-r-0 ${
@@ -550,7 +605,7 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                         } ${
                           heading === "Decision" ? "sticky left-[156px] z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
                         } ${
-                          heading === "Worksnap Time" ? "sticky left-[268px] z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
+                          heading === "Worksnap Time" ? `sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
                         }`}
                       >
                         {heading}
@@ -563,7 +618,7 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                     const hasRecord = record.date === date;
                     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
                     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-                    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDayDate(date, restDaysStr));
+                    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDayDate(date, restDaysStr), evaluationShiftType);
                     const adjustedTime = adjustedTimes[date] ?? "";
                     const holidayTime = holidayTimeFor(record, date);
                     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
@@ -576,40 +631,42 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                         <td className="sticky left-0 z-10 w-[156px] min-w-[156px] bg-white px-4 py-3 font-medium text-slate-800 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                           {formatDayLabel(date)}
                         </td>
-                        <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-3 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
-                          {showDailyDecisionActions(worksnapTime) ? (
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => toggleDailyDecision(date, "Approved")}
-                                className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
-                                aria-label={`Approve attendance for ${formatDayLabel(date)}`}
-                                title="Approve"
-                              >
-                                <LuCircleCheck size={15} strokeWidth={2} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => toggleDailyDecision(date, "Rejected")}
-                                className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50"
-                                aria-label={`Reject attendance for ${formatDayLabel(date)}`}
-                                title="Reject"
-                              >
-                                <LuX size={15} strokeWidth={2} />
-                              </button>
-                            </div>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
-                        <td className={`sticky left-[268px] z-10 w-[140px] min-w-[140px] bg-white px-4 py-3 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(worksnapTime)}`}>
+                        {!isIndia && (
+                          <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-3 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                            {showDailyDecisionActions(worksnapTime) ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDailyDecision(date, "Approved")}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                                  aria-label={`Approve attendance for ${formatDayLabel(date)}`}
+                                  title="Approve"
+                                >
+                                  <LuCircleCheck size={15} strokeWidth={2} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDailyDecision(date, "Rejected")}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50"
+                                  aria-label={`Reject attendance for ${formatDayLabel(date)}`}
+                                  title="Reject"
+                                >
+                                  <LuX size={15} strokeWidth={2} />
+                                </button>
+                              </div>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+                        )}
+                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-3 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(worksnapTime)}`}>
                           {worksnapTime}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
                           {evaluatedTime}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
-                          {isEditingAdjustedTime ? (
+                          {isIndia ? "-" : isEditingAdjustedTime ? (
                             <input
                               autoFocus
                               type="text"
@@ -669,9 +726,11 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                             ))}
                           </select>
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
-                          {timeOffTime}
-                        </td>
+                        {!isIndia && (
+                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                            {timeOffTime}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-slate-600">
                           {completionTime}
                         </td>
@@ -687,15 +746,19 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                     <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                       Total Time
                     </td>
-                    <td className="sticky left-[156px] z-20 w-[112px] min-w-[112px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
-                      -
-                    </td>
-                    <td className="sticky left-[268px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                    {!isIndia && (
+                      <td className="sticky left-[156px] z-20 w-[112px] min-w-[112px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                        -
+                      </td>
+                    )}
+                    <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       {formatMinutesAsMins(worksnapTotalMinutes)}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
-                      -
-                    </td>
+                    {!isIndia && (
+                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                        -
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
                     </td>
@@ -709,12 +772,44 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
                       -
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-900">
-                      {formatMinutesAsMins(completionTotalMinutes)}
+                      {formatMinutesAsMins(isIndia ? indiaTotalMinutes : completionTotalMinutes)}
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       -
                     </td>
                   </tr>
+                  {isIndia && (
+                    <>
+                      <tr>
+                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                          Offset Credit
+                        </td>
+                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
+                          {formatMinutesAsMins(offsetCredit || appliedOffsetCredit)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">-</td>
+                      </tr>
+                      <tr>
+                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#003527] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                          Net Time
+                        </td>
+                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 && offsetCredit === 0 ? "text-red-600" : "text-[#003527]"}`}>
+                          {formatMinutesAsMins(offsetCredit > 0 ? indiaTotalMinutes + offsetCredit : indiaNetCompletionMinutes)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">-</td>
+                      </tr>
+                    </>
+                  )}
                 </tfoot>
               </table>
             </div>
@@ -731,27 +826,36 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
             </div>
           )}
         </div>
-        <div className="hidden">
-          <div className={`flex items-center gap-3 p-3 rounded-xl ${type === "overtime" ? "bg-red-50 border border-red-100" : "bg-amber-50 border border-amber-100"}`}>
-            <LuCircleAlert size={18} className={type === "overtime" ? "text-red-500" : "text-amber-500"} />
-            <div>
-              <p className={`text-sm font-bold ${type === "overtime" ? "text-red-700" : "text-amber-700"}`}>
-                {type === "overtime" ? "Overtime Detected" : "Undertime Detected"}
-              </p>
-              <p className="text-xs text-slate-500">
-                Actual: {actual.toLocaleString()} min · Variance: {variance > 0 ? "+" : ""}{variance} min
-              </p>
-            </div>
-          </div>
-
-        </div>
-        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+          >
             Close
           </button>
+          {isIndia && appliedOffsetCredit === 0 && offsetCredit === 0 && completionTotalMinutes < 2400 && (
+            <button
+              type="button"
+              onClick={applyTimeCredit}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+            >
+              <LuCircleCheck size={15} strokeWidth={2} />
+              Apply Time Credit
+            </button>
+          )}
+          {!isIndia && (
+            <button
+              type="button"
+              onClick={approveAllDays}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+            >
+              <LuCircleCheck size={15} strokeWidth={2} />
+              Approve All
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => { onSave(record.contractorId, completionTotalMinutes); onClose(); }}
+            onClick={() => { onSave(record.contractorId, isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes, isIndia ? offsetCredit : 0); onClose(); }}
             className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
           >
             Save
@@ -762,22 +866,25 @@ const completionTotalMinutes = weekDates.reduce((total, date) => {
   );
 }
 
-type BulkApproveModalProps = {
-  allRows: AttendanceRow[];
-  initialWeek: string;
-  onApprove: (ids: Set<string>, weekDates: string[]) => void;
+function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
+  worksnapRows: AttendanceRow[];
   onClose: () => void;
-};
-
-function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkApproveModalProps) {
-  const [modalWeek, setModalWeek] = useState(initialWeek);
-  const [modalRows, setModalRows] = useState<AttendanceRow[]>(allRows);
-  const [isLoading, setIsLoading] = useState(false);
+  onApprove: (ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) => void;
+}) {
+  const [modalWeek, setModalWeek] = useState("w26");
   const [deptFilter, setDeptFilter] = useState("All");
+  const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
+  const [modalRows, setModalRows] = useState<AttendanceRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
+
+  const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
+  const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
+  const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
+  const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
   useEffect(() => {
-    if (modalWeek === initialWeek) { setModalRows(allRows); return; }
     const week = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
     const dates = datesBetween(week.from, week.to);
     const from = dates[0] ?? week.from;
@@ -789,67 +896,64 @@ function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkAppr
       .finally(() => setIsLoading(false));
   }, [modalWeek]);
 
-  const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
-  const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
-  const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
-
   const filteredRows = modalRows.filter((r) =>
     r.weeklyStatus === "For Review" &&
-    (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter)
+    !isIndiaContractor(r.region) &&
+    (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter) &&
+    (shiftTypeFilter === "All" || r.shiftType === shiftTypeFilter)
   );
 
   const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.contractorId));
 
-  function toggleAll() {
-    const ids = filteredRows.map((r) => r.contractorId);
-    setSelectedIds(allSelected ? new Set() : new Set(ids));
-  }
-
   function toggle(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+    setSelectedIds((ids) => { const next = new Set(ids); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
 
-  const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
+  function toggleAll() {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredRows.map((r) => r.contractorId)));
+  }
 
   function handleBulkApprovePreview() {
-    const approvals = new Map<string, number>();
-    modalRows.forEach((row) => {
-      if (selectedIds.has(row.contractorId)) {
-        approvals.set(row.contractorId, computeApprovedCompletionMinutes(row, modalWeekDates));
-      }
+    const map = new Map<string, number>();
+    filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
+      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates));
     });
-    setProcessedApprovals(approvals);
+    setProcessedApprovals(map);
   }
 
   function handleSave() {
-    onApprove(selectedIds, modalWeekDates);
+    const approvedMinutesById = processedApprovals.size > 0
+      ? processedApprovals
+      : new Map<string, number>(filteredRows
+          .filter((r) => selectedIds.has(r.contractorId))
+          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates)])
+        );
+    onApprove(selectedIds, modalWeekDates, approvedMinutesById);
     onClose();
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 sm:px-6 sm:py-5 border-b border-slate-100">
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold text-[#003527]">Bulk Approve</h3>
-            <p className="text-sm text-slate-500 mt-0.5">Select contractors to approve attendance</p>
+            <p className="text-sm text-slate-500 mt-0.5">Approve all selected contractors for the week</p>
           </div>
-          <button onClick={onClose} className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" aria-label="Close">
+          <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
             <LuX size={18} strokeWidth={2} />
           </button>
         </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2 px-5 py-3 sm:px-6 border-b border-slate-100 bg-slate-50">
+        <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
           <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             <option value="All">All Departments</option>
             {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={shiftTypeFilter} onChange={(e) => setShiftTypeFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
+            <option value="All">All Shift Types</option>
+            {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <select value="For Review" disabled className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none opacity-70 cursor-not-allowed">
             <option value="For Review">For Review</option>
@@ -857,8 +961,26 @@ function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkAppr
           <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             {WEEKS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
+          <div className="ml-auto flex items-center gap-2">
+            {processedApprovals.size === 0 ? (
+              <button
+                onClick={handleBulkApprovePreview}
+                disabled={selectedIds.size === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <LuCircleCheck size={15} strokeWidth={2} />
+                Bulk Approve
+              </button>
+            ) : (
+              <button
+                onClick={handleSave}
+                className="flex items-center gap-2 px-4 py-2 bg-[#003527] text-white rounded-lg text-sm font-semibold hover:bg-[#064E3B] transition-colors"
+              >
+                Save
+              </button>
+            )}
+          </div>
         </div>
-
         {/* Table */}
         <div className="min-h-0 overflow-x-auto overflow-y-auto">
           <table className="w-full text-left text-sm" style={{ minWidth: "860px", borderCollapse: "separate", borderSpacing: 0 }}>
@@ -869,7 +991,7 @@ function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkAppr
                 </th>
                 <th className="sticky left-[52px] z-20 bg-slate-50 px-4 py-3 w-[220px] min-w-[220px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Contractor</th>
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
-                {["Weekly Actual (Min)", "Completion Time", "Status"].map((h) => (
+                {["Actual Time", "Completion Time", "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
               </tr>
@@ -878,7 +1000,7 @@ function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkAppr
               {isLoading ? (
                 <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No non-India contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const completionMins = processedMins ?? computeWeeklyCompletionMinutes(row, modalWeekDates);
@@ -920,33 +1042,17 @@ function BulkApproveModal({ allRows, initialWeek, onApprove, onClose }: BulkAppr
           </table>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-between gap-3 bg-slate-50">
-          <p className="text-sm text-slate-500">
-            {processedApprovals.size > 0
-              ? `${processedApprovals.size} contractor${processedApprovals.size !== 1 ? "s" : ""} processed — review then save`
-              : `${selectedIds.size} contractor${selectedIds.size !== 1 ? "s" : ""} selected`}
-          </p>
-          <div className="flex gap-3">
-            <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
-              Cancel
-            </button>
-            <button
-              onClick={handleBulkApprovePreview}
-              disabled={selectedIds.size === 0}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <LuCircleCheck size={14} strokeWidth={2} />
-              Bulk Approve
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={processedApprovals.size === 0}
-              className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Save
-            </button>
-          </div>
+        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
+          >
+            Save
+          </button>
         </div>
       </div>
     </div>
@@ -960,9 +1066,12 @@ export default function AttendancePage() {
   const [isLoadingWorksnap, setIsLoadingWorksnap] = useState(true);
   const [worksnapError, setWorksnapError] = useState("");
   const [nameSearch, setNameSearch] = useState("");
+  const [countryFilter, setCountryFilter] = useState("All");
+  const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
+  const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
   const selectedWeek = WEEKS.find((week) => week.key === activeWeek) ?? WEEKS[0];
   const weekDates = datesBetween(selectedWeek.from, selectedWeek.to);
   const rangeFrom = weekDates[0] ?? selectedWeek.from;
@@ -1008,35 +1117,54 @@ export default function AttendancePage() {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
     const matchesName = !query || row.name.toLowerCase().includes(query);
+    const matchesCountry = countryFilter === "All" || row.region === countryFilter;
+    const matchesShiftType = shiftTypeFilter === "All" || row.shiftType === shiftTypeFilter;
     const matchesDepartment = departmentFilter === "All" || department === departmentFilter;
     const matchesStatus = statusFilter === "All" || row.weeklyStatus === statusFilter;
 
-    return matchesName && matchesDepartment && matchesStatus;
+    return matchesName && matchesCountry && matchesShiftType && matchesDepartment && matchesStatus;
   });
   const departmentOptions = Array.from(new Set(attendanceRows.map(departmentForAttendanceRow))).sort();
+  const countryOptions = Array.from(new Set(attendanceRows.map((r) => r.region).filter(Boolean))).sort();
+  const shiftTypeOptions = Array.from(new Set(attendanceRows.map((r) => r.shiftType ?? "").filter(Boolean))).sort();
 
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
   const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
   const reviewedCount    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed").length;
 
   const STATS = [
-    { label: "Perfect Standard",        value: perfectStandard, color: "text-slate-900",  iconBg: "bg-teal-50",   iconColor: "text-teal-600",  Icon: LuCircleCheck   },
-    { label: "For Review",              value: forReviewCount,  color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",   Icon: LuCircleAlert   },
-    { label: "Count of Reviewed",       value: reviewedCount,   color: "text-orange-600", iconBg: "bg-orange-50", iconColor: "text-orange-600", Icon: LuClock         },
+    { label: "Standard Met",      value: perfectStandard, color: "text-emerald-600", iconBg: "bg-teal-50",   iconColor: "text-teal-600",   Icon: LuCircleCheck },
+    { label: "For Review",        value: forReviewCount,  color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",    Icon: LuCircleAlert },
+    { label: "Reviewed", value: reviewedCount,   color: "text-orange-600", iconBg: "bg-orange-50", iconColor: "text-orange-600", Icon: LuClock       },
   ];
 
-  function handleReviewSave(contractorId: string, completionMinutes: number) {
+  function appliedOffsetCreditFor(row: AttendanceRow) {
+    return offsetCreditsByWeek[activeWeek]?.[row.contractorId] ?? 0;
+  }
+
+  function handleReviewSave(contractorId: string, completionMinutes: number, offsetCreditApplied = 0) {
     setWorksnapRows((rows) => rows.map((r) =>
       r.contractorId === contractorId
         ? { ...r, completionMinutes, weeklyStatus: "Reviewed" as const }
         : r
     ));
+
+    const nextWeekKey = nextWeekKeyFor(activeWeek);
+    if (!nextWeekKey || offsetCreditApplied <= 0) return;
+
+    setOffsetCreditsByWeek((current) => ({
+      ...current,
+      [nextWeekKey]: {
+        ...(current[nextWeekKey] ?? {}),
+        [contractorId]: offsetCreditApplied,
+      },
+    }));
   }
 
-  function handleBulkApprove(ids: Set<string>, weekDates: string[]) {
+  function handleBulkApprove(ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) {
     setWorksnapRows((rows) => rows.map((r) => {
       if (!ids.has(r.contractorId)) return r;
-      const approvedMinutes = computeApprovedCompletionMinutes(r, weekDates);
+      const approvedMinutes = approvedMinutesById.get(r.contractorId) ?? computeApprovedCompletionMinutes(r, weekDates);
       const dailyWorksnapMinutes = r.dailyWorksnapMinutes ?? {};
       const savedDailyDecisionStatuses: Record<string, string> = {};
       weekDates.forEach((date) => {
@@ -1103,6 +1231,28 @@ export default function AttendancePage() {
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={countryFilter}
+              onChange={(event) => setCountryFilter(event.target.value)}
+              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
+              aria-label="Filter by country"
+            >
+              <option value="All">All Countries</option>
+              {countryOptions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select
+              value={shiftTypeFilter}
+              onChange={(event) => setShiftTypeFilter(event.target.value)}
+              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
+              aria-label="Filter by shift type"
+            >
+              <option value="All">All Shift Types</option>
+              {shiftTypeOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
             <input
               type="search"
               value={nameSearch}
@@ -1150,10 +1300,10 @@ export default function AttendancePage() {
           <table className="w-full text-left" style={{ minWidth: "720px" }}>
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                {["Contractor", "Department", "Weekly Actual (Min)", "Completion Time", "Variance", "Status", "Actions"].map((h, i) => (
+                {["Contractor", "Department", "Actual Time", "Completion Time", "Variance", "Status", "Actions"].map((h, i) => (
                   <th
                     key={h}
-                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap ${i === 6 ? "text-right" : ""}`}
+                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap ${i === 5 ? "w-48 text-center" : ""} ${i === 6 ? "text-right" : ""}`}
                   >
                     {h}
                   </th>
@@ -1174,7 +1324,14 @@ export default function AttendancePage() {
                 const isStandard = row.weeklyStatus === "Standard Met";
                 const isForReview = row.weeklyStatus === "For Review";
                 const isReviewed = row.weeklyStatus === "Reviewed";
-                const completionMins = row.completionMinutes ?? computeWeeklyCompletionMinutes(row, weekDates);
+                const appliedOffsetCredit = appliedOffsetCreditFor(row);
+                const isAppliedTimeCredit = isIndiaContractor(row.region) && appliedOffsetCredit > 0;
+                const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
+                const completionMins = row.completionMinutes ?? (
+                  isIndiaContractor(row.region)
+                    ? Math.max(0, computedCompletionMins - appliedOffsetCredit)
+                    : computedCompletionMins
+                );
 
                 return (
                   <tr key={row.contractorId} className="hover:bg-slate-50/80 transition-colors group">
@@ -1212,7 +1369,7 @@ export default function AttendancePage() {
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">
+                        <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
                           {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
                         </span>
                       )}
@@ -1230,27 +1387,35 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
-                      {isStandard && (
-                        <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">
-                          Standard Met
+                    <td className="px-4 md:px-6 py-3 md:py-4 text-center">
+                      {isAppliedTimeCredit ? (
+                        <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
+                          Applied Time Credit
                         </span>
-                      )}
-                      {isForReview && (
-                        <span className="flex items-center gap-1 text-red-600">
-                          <LuCircleAlert size={15} strokeWidth={2} className="fill-red-100" />
-                          <span className="text-[11px] font-bold uppercase">For Review</span>
-                        </span>
-                      )}
-                      {isOnLeave && (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">
-                          On Leave
-                        </span>
-                      )}
-                      {isReviewed && (
-                        <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
-                          Reviewed
-                        </span>
+                      ) : (
+                        <>
+                          {isStandard && (
+                            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">
+                              Standard Met
+                            </span>
+                          )}
+                          {isForReview && (
+                            <span className="flex items-center justify-center gap-1 text-red-600">
+                              <LuCircleAlert size={15} strokeWidth={2} className="fill-red-100" />
+                              <span className="text-[11px] font-bold uppercase">For Review</span>
+                            </span>
+                          )}
+                          {isOnLeave && (
+                            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">
+                              On Leave
+                            </span>
+                          )}
+                          {isReviewed && (
+                            <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
+                              Reviewed
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
 
@@ -1308,6 +1473,7 @@ export default function AttendancePage() {
           record={reviewTarget.record}
           weekDates={weekDates}
           onClose={() => setReviewTarget(null)}
+          appliedOffsetCredit={appliedOffsetCreditFor(reviewTarget.record as AttendanceRow)}
           onSave={handleReviewSave}
         />
       )}
@@ -1315,10 +1481,9 @@ export default function AttendancePage() {
       {/* Bulk Approve Modal */}
       {showBulkApproveModal && (
         <BulkApproveModal
-          allRows={attendanceRows}
-          initialWeek={activeWeek}
-          onApprove={handleBulkApprove}
+          worksnapRows={worksnapRows}
           onClose={() => setShowBulkApproveModal(false)}
+          onApprove={handleBulkApprove}
         />
       )}
     </div>
