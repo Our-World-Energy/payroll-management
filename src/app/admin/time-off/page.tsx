@@ -10,7 +10,6 @@ import {
   calculateUnusedSickLeaveBalance,
   effectiveRequestStatus,
   fmtBalance,
-  HOURS_PER_DAY,
   ptoAvailableTextClass,
   roundBalance,
   type RequestDecision,
@@ -117,8 +116,6 @@ export default function TimeOffPage() {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [requestPageRowId, setRequestPageRowId] = useState<string | null>(null);
   const [requestDecisions, setRequestDecisions] = useState<RequestDecisionMap>({});
-  const [editStatus,  setEditStatus]  = useState("PTO Leave");
-  const [editHours,   setEditHours]   = useState("");
   const [editReason,  setEditReason]  = useState("");
 
   useEffect(() => {
@@ -177,13 +174,7 @@ export default function TimeOffPage() {
   const pendingRequests = TIME_OFF.filter((r) =>
     effectiveRequestStatus(r, requestDecisions) === "Pending" && visibleNames.has(r.name)
   ).length;
-  const approvedRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Approved" && visibleNames.has(r.name)
-  ).length;
-  const rejectedRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Rejected" && visibleNames.has(r.name)
-  ).length;
-  const selectedRow = rows.find((row) => row.id === selectedRowId) ?? null;
+const selectedRow = rows.find((row) => row.id === selectedRowId) ?? null;
   const requestPageRow = rows.find((row) => row.id === requestPageRowId) ?? null;
 
   function clearFilters() {
@@ -213,13 +204,9 @@ export default function TimeOffPage() {
 
   const columns = [
     "Full Name",
-    "Email Address",
     "Country",
     "Department",
-    "Role",
     "Hire Date",
-    "Status Request",
-    "Review Status",
     "PTO Balance",
     "PTO Used",
     "PTO Available",
@@ -229,7 +216,7 @@ export default function TimeOffPage() {
     "Unused Sick Leave",
     "Advance Birthday Leave",
     "Advance Sick Leave",
-    "Action",
+    "Review Status",
   ];
 
   if (requestPageRow) {
@@ -566,24 +553,29 @@ export default function TimeOffPage() {
                 </tr>
               ) : filteredRows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
-                  {/* Employee cell */}
-                  <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 210 }}>
+                  {/* Col 1: Full Name + Email */}
+                  <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 220 }}>
                     <div className="flex items-center gap-3">
                       <div className={`size-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
                         {avatarInitials(row.fullName)}
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-[#003527] truncate">{row.fullName}</p>
-                        <p className="text-xs text-slate-400 truncate">{row.role || "—"}</p>
+                        <p className="text-xs text-slate-400 truncate">{row.email || "—"}</p>
                       </div>
                     </div>
                   </td>
 
+                  {/* Col 2: Country */}
                   <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{row.country}</td>
+
+                  {/* Col 3: Department */}
                   <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap border-r border-slate-100">{row.department || "Unassigned"}</td>
+
+                  {/* Col 4: Hire Date */}
                   <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap font-mono text-xs border-r border-slate-100">{fmtDate(row.hireDate)}</td>
 
-                  {/* PTO */}
+                  {/* Col 5–7: PTO */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.ptoBalance)}h</td>
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.ptoUsed)}h</td>
                   <td className="px-4 py-3 border-r border-slate-100">
@@ -595,7 +587,7 @@ export default function TimeOffPage() {
                     </div>
                   </td>
 
-                  {/* Sick */}
+                  {/* Col 7–9: Sick Leave */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
                   <td className="px-4 py-3 border-r border-slate-100">
@@ -607,7 +599,16 @@ export default function TimeOffPage() {
                     </div>
                   </td>
 
-                  {/* Review status */}
+                  {/* Col 10: Unused Sick Leave */}
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.unusedSickLeave)}h</td>
+
+                  {/* Col 11: Advance Birthday Leave */}
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.advanceBirthdayLeave)}h</td>
+
+                  {/* Col 12: Advance Sick Leave */}
+                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.advanceSickLeave)}h</td>
+
+                  {/* Col 13: Review Status */}
                   <td className="px-4 py-3 whitespace-nowrap border-r border-slate-100">
                     {row.reviewStatus === "-" ? (
                       <span className="text-slate-300 text-sm">—</span>
@@ -618,21 +619,12 @@ export default function TimeOffPage() {
                       </span>
                     )}
                   </td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.ptoBalance)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.ptoUsed)}h</td>
-                  <td className={`px-4 md:px-5 py-3.5 font-semibold tabular-nums border-r border-slate-100 ${row.ptoAvailable <= 0 ? "text-red-600" : "text-teal-700"}`}>{fmtBalance(row.ptoAvailable)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-teal-700 font-semibold tabular-nums border-r border-slate-100">{fmtBalance(row.sickLeaveAvailable)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.unusedSickLeave)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.advanceBirthdayLeave)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(row.advanceSickLeave)}h</td>
-                  <td className="px-4 md:px-5 py-3.5 text-right">
+
+                  {/* Action (sticky right) */}
+                  <td className="px-4 py-3 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
                     <button
                       onClick={() => {
                         setSelectedRowId(row.id);
-                        setEditStatus(row.requestStatus === "-" ? "PTO Leave" : row.requestStatus);
-                        setEditHours(row.latestRequest ? String(row.latestRequest.days * HOURS_PER_DAY) : "");
                         setEditReason(row.latestRequest?.reason ?? "");
                       }}
                       title="View details"

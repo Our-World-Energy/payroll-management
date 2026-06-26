@@ -20,7 +20,7 @@ const COUNTRY_STATES: Record<string, string[]> = {
 };
 const COUNTRIES = Object.keys(COUNTRY_STATES);
 
-const PAY_CATEGORIES = ["Hourly", "Fixed"];
+const PAY_CATEGORIES = ["Hourly", "Fixed-Ind", "Fixed-Mex"];
 const CURRENCIES     = ["PHP", "INR", "MXN", "USD"];
 const STATUSES       = ["Active", "Dismissed"] as const;
 const GENDERS        = ["Not Specified", "Male", "Female"];

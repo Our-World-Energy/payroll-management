@@ -2,8 +2,8 @@ import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 
 const PTO_MONTHLY_ACCRUAL = 6.67;
 const PTO_HALF_MONTH_ACCRUAL = 3.33;
-const SICK_LEAVE_MONTHLY_ACCRUAL = 3.33;
-const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.665;
+const SICK_LEAVE_MONTHLY_ACCRUAL = 3.335;
+const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 
 export const HOURS_PER_DAY = 8;
 
@@ -27,6 +27,10 @@ function addMonths(date: Date, months: number) {
 
 function firstDayAfterMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
 function calendarMonthDiff(start: Date, end: Date) {
@@ -88,9 +92,10 @@ function calculatePolicyBalanceAsOf(
   const effectiveStartDate = accrualStartDate > currentPeriodStart ? accrualStartDate : currentPeriodStart;
   const prorationDate = effectiveStartDate.getTime() === accrualStartDate.getTime() ? eligibilityDate : effectiveStartDate;
   const firstAccrual = prorationDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
-  const additionalAccrualMonths = calendarMonthDiff(effectiveStartDate, asOfDate);
-
-  return roundBalance(firstAccrual + additionalAccrualMonths * monthlyAccrual);
+  // Only count months whose last day has already passed (end-of-month accrual)
+  const completedMonths = calendarMonthDiff(effectiveStartDate, startOfMonth(asOfDate));
+  if (completedMonths === 0) return 0;
+  return roundBalance(firstAccrual + (completedMonths - 1) * monthlyAccrual);
 }
 
 function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number) {

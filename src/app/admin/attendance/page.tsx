@@ -2,7 +2,7 @@
 /* test eslint-disable react-hooks/set-state-in-effect -- data-fetching effects set loading/result state on mount */
 
 import { useState, useEffect } from "react";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX } from "react-icons/lu";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar } from "react-icons/lu";
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 
 const WEEKS = [
@@ -66,6 +66,7 @@ type ReviewModalProps = {
   onClose: () => void;
   appliedOffsetCredit?: number;
   onSave: (contractorId: string, completionMinutes: number, offsetCreditApplied?: number) => void;
+  usaHolidays: HolidayEntry[];
 };
 
 type WorksnapEntry = {
@@ -230,28 +231,19 @@ function timeOffTimeFor(timeOffStatus: string) {
   return "-";
 }
 
-function completionTimeFor(evaluatedTime: string, adjustedTime: string, timeOffTime: string) {
+function completionTimeFor(evaluatedTime: string, adjustedTime: string, timeOffTime: string, holidayTime = "-") {
   const evaluatedMinutes = timeValueToMinutes(evaluatedTime);
   const timeOffMinutes = timeValueToMinutes(timeOffTime);
+  const holidayMinutes = timeValueToMinutes(holidayTime);
 
-  if (adjustedTime === "") return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes);
+  if (adjustedTime === "") return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes + holidayMinutes);
   return formatMinutesAsMins(timeValueToMinutes(adjustedTime));
 }
 
-const HOLIDAYS = [
-  { name: "Memorial Day", country: "US", date: "2026-05-25" },
-  { name: "Bakrid", country: "India", date: "2026-06-07" },
-  { name: "Father's Day", country: "Mexico", date: "2026-06-21" },
-  { name: "Independence Day", country: "Philippines", date: "2026-06-12" },
-];
+type HolidayEntry = { date: string; country: string; name: string };
 
-function holidayTimeFor(record: AttendanceRecord, date: string) {
-  const holiday = HOLIDAYS.find((item) =>
-    item.country === record.region &&
-    item.date === date
-  );
-
-  return holiday ? "8h 00m" : "-";
+function holidayTimeFor(date: string, usaHolidays: HolidayEntry[]) {
+  return usaHolidays.some((h) => h.date === date) ? "480 mins" : "-";
 }
 
 
@@ -367,7 +359,7 @@ type AttendanceRow = AttendanceRecord & {
 };
 
 function isFixedContractor(payCategory?: string) {
-  return payCategory?.trim().toLowerCase() === "fixed";
+  return payCategory?.trim().toLowerCase() === "fixed-ind";
 }
 
 function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string, payCategory: string): AttendanceRecord["weeklyStatus"] {
@@ -478,7 +470,7 @@ function payCategoryForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -508,7 +500,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const adjustedTime = adjustedTimes[date] ?? "";
         const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
         const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-        return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime));
+        const holidayTime = holidayTimeFor(date, usaHolidays);
+        return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime));
       }, 0);
   const details = [
     ["Shift Type", shiftType],
@@ -630,10 +623,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDayDate(date, restDaysStr), evaluationShiftType);
                     const adjustedTime = adjustedTimes[date] ?? "";
-                    const holidayTime = holidayTimeFor(record, date);
+                    const holidayTime = holidayTimeFor(date, usaHolidays);
                     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
                     const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-                    const completionTime = completionTimeFor(evaluatedTime, adjustedTime, timeOffTime);
+                    const completionTime = completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime);
                     const isEditingAdjustedTime = editingAdjustedDate === date;
 
                     return (
@@ -876,10 +869,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   );
 }
 
-function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
+function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   worksnapRows: AttendanceRow[];
   onClose: () => void;
   onApprove: (ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) => void;
+  usaHolidays: HolidayEntry[];
 }) {
   const [modalWeek, setModalWeek] = useState("w26");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
@@ -893,6 +887,10 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
 
   const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
   const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
+  const holidayBonusMins = modalWeekDates.reduce(
+    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays)),
+    0
+  );
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
@@ -933,7 +931,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates));
+      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + holidayBonusMins);
     });
     setProcessedApprovals(map);
   }
@@ -943,7 +941,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates)])
+          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + holidayBonusMins])
         );
     onApprove(selectedIds, modalWeekDates, approvedMinutesById);
     onClose();
@@ -1005,7 +1003,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
                 <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
-                const completionMins = processedMins ?? computeWeeklyCompletionMinutes(row, modalWeekDates);
+                const completionMins = processedMins ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + holidayBonusMins);
                 const isProcessed = processedMins !== undefined;
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
@@ -1024,7 +1022,14 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
                   <td className="sticky left-[272px] z-10 bg-white px-4 py-3 w-[160px] min-w-[160px] text-sm text-slate-600 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{departmentForAttendanceRow(row)}</td>
                   <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
                   <td className={`px-4 py-3 text-sm font-semibold border-r border-slate-100 ${isProcessed ? "text-emerald-700 bg-emerald-50" : "text-slate-900"}`}>
-                    {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                    <span className="flex items-center gap-1.5">
+                      <span>{completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}</span>
+                      {holidayBonusMins > 0 && (
+                        <span title="Includes US holiday time" className="inline-flex items-center justify-center rounded-full bg-blue-100 p-0.5">
+                          <LuCalendar size={11} strokeWidth={2} className="text-blue-500" />
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     {row.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}
@@ -1088,10 +1093,24 @@ export default function AttendancePage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
   const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
+  const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
+
   const selectedWeek = WEEKS.find((week) => week.key === activeWeek) ?? WEEKS[0];
   const weekDates = datesBetween(selectedWeek.from, selectedWeek.to);
   const rangeFrom = weekDates[0] ?? selectedWeek.from;
   const rangeTo = weekDates[weekDates.length - 1] ?? selectedWeek.to;
+
+  useEffect(() => {
+    fetch("/api/holidays")
+      .then((r) => r.json())
+      .then((data) => {
+        const usa = (data.holidays ?? []).filter(
+          (h: HolidayEntry) => h.country === "United States"
+        );
+        setUsaHolidays(usa);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -1328,12 +1347,12 @@ export default function AttendancePage() {
         {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left" style={{ minWidth: "720px" }}>
-            <thead className="bg-slate-50 border-b border-slate-200">
+            <thead className="bg-[#003527] border-b border-white/20">
               <tr>
                 {["Contractor", "Department", "Actual Time", "Completion Time", "Variance", "Status", "Actions"].map((h, i) => (
                   <th
                     key={h}
-                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap ${i === 5 ? "w-48 text-center" : ""} ${i === 6 ? "text-right" : ""}`}
+                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-white whitespace-nowrap ${i === 5 ? "w-48 text-center" : ""} ${i === 6 ? "text-right" : ""}`}
                   >
                     {h}
                   </th>
@@ -1357,10 +1376,14 @@ export default function AttendancePage() {
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
                 const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
+                const holidayBonusMins = weekDates.reduce(
+                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays)),
+                  0
+                );
                 const completionMins = row.completionMinutes ?? (
                   isFixedContractor(row.payCategory)
                     ? Math.max(0, computedCompletionMins - appliedOffsetCredit)
-                    : computedCompletionMins
+                    : computedCompletionMins + holidayBonusMins
                 );
 
                 return (
@@ -1399,8 +1422,15 @@ export default function AttendancePage() {
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
-                        <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
-                          {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                        <span className="flex items-center gap-1.5">
+                          <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
+                            {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                          </span>
+                          {holidayBonusMins > 0 && (
+                            <span title="Includes US holiday time" className="inline-flex items-center justify-center rounded-full bg-blue-100 p-0.5">
+                              <LuCalendar size={11} strokeWidth={2} className="text-blue-500" />
+                            </span>
+                          )}
                         </span>
                       )}
                     </td>
@@ -1505,6 +1535,7 @@ export default function AttendancePage() {
           onClose={() => setReviewTarget(null)}
           appliedOffsetCredit={appliedOffsetCreditFor(reviewTarget.record as AttendanceRow)}
           onSave={handleReviewSave}
+          usaHolidays={usaHolidays}
         />
       )}
 
@@ -1514,6 +1545,7 @@ export default function AttendancePage() {
           worksnapRows={worksnapRows}
           onClose={() => setShowBulkApproveModal(false)}
           onApprove={handleBulkApprove}
+          usaHolidays={usaHolidays}
         />
       )}
     </div>

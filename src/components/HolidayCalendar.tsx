@@ -27,12 +27,6 @@ type Holiday = {
   date: string; // YYYY-MM-DD
 };
 
-const INITIAL_HOLIDAYS: Holiday[] = [
-  { id: 1, name: "Memorial Day",     country: "United States", date: "2026-05-25" },
-  { id: 2, name: "Bakrid",           country: "India",         date: "2026-06-07" },
-  { id: 3, name: "Father's Day",     country: "Mexico",        date: "2026-06-21" },
-  { id: 4, name: "Independence Day", country: "Philippines",   date: "2026-06-12" },
-];
 
 const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -58,7 +52,8 @@ const TODAY_STR = `${TODAY.getFullYear()}-${pad(TODAY.getMonth()+1)}-${pad(TODAY
 
 export function HolidayCalendar() {
   const [mounted, setMounted] = useState(false);
-  const [holidays, setHolidays] = useState<Holiday[]>(INITIAL_HOLIDAYS);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [loadingHolidays, setLoadingHolidays] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [calYear,  setCalYear]  = useState(TODAY.getFullYear());
@@ -70,8 +65,15 @@ export function HolidayCalendar() {
   const [newCountry, setNewCountry] = useState(COUNTRIES[0]);
   const [newDate,    setNewDate]    = useState("");
 
-  // Only render portals after mount (client-only)
-  useEffect(() => { setMounted(true); }, []);
+  // Mount flag + load holidays from Supabase
+  useEffect(() => {
+    setMounted(true);
+    fetch("/api/holidays")
+      .then((r) => r.json())
+      .then((data) => { if (data.holidays) setHolidays(data.holidays); })
+      .catch(() => {})
+      .finally(() => setLoadingHolidays(false));
+  }, []);
 
   function prevMonth() {
     if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
@@ -82,15 +84,22 @@ export function HolidayCalendar() {
     else setCalMonth(m => m + 1);
   }
 
-  function handleAdd() {
+  async function handleAdd() {
     const n = newName.trim();
     if (!n || !newDate) return;
-    setHolidays(prev => [...prev, { id: Date.now(), name: n, country: newCountry, date: newDate }]);
+    const res = await fetch("/api/holidays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: n, country: newCountry, date: newDate }),
+    });
+    const data = await res.json();
+    if (data.holiday) setHolidays(prev => [...prev, data.holiday]);
     setNewName(""); setNewDate(""); setNewCountry(COUNTRIES[0]);
     setShowAdd(false);
   }
 
-  function handleDelete(id: number) {
+  async function handleDelete(id: number) {
+    await fetch(`/api/holidays/${id}`, { method: "DELETE" });
     setHolidays(prev => prev.filter(h => h.id !== id));
   }
 
@@ -326,7 +335,11 @@ export function HolidayCalendar() {
           <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
         </div>
         <div className="space-y-3 flex-1">
-          {upcoming.length === 0 ? (
+          {loadingHolidays ? (
+            <div className="space-y-3 animate-pulse">
+              {[1,2,3].map(i => <div key={i} className="h-9 bg-slate-100 rounded-lg" />)}
+            </div>
+          ) : upcoming.length === 0 ? (
             <p className="text-sm text-slate-400 italic">No upcoming holidays.</p>
           ) : upcoming.map((h) => {
             const [y, mo, d] = h.date.split("-");
