@@ -314,6 +314,16 @@ model AttendanceWeekStatus {
   @@map("attendance_week_status")
 }
 
+model Holiday {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  country   String
+  date      DateTime @db.Date
+  createdAt DateTime @default(now())
+
+  @@map("holidays")
+}
+
 /// Per-employee per-DAY time-off + manual adjustment (admin picks the date).
 model AttendanceDayStatus {
   id                   String      @id @default(uuid()) @db.Uuid

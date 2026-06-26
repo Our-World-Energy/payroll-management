@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(psql postgresql://postgres:7Qs2Rg9as5yAjSEA@db.usmqpeutnpzmtonnxucg.supabase.co:5432/postgres -c ' *)",
+      "Bash(node -e ' *)"
+    ]
+  }
+}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { createPortal } from "react-dom";
-import { LuCalendar, LuChevronLeft, LuChevronRight, LuPlus, LuX, LuFlag, LuTrash2 } from "react-icons/lu";
+import { LuCalendar, LuChevronLeft, LuChevronRight, LuPlus, LuX, LuFlag, LuTrash2, LuLoader } from "react-icons/lu";
+import { fetchHolidays, createHoliday, deleteHoliday, type Holiday } from "@/app/admin/holidays/actions";
 
 const COUNTRY_COLORS: Record<string, string> = {
   "United States": "bg-blue-500",
@@ -19,20 +20,6 @@ const FLAG_COLORS: Record<string, string> = {
   "Global":        "text-purple-500",
 };
 const COUNTRIES = Object.keys(COUNTRY_COLORS);
-
-type Holiday = {
-  id: number;
-  name: string;
-  country: string;
-  date: string; // YYYY-MM-DD
-};
-
-const INITIAL_HOLIDAYS: Holiday[] = [
-  { id: 1, name: "Memorial Day",     country: "United States", date: "2026-05-25" },
-  { id: 2, name: "Bakrid",           country: "India",         date: "2026-06-07" },
-  { id: 3, name: "Father's Day",     country: "Mexico",        date: "2026-06-21" },
-  { id: 4, name: "Independence Day", country: "Philippines",   date: "2026-06-12" },
-];
 
 const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -52,26 +39,42 @@ function buildCalendar(year: number, month: number) {
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
-// Fixed date — avoids SSR/hydration mismatch from new Date() in render
-const TODAY = new Date(2026, 4, 28); // May 28 2026 — update if needed, or set dynamically in useEffect
-const TODAY_STR = `${TODAY.getFullYear()}-${pad(TODAY.getMonth()+1)}-${pad(TODAY.getDate())}`;
-
 export function HolidayCalendar() {
-  const [mounted, setMounted] = useState(false);
-  const [holidays, setHolidays] = useState<Holiday[]>(INITIAL_HOLIDAYS);
-  const [showModal, setShowModal] = useState(false);
-  const [showAdd, setShowAdd] = useState(false);
-  const [calYear,  setCalYear]  = useState(TODAY.getFullYear());
-  const [calMonth, setCalMonth] = useState(TODAY.getMonth());
+  const [mounted,       setMounted]       = useState(false);
+  const [holidays,      setHolidays]      = useState<Holiday[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [showModal,     setShowModal]     = useState(false);
+  const [showAdd,       setShowAdd]       = useState(false);
+  const [calYear,       setCalYear]       = useState(new Date().getFullYear());
+  const [calMonth,      setCalMonth]      = useState(new Date().getMonth());
   const [filterCountry, setFilterCountry] = useState("All");
+  const [todayStr,      setTodayStr]      = useState("");
+  const [isPending,     startTransition]  = useTransition();
 
   // Add form state
   const [newName,    setNewName]    = useState("");
   const [newCountry, setNewCountry] = useState(COUNTRIES[0]);
   const [newDate,    setNewDate]    = useState("");
+  const [addError,   setAddError]   = useState("");
 
-  // Only render portals after mount (client-only)
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    setMounted(true);
+    const now = new Date();
+    setTodayStr(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
+    loadHolidays();
+  }, []);
+
+  async function loadHolidays() {
+    setLoading(true);
+    try {
+      const data = await fetchHolidays();
+      setHolidays(data);
+    } catch (e) {
+      console.error("Failed to load holidays:", e);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function prevMonth() {
     if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
@@ -84,17 +87,33 @@ export function HolidayCalendar() {
 
   function handleAdd() {
     const n = newName.trim();
-    if (!n || !newDate) return;
-    setHolidays(prev => [...prev, { id: Date.now(), name: n, country: newCountry, date: newDate }]);
-    setNewName(""); setNewDate(""); setNewCountry(COUNTRIES[0]);
-    setShowAdd(false);
+    if (!n) { setAddError("Holiday name is required."); return; }
+    if (!newDate) { setAddError("Date is required."); return; }
+    setAddError("");
+    startTransition(async () => {
+      try {
+        const created = await createHoliday({ name: n, country: newCountry, date: newDate });
+        setHolidays(prev => [...prev, created].sort((a, b) => a.date.localeCompare(b.date)));
+        setNewName(""); setNewDate(""); setNewCountry(COUNTRIES[0]);
+        setShowAdd(false);
+      } catch (e) {
+        setAddError(e instanceof Error ? e.message : "Failed to add holiday.");
+      }
+    });
   }
 
-  function handleDelete(id: number) {
-    setHolidays(prev => prev.filter(h => h.id !== id));
+  function handleDelete(id: string) {
+    startTransition(async () => {
+      try {
+        await deleteHoliday(id);
+        setHolidays(prev => prev.filter(h => h.id !== id));
+      } catch (e) {
+        console.error("Failed to delete holiday:", e);
+      }
+    });
   }
 
-  function closeAll() { setShowModal(false); setShowAdd(false); }
+  function closeAll() { setShowModal(false); setShowAdd(false); setAddError(""); }
 
   const cells = buildCalendar(calYear, calMonth);
 
@@ -113,11 +132,9 @@ export function HolidayCalendar() {
   const sidebarHolidays = filterCountry === "All"
     ? holidays
     : holidays.filter(h => h.country === filterCountry);
-  const sortedSidebar = [...sidebarHolidays].sort((a, b) => a.date.localeCompare(b.date));
 
   const upcoming = [...holidays]
-    .filter(h => h.date >= TODAY_STR)
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter(h => h.date >= todayStr)
     .slice(0, 4);
 
   const calendarModal = (
@@ -152,12 +169,11 @@ export function HolidayCalendar() {
         <div className="flex flex-1 overflow-hidden divide-x divide-slate-100">
           {/* Calendar grid */}
           <div className="flex-1 flex flex-col p-5 overflow-y-auto">
-            {/* Month nav — fixed height so grid never shifts */}
+            {/* Month nav */}
             <div className="flex items-center justify-between mb-4 h-9">
               <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-600 shrink-0">
                 <LuChevronLeft size={18} strokeWidth={2} />
               </button>
-              {/* Month + Year pickers */}
               <div className="flex items-center gap-1.5">
                 <select
                   value={calMonth}
@@ -171,7 +187,7 @@ export function HolidayCalendar() {
                   onChange={(e) => setCalYear(Number(e.target.value))}
                   className="text-sm font-bold text-[#003527] border border-slate-200 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                 >
-                  {Array.from({ length: 10 }, (_, i) => TODAY.getFullYear() - 3 + i).map(y => (
+                  {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 3 + i).map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}
                 </select>
@@ -181,42 +197,48 @@ export function HolidayCalendar() {
               </button>
             </div>
 
-            {/* Day headers — fixed, never moves */}
+            {/* Day headers */}
             <div className="grid grid-cols-7 mb-1">
               {DAYS_OF_WEEK.map(d => (
                 <div key={d} className="text-center text-xs font-semibold text-slate-400 uppercase py-1">{d}</div>
               ))}
             </div>
 
-            {/* Cells — fixed 6-row height so nav never shifts */}
-            <div className="grid grid-cols-7 grid-rows-6 gap-1" style={{ minHeight: 312 }}>
-              {cells.map((day, i) => {
-                if (!day) return <div key={i} />;
-                const dateStr = `${calYear}-${pad(calMonth + 1)}-${pad(day)}`;
-                const isToday = dateStr === TODAY_STR;
-                const dots = dotsByDay[day] ?? [];
-                return (
-                  <div key={i} className={`min-h-[52px] rounded-lg p-1.5 flex flex-col items-center gap-0.5 border transition-colors ${
-                    isToday ? "bg-[#003527] border-[#003527]"
-                    : dots.length > 0 ? "bg-teal-50 border-teal-200"
-                    : "bg-white border-slate-100 hover:bg-slate-50"
-                  }`}>
-                    <span className={`text-xs font-semibold ${isToday ? "text-white" : "text-slate-700"}`}>{day}</span>
-                    <div className="flex flex-wrap justify-center gap-0.5 mt-0.5">
-                      {dots.slice(0, 3).map((h, di) => (
-                        <span key={di} title={`${h.name} (${h.country})`}
-                          className={`w-1.5 h-1.5 rounded-full ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
-                      ))}
+            {/* Cells */}
+            {loading ? (
+              <div className="flex items-center justify-center" style={{ minHeight: 312 }}>
+                <LuLoader size={28} className="text-slate-300 animate-spin" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-7 grid-rows-6 gap-1" style={{ minHeight: 312 }}>
+                {cells.map((day, i) => {
+                  if (!day) return <div key={i} />;
+                  const dateStr = `${calYear}-${pad(calMonth + 1)}-${pad(day)}`;
+                  const isToday = dateStr === todayStr;
+                  const dots = dotsByDay[day] ?? [];
+                  return (
+                    <div key={i} className={`min-h-[52px] rounded-lg p-1.5 flex flex-col items-center gap-0.5 border transition-colors ${
+                      isToday ? "bg-[#003527] border-[#003527]"
+                      : dots.length > 0 ? "bg-teal-50 border-teal-200"
+                      : "bg-white border-slate-100 hover:bg-slate-50"
+                    }`}>
+                      <span className={`text-xs font-semibold ${isToday ? "text-white" : "text-slate-700"}`}>{day}</span>
+                      <div className="flex flex-wrap justify-center gap-0.5 mt-0.5">
+                        {dots.slice(0, 3).map((h, di) => (
+                          <span key={di} title={`${h.name} (${h.country})`}
+                            className={`w-1.5 h-1.5 rounded-full ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
+                        ))}
+                      </div>
+                      {dots.length > 0 && (
+                        <span className={`text-[9px] leading-none w-full text-center truncate ${isToday ? "text-white/80" : "text-teal-600"} font-medium`}>
+                          {dots[0].name}
+                        </span>
+                      )}
                     </div>
-                    {dots.length > 0 && (
-                      <span className={`text-[9px] leading-none w-full text-center truncate ${isToday ? "text-white/80" : "text-teal-600"} font-medium`}>
-                        {dots[0].name}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Legend */}
             <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-slate-100">
@@ -243,9 +265,13 @@ export function HolidayCalendar() {
               </select>
             </div>
             <div className="flex-1 overflow-y-auto space-y-1.5">
-              {sortedSidebar.length === 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center mt-8">
+                  <LuLoader size={20} className="text-slate-300 animate-spin" />
+                </div>
+              ) : sidebarHolidays.length === 0 ? (
                 <p className="text-xs text-slate-400 italic text-center mt-4">No holidays found.</p>
-              ) : sortedSidebar.map(h => {
+              ) : sidebarHolidays.map(h => {
                 const [y, mo, d] = h.date.split("-");
                 const label = `${MONTHS[parseInt(mo)-1].slice(0,3)} ${parseInt(d)}, ${y}`;
                 return (
@@ -255,8 +281,11 @@ export function HolidayCalendar() {
                       <p className="text-xs font-semibold text-slate-700 truncate">{h.name}</p>
                       <p className="text-[10px] text-slate-400">{h.country} · {label}</p>
                     </div>
-                    <button onClick={() => handleDelete(h.id)}
-                      className="shrink-0 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all">
+                    <button
+                      onClick={() => handleDelete(h.id)}
+                      disabled={isPending}
+                      className="shrink-0 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all disabled:opacity-30"
+                    >
                       <LuTrash2 size={12} strokeWidth={2} />
                     </button>
                   </div>
@@ -271,7 +300,7 @@ export function HolidayCalendar() {
 
   const addModal = (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAdd(false)} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setShowAdd(false); setAddError(""); }} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="flex items-center gap-3">
@@ -283,7 +312,7 @@ export function HolidayCalendar() {
               <p className="text-xs text-slate-400">Fill in the details below</p>
             </div>
           </div>
-          <button onClick={() => setShowAdd(false)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+          <button onClick={() => { setShowAdd(false); setAddError(""); }} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
             <LuX size={18} />
           </button>
         </div>
@@ -302,15 +331,22 @@ export function HolidayCalendar() {
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</label>
             <input type="date" className={INPUT} value={newDate} onChange={(e) => setNewDate(e.target.value)} />
           </div>
+          {addError && <p className="text-xs text-red-500">{addError}</p>}
         </div>
         <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
-          <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+          <button onClick={() => { setShowAdd(false); setAddError(""); }} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
             Cancel
           </button>
-          <button onClick={handleAdd}
-            className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2">
-            <LuCalendar size={15} strokeWidth={2} />
-            Add Holiday
+          <button
+            onClick={handleAdd}
+            disabled={isPending}
+            className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-60"
+          >
+            {isPending
+              ? <LuLoader size={15} className="animate-spin" />
+              : <LuCalendar size={15} strokeWidth={2} />
+            }
+            {isPending ? "Saving…" : "Add Holiday"}
           </button>
         </div>
       </div>
@@ -326,7 +362,11 @@ export function HolidayCalendar() {
           <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
         </div>
         <div className="space-y-3 flex-1">
-          {upcoming.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-6">
+              <LuLoader size={22} className="text-slate-300 animate-spin" />
+            </div>
+          ) : upcoming.length === 0 ? (
             <p className="text-sm text-slate-400 italic">No upcoming holidays.</p>
           ) : upcoming.map((h) => {
             const [y, mo, d] = h.date.split("-");
@@ -353,7 +393,7 @@ export function HolidayCalendar() {
         </button>
       </div>
 
-      {/* Portals — rendered at document.body, not inside the card */}
+      {/* Portals */}
       {mounted && showModal && createPortal(calendarModal, document.body)}
       {mounted && showAdd  && createPortal(addModal,      document.body)}
     </>
