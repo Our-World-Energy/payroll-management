@@ -141,6 +141,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email";
     if (!form.role.trim())      e.role      = "Required";
     if (!form.hireDate)         e.hireDate  = "Required";
+    if (!form.restDays.length)  e.restDays  = "Required";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -409,7 +410,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
             {/* Rest Days */}
             <div className="mt-4 flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Rest Days</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Rest Days<span className="text-red-400 ml-0.5">*</span>
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {WEEK_DAYS.map((day) => {
                     const checked = form.restDays.includes(day);
@@ -425,6 +428,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     );
                   })}
                 </div>
+                {errors.restDays && <span className="text-xs text-red-500">{errors.restDays}</span>}
               </div>
           </section>
 

@@ -81,6 +81,9 @@ export default function ContractorTimeOffPage() {
     ? contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ")
     : "";
 
+  const country = contractor?.location?.split(",").map((p) => p.trim()).filter(Boolean).at(-1) ?? "";
+  const isIndia = country.toLowerCase() === "india";
+
   const requests = DUMMY_REQUESTS;
 
   function decide(reqId: string, decision: "Approved" | "Declined") {
@@ -130,26 +133,26 @@ export default function ContractorTimeOffPage() {
       </div>
 
       {/* Score Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        {/* PTO Accrual */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
-          <p className="text-2xl font-black text-[#003527]">
-            {contractor.hireDate ? `${fmtBalance(calculatePtoBalance(contractor.hireDate))}h` : "—"}
-          </p>
-        </div>
-        {/* PTO Used */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
-          <p className="text-2xl font-black text-slate-700">0h</p>
-        </div>
-        {/* PTO Accrual Available */}
-        <div className="bg-emerald-50 rounded-2xl border border-emerald-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">PTO Available</p>
-          <p className="text-2xl font-black text-emerald-700">
-            {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "—"}
-          </p>
-        </div>
+      <div className={`grid grid-cols-2 ${isIndia ? "md:grid-cols-3" : "md:grid-cols-3 lg:grid-cols-6"} gap-4 mb-8`}>
+        {/* PTO cards — hidden for India */}
+        {!isIndia && <>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
+            <p className="text-2xl font-black text-[#003527]">
+              {contractor.hireDate ? `${fmtBalance(calculatePtoBalance(contractor.hireDate))}h` : "—"}
+            </p>
+          </div>
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
+            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
+            <p className="text-2xl font-black text-slate-700">0h</p>
+          </div>
+          <div className="bg-emerald-50 rounded-2xl border border-emerald-200 shadow-sm px-5 py-4">
+            <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">PTO Available</p>
+            <p className="text-2xl font-black text-emerald-700">
+              {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "—"}
+            </p>
+          </div>
+        </>}
         {/* Sick Leave Accrual */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
@@ -177,7 +180,7 @@ export default function ContractorTimeOffPage() {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date", "Reason", "PTO Available", "Sick Leave Available", "Status", "Action"].map((h) => (
+                {["Name", "Start Date", "End Date", "Reason", ...(!isIndia ? ["PTO Available"] : []), "Sick Leave Available", "Status", "Action"].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -187,24 +190,27 @@ export default function ContractorTimeOffPage() {
             <tbody className="divide-y divide-slate-100">
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={isIndia ? 7 : 8} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     No time-off requests found.
                   </td>
                 </tr>
               ) : requests.map((req) => {
                 const status = effectiveStatus(req);
+                const blocked = isIndia && req.type !== "Sick Leave";
                 return (
-                  <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                  <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
                     <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
                     <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
                     <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
-                    <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
-                      {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "-"}
-                    </td>
+                    {!isIndia && (
+                      <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
+                        {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "-"}
+                      </td>
+                    )}
                     <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
                       {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculateSickLeaveBalance(contractor.hireDate), 0)))}h` : "-"}
                     </td>
@@ -228,14 +234,14 @@ export default function ContractorTimeOffPage() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => decide(req.id, "Declined")}
-                          disabled={status === "Declined"}
+                          disabled={status === "Declined" || blocked}
                           className="px-4 py-1.5 bg-red-400 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
                         >
                           Reject
                         </button>
                         <button
                           onClick={() => decide(req.id, "Approved")}
-                          disabled={status === "Approved"}
+                          disabled={status === "Approved" || blocked}
                           className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
                         >
                           Approve
@@ -278,8 +284,9 @@ export default function ContractorTimeOffPage() {
                   </tr>
                 ) : DUMMY_HISTORY.map((req) => {
                   const ls = deriveLeaveStatus(req);
+                  const blocked = isIndia && req.type !== "Sick Leave";
                   return (
-                    <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                    <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
                       <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
                       <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
                       <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>

@@ -364,11 +364,14 @@ export default function TimeOffPage() {
     URL.revokeObjectURL(url);
   }
 
+  const isIndia = countryFilter === "India";
+
   const COLS = [
     "Employee", "Country", "Department", "Hire Date",
-    "PTO Accrual", "PTO Used", "PTO Accrual Available",
+    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
     "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
-    "Advance PTO/Birthday Leave", "Advance Sick Leave",
+    ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
+    "Advance Sick Leave",
     "Status", "Action",
   ];
 
@@ -406,13 +409,15 @@ export default function TimeOffPage() {
               </div>
 
               {/* Balance summary bar */}
-              <div className="grid grid-cols-2 divide-x divide-slate-100 border-b border-slate-100">
-                <div className="px-5 py-3">
-                  <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Accrual Available</p>
-                  <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
-                  <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
-                  <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
-                </div>
+              <div className={`grid ${isIndia ? "grid-cols-1" : "grid-cols-2 divide-x divide-slate-100"} border-b border-slate-100`}>
+                {!isIndia && (
+                  <div className="px-5 py-3">
+                    <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Accrual Available</p>
+                    <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
+                    <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
+                    <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
+                  </div>
+                )}
                 <div className="px-5 py-3">
                   <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Accrual Available</p>
                   <p className="text-2xl font-black text-orange-600 leading-tight">{fmtBalance(selectedRow.sickLeaveAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
@@ -463,22 +468,24 @@ export default function TimeOffPage() {
                       ))}
                     </div>
 
-                    {/* PTO section */}
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          ["PTO Accrual",   `${fmtBalance(selectedRow.ptoBalance)}h`,   "teal"],
-                          ["PTO Used",      `${fmtBalance(selectedRow.ptoUsed)}h`,       "teal"],
-                          ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`,  "teal"],
-                        ] as [string, string, string][]).map(([label, value]) => (
-                          <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
-                            <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
-                            <p className="text-lg font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
-                          </div>
-                        ))}
+                    {/* PTO section — hidden for India */}
+                    {!isIndia && (
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([
+                            ["PTO Accrual",           `${fmtBalance(selectedRow.ptoBalance)}h`],
+                            ["PTO Used",              `${fmtBalance(selectedRow.ptoUsed)}h`],
+                            ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`],
+                          ] as [string, string][]).map(([label, value]) => (
+                            <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
+                              <p className="text-lg font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     {/* Sick Leave section */}
                     <div>
@@ -523,7 +530,7 @@ export default function TimeOffPage() {
                   // Contractor is eligible for advance leave only if they have NO regular balance yet
                   const hasNoPtoBalance    = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
                   const hasNoSickBalance   = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
-                  const advanceEligible    = hasNoPtoBalance && hasNoSickBalance;
+                  const advanceEligible    = isIndia ? hasNoSickBalance : (hasNoPtoBalance && hasNoSickBalance);
                   const isPto = editLeaveType === "Advance PTO/Birthday Leave";
 
                   function applyAdvanceGrant() {
@@ -544,15 +551,17 @@ export default function TimeOffPage() {
 
                   return (<>
                   {/* Leave balance cards */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
-                      <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
-                      <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
-                        {selectedRow.birthdayLeave > 0
-                          ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
-                          : <span className="text-sm text-pink-300">Not eligible</span>}
-                      </p>
-                    </div>
+                  <div className={`grid ${isIndia ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
+                    {!isIndia && (
+                      <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
+                        <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
+                        <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
+                          {selectedRow.birthdayLeave > 0
+                            ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
+                            : <span className="text-sm text-pink-300">Not eligible</span>}
+                        </p>
+                      </div>
+                    )}
                     <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
                       <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
                       <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
@@ -607,7 +616,7 @@ export default function TimeOffPage() {
                               className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                             >
                               <option value="Advance Sick Leave">Advance Sick Leave</option>
-                              <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>
+                              {!isIndia && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
                             </select>
                           </div>
 
@@ -883,17 +892,25 @@ export default function TimeOffPage() {
                   <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap border-r border-slate-100">{row.department || "Unassigned"}</td>
                   <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap font-mono text-xs border-r border-slate-100">{fmtDate(row.hireDate)}</td>
 
-                  {/* PTO */}
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.ptoBalance)}h</td>
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.ptoUsed)}h</td>
-                  <td className="px-4 py-3 border-r border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold tabular-nums text-teal-700">{fmtBalance(row.ptoAvailable)}h</span>
-                      <div className="w-12">
-                        <BalanceBar used={row.ptoUsed} total={row.ptoBalance} color="bg-teal-400" />
-                      </div>
-                    </div>
-                  </td>
+                  {/* PTO — hidden when India filter active; grayed out per-row for India contractors */}
+                  {!isIndia && <>
+                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                      {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoBalance)}h`}
+                    </td>
+                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                      {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
+                    </td>
+                    <td className="px-4 py-3 border-r border-slate-100">
+                      {row.country === "India" ? <span className="text-slate-300">—</span> : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold tabular-nums text-teal-700">{fmtBalance(row.ptoAvailable)}h</span>
+                          <div className="w-12">
+                            <BalanceBar used={row.ptoUsed} total={row.ptoBalance} color="bg-teal-400" />
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  </>}
 
                   {/* Sick */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
@@ -907,12 +924,16 @@ export default function TimeOffPage() {
                     </div>
                   </td>
 
-                  {/* Advance PTO/Birthday Leave */}
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                    {row.birthdayLeave > 0
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
-                      : <span className="text-slate-300">—</span>}
-                  </td>
+                  {/* Advance PTO/Birthday Leave — hidden when India filter active; blank per-row for India contractors */}
+                  {!isIndia && (
+                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                      {row.country === "India" ? <span className="text-slate-300">—</span> : (
+                        row.birthdayLeave > 0
+                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
+                          : <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                  )}
                   {/* Advance Sick Leave */}
                   <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                     {row.advanceSickLeave > 0
