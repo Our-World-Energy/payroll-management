@@ -49,7 +49,7 @@ export async function GET(request: Request) {
   const { data: contractorProfiles, error: contractorError } = emails.length
     ? await supabase
       .from("contractor_profiles")
-      .select("email,department,restDay,location,shiftType")
+      .select("email,department,restDay,location,shiftType,payCategory")
       .in("email", emails)
     : { data: [], error: null };
 
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
 
   const profilesByEmail = new Map((contractorProfiles ?? []).map((profile) => [
     String(profile.email ?? "").trim().toLowerCase(),
-    { department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? "") },
+    { department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? ""), payCategory: String(profile.payCategory ?? "") },
   ]));
 
   const entries = data.map((entry) => {
@@ -70,6 +70,7 @@ export async function GET(request: Request) {
       restDay: profile?.restDay ?? "",
       location: profile?.location ?? "",
       shiftType: profile?.shiftType ?? "",
+      payCategory: profile?.payCategory ?? "",
     };
   });
 

@@ -77,6 +77,7 @@ type WorksnapEntry = {
   restDay?: string | null;
   location?: string | null;
   shiftType?: string | null;
+  payCategory?: string | null;
   dailyWorksnapMinutes?: Record<string, number>;
 };
 
@@ -263,7 +264,7 @@ function worksnapTotalMinutesFor(weekDates: string[], dailyWorksnapMinutes: Reco
 function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
   const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
 
-  if (isIndiaContractor(row.region)) {
+  if (isFixedContractor(row.payCategory)) {
     const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
     return Math.min(total, 2400);
   }
@@ -293,7 +294,7 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[])
 function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
   const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
 
-  if (isIndiaContractor(row.region)) {
+  if (isFixedContractor(row.payCategory)) {
     const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
     return Math.min(total, 2400);
   }
@@ -359,17 +360,18 @@ type AttendanceRow = AttendanceRecord & {
   department?: string;
   restDay?: string;
   shiftType?: string;
+  payCategory?: string;
   dailyWorksnapMinutes?: Record<string, number>;
   completionMinutes?: number;
   savedDailyDecisionStatuses?: Record<string, string>;
 };
 
-function isIndiaContractor(region: string) {
-  return region.trim().toLowerCase().includes("india");
+function isFixedContractor(payCategory?: string) {
+  return payCategory?.trim().toLowerCase() === "fixed";
 }
 
-function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string, region: string): AttendanceRecord["weeklyStatus"] {
-  if (isIndiaContractor(region)) {
+function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekDates: string[], restDaysStr: string, payCategory: string): AttendanceRecord["weeklyStatus"] {
+  if (isFixedContractor(payCategory)) {
     const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
     if (total < 2400 || total > 2700) return "For Review";
     return "Standard Met";
@@ -388,7 +390,8 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
   const restDaysStr = entry.restDay?.trim() || "";
   const region = entry.location?.trim().split(",").at(-1)?.trim() || "Worksnap";
   const shiftType = entry.shiftType?.trim() || "";
-  const weeklyStatus = computeWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr, region);
+  const payCategory = entry.payCategory?.trim() || "";
+  const weeklyStatus = computeWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr, payCategory);
 
   return {
     contractorId: entry.email?.trim() || `worksnap-${index}`,
@@ -407,12 +410,13 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
     department: entry.department?.trim() || "",
     restDay: entry.restDay?.trim() || "",
     shiftType,
+    payCategory,
     dailyWorksnapMinutes: entry.dailyWorksnapMinutes ?? {},
   };
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; dailyWorksnapMinutes: Record<string, number> }>();
+  const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number> }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -431,6 +435,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
       restDay: current?.restDay || entry.restDay || null,
       location: current?.location || entry.location || null,
       shiftType: current?.shiftType || entry.shiftType || null,
+      payCategory: current?.payCategory || entry.payCategory || null,
       dailyWorksnapMinutes,
     });
   });
@@ -468,6 +473,11 @@ function shiftTypeForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
+function payCategoryForAttendanceRow(row: AttendanceRow) {
+  if (row.payCategory) return row.payCategory;
+  return "-";
+}
+
 function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
@@ -483,14 +493,14 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
   const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
-  const isIndia = isIndiaContractor(record.region);
+  const isIndia = isFixedContractor((record as AttendanceRow).payCategory);
   const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
   const evaluationShiftType = isIndia ? undefined : shiftType;
   const [offsetCredit, setOffsetCredit] = useState(0);
   const worksnapTotalMinutes = worksnapTotalMinutesFor(weekDates, dailyWorksnapMinutes);
   const indiaTotalMinutes = Math.min(worksnapTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
-const completionTotalMinutes = isIndiaContractor(record.region)
+const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCategory)
     ? indiaNetCompletionMinutes
     : weekDates.reduce((total, date) => {
         const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -564,16 +574,16 @@ const completionTotalMinutes = isIndiaContractor(record.region)
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 px-5 py-4 sm:px-6 sm:py-5 border-b border-slate-100">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 sm:px-6 sm:py-5 border-b border-[#003527] bg-[#003527]">
           <div>
-            <h3 className="text-lg font-bold text-[#003527]">Attendance Review</h3>
-            <p className="mt-1 text-xl font-bold text-slate-900">{name}</p>
-            <p className="text-sm text-slate-500">{role}</p>
-            <p className="text-sm text-slate-500">{location}</p>
+            <h3 className="text-lg font-bold text-white">Attendance Review</h3>
+            <p className="mt-1 text-xl font-bold text-white">{name}</p>
+            <p className="text-sm text-green-200">{role}</p>
+            <p className="text-sm text-green-200">{location}{(record as AttendanceRow).payCategory ? ` / ${(record as AttendanceRow).payCategory}` : ""}</p>
           </div>
           <button
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
             aria-label="Close attendance review"
             title="Close"
           >
@@ -872,6 +882,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
   onApprove: (ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) => void;
 }) {
   const [modalWeek, setModalWeek] = useState("w26");
+  const [payCategoryFilter, setPayCategoryFilter] = useState("All");
+  const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [modalRows, setModalRows] = useState<AttendanceRow[]>([]);
@@ -881,6 +893,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
 
   const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
   const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
+  const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
+  const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
   const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
@@ -898,7 +912,9 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
 
   const filteredRows = modalRows.filter((r) =>
     r.weeklyStatus === "For Review" &&
-    !isIndiaContractor(r.region) &&
+    !isFixedContractor(r.payCategory) &&
+    (payCategoryFilter === "All" || payCategoryForAttendanceRow(r) === payCategoryFilter) &&
+    (countryFilter === "All" || r.region === countryFilter) &&
     (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter) &&
     (shiftTypeFilter === "All" || r.shiftType === shiftTypeFilter)
   );
@@ -937,49 +953,35 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[90vh] flex flex-col">
-        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between">
+        <div className="px-6 py-5 border-b border-[#003527] bg-[#003527] flex items-start justify-between">
           <div>
-            <h3 className="text-lg font-bold text-[#003527]">Bulk Approve</h3>
-            <p className="text-sm text-slate-500 mt-0.5">Approve all selected contractors for the week</p>
+            <h3 className="text-lg font-bold text-white">Bulk Approve</h3>
+            <p className="text-sm text-green-200 mt-0.5">Approve all selected contractors for the week</p>
           </div>
-          <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
+          <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white">
             <LuX size={18} strokeWidth={2} />
           </button>
         </div>
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
+          <select value={payCategoryFilter} onChange={(e) => setPayCategoryFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
+            <option value="All">All Pay Categories</option>
+            {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
           <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             <option value="All">All Departments</option>
             {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+          <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
+            <option value="All">All Countries</option>
+            {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <select value={shiftTypeFilter} onChange={(e) => setShiftTypeFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             <option value="All">All Shift Types</option>
             {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select value="For Review" disabled className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none opacity-70 cursor-not-allowed">
-            <option value="For Review">For Review</option>
-          </select>
           <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             {WEEKS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
           </select>
-          <div className="ml-auto flex items-center gap-2">
-            {processedApprovals.size === 0 ? (
-              <button
-                onClick={handleBulkApprovePreview}
-                disabled={selectedIds.size === 0}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
-                <LuCircleCheck size={15} strokeWidth={2} />
-                Bulk Approve
-              </button>
-            ) : (
-              <button
-                onClick={handleSave}
-                className="flex items-center gap-2 px-4 py-2 bg-[#003527] text-white rounded-lg text-sm font-semibold hover:bg-[#064E3B] transition-colors"
-              >
-                Save
-              </button>
-            )}
-          </div>
         </div>
         {/* Table */}
         <div className="min-h-0 overflow-x-auto overflow-y-auto">
@@ -1000,7 +1002,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
               {isLoading ? (
                 <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No non-India contractors match the selected filters.</td></tr>
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const completionMins = processedMins ?? computeWeeklyCompletionMinutes(row, modalWeekDates);
@@ -1046,13 +1048,26 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove }: {
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
             Close
           </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
-          >
-            Save
-          </button>
+          {processedApprovals.size === 0 ? (
+            <button
+              type="button"
+              onClick={handleBulkApprovePreview}
+              disabled={selectedIds.size === 0}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <LuCircleCheck size={15} strokeWidth={2} />
+              Bulk Approve
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSave}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
+            >
+              <LuCircleCheck size={15} strokeWidth={2} />
+              Save
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1066,6 +1081,7 @@ export default function AttendancePage() {
   const [isLoadingWorksnap, setIsLoadingWorksnap] = useState(true);
   const [worksnapError, setWorksnapError] = useState("");
   const [nameSearch, setNameSearch] = useState("");
+  const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
@@ -1116,17 +1132,20 @@ export default function AttendancePage() {
   const filteredAttendanceRows = attendanceRows.filter((row) => {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
+    const payCategory = payCategoryForAttendanceRow(row);
     const matchesName = !query || row.name.toLowerCase().includes(query);
+    const matchesPayCategory = payCategoryFilter === "All" || payCategory === payCategoryFilter;
     const matchesCountry = countryFilter === "All" || row.region === countryFilter;
     const matchesShiftType = shiftTypeFilter === "All" || row.shiftType === shiftTypeFilter;
     const matchesDepartment = departmentFilter === "All" || department === departmentFilter;
     const matchesStatus = statusFilter === "All" || row.weeklyStatus === statusFilter;
 
-    return matchesName && matchesCountry && matchesShiftType && matchesDepartment && matchesStatus;
+    return matchesName && matchesPayCategory && matchesCountry && matchesShiftType && matchesDepartment && matchesStatus;
   });
   const departmentOptions = Array.from(new Set(attendanceRows.map(departmentForAttendanceRow))).sort();
   const countryOptions = Array.from(new Set(attendanceRows.map((r) => r.region).filter(Boolean))).sort();
   const shiftTypeOptions = Array.from(new Set(attendanceRows.map((r) => r.shiftType ?? "").filter(Boolean))).sort();
+  const payCategoryOptions = Array.from(new Set(attendanceRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
 
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
   const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
@@ -1232,6 +1251,17 @@ export default function AttendancePage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
+              value={payCategoryFilter}
+              onChange={(event) => setPayCategoryFilter(event.target.value)}
+              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
+              aria-label="Filter by pay category"
+            >
+              <option value="All">All Pay Categories</option>
+              {payCategoryOptions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+            <select
               value={countryFilter}
               onChange={(event) => setCountryFilter(event.target.value)}
               className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
@@ -1325,10 +1355,10 @@ export default function AttendancePage() {
                 const isForReview = row.weeklyStatus === "For Review";
                 const isReviewed = row.weeklyStatus === "Reviewed";
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
-                const isAppliedTimeCredit = isIndiaContractor(row.region) && appliedOffsetCredit > 0;
+                const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
                 const completionMins = row.completionMinutes ?? (
-                  isIndiaContractor(row.region)
+                  isFixedContractor(row.payCategory)
                     ? Math.max(0, computedCompletionMins - appliedOffsetCredit)
                     : computedCompletionMins
                 );
