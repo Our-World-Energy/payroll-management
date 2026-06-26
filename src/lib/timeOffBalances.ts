@@ -3,7 +3,7 @@ import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 const PTO_MONTHLY_ACCRUAL = 6.67;
 const PTO_HALF_MONTH_ACCRUAL = 3.33;
 const SICK_LEAVE_MONTHLY_ACCRUAL = 3.33;
-const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.67;
+const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.665;
 
 export const HOURS_PER_DAY = 8;
 
@@ -25,8 +25,12 @@ function addMonths(date: Date, months: number) {
   return result;
 }
 
-function lastDayOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0);
+function firstDayAfterMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth() + 1, 1);
+}
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
 function calendarMonthDiff(start: Date, end: Date) {
@@ -68,32 +72,30 @@ function calculatePolicyBalanceAsOf(
   asOfDate: Date
 ) {
   const startDate = parseDate(hireDate);
+
   if (!startDate) return 0;
 
-  // 6 full calendar months must pass before accrual begins.
-  // Hired Nov 16 → months: Dec(1) Jan(2) Feb(3) Mar(4) Apr(5) May(6) → 6 months done end of May.
-  // First credit fires at END of the 7th month → Jun 30.
-  // So accrualStartDate = last day of month 7 from hire date.
-  const accrualStartDate = lastDayOfMonth(addMonths(startDate, 7));
+  const eligibilityDate = addMonths(startDate, 6);
+  const accrualStartDate = firstDayAfterMonth(eligibilityDate);
+  const oneYearDate = addMonths(startDate, 12);
 
   if (asOfDate < accrualStartDate) return 0;
 
-  // First-month credit: day 1–15 hire → full rate, day 16–31 hire → half rate.
-  const firstMonthCredit = startDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
+  if (asOfDate < oneYearDate) {
+    const firstYearAccrual = eligibilityDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
+    const firstYearAdditionalMonths = calendarMonthDiff(accrualStartDate, asOfDate);
 
-  // Each subsequent credit fires on the last day of every following month.
-  // January (month 0) and February (month 1) are credited twice.
-  let totalAdditional = 0;
-  let i = 1;
-  let nextCredit = lastDayOfMonth(addMonths(accrualStartDate, i));
-  while (asOfDate >= nextCredit) {
-    const month = nextCredit.getMonth(); // 0=Jan, 1=Feb
-    totalAdditional += (month === 0 || month === 1) ? 2 : 1;
-    i++;
-    nextCredit = lastDayOfMonth(addMonths(accrualStartDate, i));
+    return roundBalance(firstYearAccrual + firstYearAdditionalMonths * monthlyAccrual);
   }
 
-  return roundBalance(firstMonthCredit + totalAdditional * monthlyAccrual);
+  const currentPeriodStart = accrualPeriodStartFor(asOfDate);
+  const effectiveStartDate = accrualStartDate > currentPeriodStart ? accrualStartDate : currentPeriodStart;
+  const prorationDate = effectiveStartDate.getTime() === accrualStartDate.getTime() ? eligibilityDate : effectiveStartDate;
+  const firstAccrual = prorationDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
+  // Only count months whose last day has already passed (end-of-month accrual)
+  const completedMonths = calendarMonthDiff(effectiveStartDate, startOfMonth(asOfDate));
+  if (completedMonths === 0) return 0;
+  return roundBalance(firstAccrual + (completedMonths - 1) * monthlyAccrual);
 }
 
 function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number) {
