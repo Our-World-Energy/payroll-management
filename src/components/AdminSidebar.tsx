@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LuLayoutDashboard, LuHardHat, LuFingerprint, LuWallet,
-  LuCalendarX, LuChartBar, LuSettings, LuLogOut,
+  LuCalendarX, LuChartBar, LuSettings, LuLogOut, LuUsers,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import Image from "next/image";
@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/admin/payroll",      label: "Payroll",            Icon: LuWallet          },
   { href: "/admin/time-off",     label: "Time-Off Management",Icon: LuCalendarX       },
   { href: "/admin/reports",      label: "Reports",            Icon: LuChartBar        },
+  { href: "/admin/users",        label: "User Management",    Icon: LuUsers           },
   { href: "/admin/settings",     label: "Settings",           Icon: LuSettings        },
 ];
 

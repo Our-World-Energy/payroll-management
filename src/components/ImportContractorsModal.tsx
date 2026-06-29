@@ -156,6 +156,10 @@ function rowToContractor(data: Record<string, string>): Contractor {
     dismissalReason:    data.status === "Dismissed" ? (data.dismissal_reason ?? "") : "",
     equipmentProvided:  data.equipment_provided === "yes" || data.equipment_provided === "true",
     worksnapId:         String(data.worksnap_id ?? ""),
+    ptoUsed:            0,
+    sickLeaveUsed:      0,
+    birthdayLeave:      0,
+    advanceSickLeave:   0,
   };
 }
 

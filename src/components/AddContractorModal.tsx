@@ -183,6 +183,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
       equipmentProvided:  form.equipmentProvided,
       worksnapId:         form.worksnapId,
+      ptoUsed:            0,
+      sickLeaveUsed:      0,
+      birthdayLeave:      0,
+      advanceSickLeave:   0,
     };
 
     onSave(contractor);

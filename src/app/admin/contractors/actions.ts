@@ -3,6 +3,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
+import { provisionContractorUser } from "@/lib/provisionContractor";
 
 const TABLE = "contractor_profiles";
 
@@ -215,6 +216,9 @@ export async function createContractor(c: Contractor): Promise<void> {
     advanceSickLeave: c.advanceSickLeave  ?? 0,
   });
   if (error) throw new Error(error.message);
+
+  // Auto-provision portal login + send welcome email
+  await provisionContractorUser(c);
 }
 
 export async function updateContractor(c: Contractor): Promise<void> {
