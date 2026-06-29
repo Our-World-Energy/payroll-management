@@ -235,15 +235,31 @@ function completionTimeFor(evaluatedTime: string, adjustedTime: string, timeOffT
   const evaluatedMinutes = timeValueToMinutes(evaluatedTime);
   const timeOffMinutes = timeValueToMinutes(timeOffTime);
   const holidayMinutes = timeValueToMinutes(holidayTime);
-
-  if (adjustedTime === "") return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes + holidayMinutes);
-  return formatMinutesAsMins(timeValueToMinutes(adjustedTime));
+  const adjustedMinutes = timeValueToMinutes(adjustedTime);
+  // Only treat adjustedTime as a manual override when it resolves to a positive value.
+  // A value of "" or "-" means no override has been set (the latter is the auto-populated
+  // default for days with no Worksnap time), so the formula is used in those cases.
+  if (adjustedMinutes > 0) return formatMinutesAsMins(adjustedMinutes);
+  return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes + holidayMinutes);
 }
 
 type HolidayEntry = { date: string; country: string; name: string };
 
-function holidayTimeFor(date: string, usaHolidays: HolidayEntry[]) {
-  return usaHolidays.some((h) => h.date === date) ? "480 mins" : "-";
+function holidayTimeFor(
+  date: string,
+  usaHolidays: HolidayEntry[],
+  dailyWorksnapMinutes: Record<string, number> = {},
+  restDaysStr = "",
+  weekDates: string[] = []
+) {
+  if (!usaHolidays.some((h) => h.date === date)) return "-";
+  if (isRestDayDate(date, restDaysStr)) return "-";
+  // All other working days in the week must have login time
+  const otherWorkingDays = weekDates.filter(
+    (d) => d !== date && !isRestDayDate(d, restDaysStr) && !usaHolidays.some((h) => h.date === d)
+  );
+  if (otherWorkingDays.some((d) => (dailyWorksnapMinutes[d] ?? 0) === 0)) return "-";
+  return "480 mins";
 }
 
 
@@ -492,15 +508,19 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const worksnapTotalMinutes = worksnapTotalMinutesFor(weekDates, dailyWorksnapMinutes);
   const indiaTotalMinutes = Math.min(worksnapTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
+const totalHolidayMins = weekDates.reduce(
+    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates)),
+    0
+  );
 const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCategory)
-    ? indiaNetCompletionMinutes
+    ? indiaNetCompletionMinutes + totalHolidayMins
     : weekDates.reduce((total, date) => {
         const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType);
         const adjustedTime = adjustedTimes[date] ?? "";
         const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
         const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-        const holidayTime = holidayTimeFor(date, usaHolidays);
+        const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime));
       }, 0);
   const details = [
@@ -623,7 +643,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDayDate(date, restDaysStr), evaluationShiftType);
                     const adjustedTime = adjustedTimes[date] ?? "";
-                    const holidayTime = holidayTimeFor(date, usaHolidays);
+                    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
                     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
                     const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
                     const completionTime = completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime);
@@ -765,8 +785,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
-                      -
+                    <td className="px-4 py-3 border-r border-slate-100">
+                      {totalHolidayMins > 0
+                        ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesAsMins(totalHolidayMins)}</span>
+                        : <span className="text-slate-500">-</span>}
                     </td>
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
@@ -775,7 +797,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                       -
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-900">
-                      {formatMinutesAsMins(isIndia ? indiaTotalMinutes : completionTotalMinutes)}
+                      {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       -
@@ -807,7 +829,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 && offsetCredit === 0 ? "text-red-600" : "text-[#003527]"}`}>
-                          {formatMinutesAsMins(offsetCredit > 0 ? indiaTotalMinutes + offsetCredit : indiaNetCompletionMinutes)}
+                          {formatMinutesAsMins(offsetCredit > 0 ? indiaTotalMinutes + offsetCredit + totalHolidayMins : indiaNetCompletionMinutes + totalHolidayMins)}
                         </td>
                         <td className="px-4 py-3 text-slate-500">-</td>
                       </tr>
@@ -823,7 +845,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               <div>
                 <p className="text-sm font-bold text-amber-700">{record.weeklyStatus}</p>
                 <p className="text-xs text-slate-500">
-                  Actual: {record.actualMinutes.toLocaleString()} min Â· Standard: {record.standardMinutes.toLocaleString()} min
+                  Actual: {record.actualMinutes.toLocaleString()} min &middot; Standard: {(isIndia ? 2400 : record.standardMinutes).toLocaleString()} min
                 </p>
               </div>
             </div>
@@ -887,10 +909,6 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
 
   const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
   const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
-  const holidayBonusMins = modalWeekDates.reduce(
-    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays)),
-    0
-  );
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
@@ -928,10 +946,19 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
     else setSelectedIds(new Set(filteredRows.map((r) => r.contractorId)));
   }
 
+  function rowHolidayBonus(r: AttendanceRow) {
+    const rowDailyMins = r.dailyWorksnapMinutes ?? {};
+    const rowRestDays = restDaysForAttendanceRow(r);
+    return modalWeekDates.reduce(
+      (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates)),
+      0
+    );
+  }
+
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + holidayBonusMins);
+      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + rowHolidayBonus(r));
     });
     setProcessedApprovals(map);
   }
@@ -941,7 +968,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + holidayBonusMins])
+          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + rowHolidayBonus(r)])
         );
     onApprove(selectedIds, modalWeekDates, approvedMinutesById);
     onClose();
@@ -1003,7 +1030,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
                 <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
-                const completionMins = processedMins ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + holidayBonusMins);
+                const rowHolidayBonusMins = rowHolidayBonus(row);
+                const completionMins = processedMins ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + rowHolidayBonusMins);
                 const isProcessed = processedMins !== undefined;
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
@@ -1024,7 +1052,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
                   <td className={`px-4 py-3 text-sm font-semibold border-r border-slate-100 ${isProcessed ? "text-emerald-700 bg-emerald-50" : "text-slate-900"}`}>
                     <span className="flex items-center gap-1.5">
                       <span>{completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}</span>
-                      {holidayBonusMins > 0 && (
+                      {rowHolidayBonusMins > 0 && (
                         <span title="Includes US holiday time" className="inline-flex items-center justify-center rounded-full bg-blue-100 p-0.5">
                           <LuCalendar size={11} strokeWidth={2} className="text-blue-500" />
                         </span>
@@ -1376,13 +1404,15 @@ export default function AttendancePage() {
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
                 const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
+                const rowDailyMins = row.dailyWorksnapMinutes ?? {};
+                const rowRestDays = restDaysForAttendanceRow(row);
                 const holidayBonusMins = weekDates.reduce(
-                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays)),
+                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates)),
                   0
                 );
                 const completionMins = row.completionMinutes ?? (
                   isFixedContractor(row.payCategory)
-                    ? Math.max(0, computedCompletionMins - appliedOffsetCredit)
+                    ? Math.max(0, computedCompletionMins - appliedOffsetCredit) + holidayBonusMins
                     : computedCompletionMins + holidayBonusMins
                 );
 
