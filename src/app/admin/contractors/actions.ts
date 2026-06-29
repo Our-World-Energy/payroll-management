@@ -46,6 +46,10 @@ function toContractor(row: Record<string, unknown>): Contractor {
     dismissalReason:   String(row.dismissalReason   ?? ""),
     equipmentProvided: Boolean(row.equipmentProvided),
     worksnapId:        String(row.worksnapId        ?? ""),
+    ptoUsed:          Number(row.ptoUsed          ?? 0),
+    sickLeaveUsed:    Number(row.sickLeaveUsed    ?? 0),
+    birthdayLeave:    Number(row.birthdayLeave     ?? 0),
+    advanceSickLeave: Number(row.advanceSickLeave  ?? 0),
   };
 }
 
@@ -205,6 +209,10 @@ export async function createContractor(c: Contractor): Promise<void> {
     dismissalReason:   c.dismissalReason,
     equipmentProvided: c.equipmentProvided,
     worksnapId:        c.worksnapId,
+    ptoUsed:          c.ptoUsed          ?? 0,
+    sickLeaveUsed:    c.sickLeaveUsed    ?? 0,
+    birthdayLeave:    c.birthdayLeave    ?? 0,
+    advanceSickLeave: c.advanceSickLeave  ?? 0,
   });
   if (error) throw new Error(error.message);
 }
@@ -243,6 +251,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
     dismissalReason:   c.dismissalReason,
     equipmentProvided: c.equipmentProvided,
     worksnapId:        c.worksnapId,
+    ptoUsed:          c.ptoUsed          ?? 0,
+    sickLeaveUsed:    c.sickLeaveUsed    ?? 0,
+    birthdayLeave:    c.birthdayLeave    ?? 0,
+    advanceSickLeave: c.advanceSickLeave  ?? 0,
   }).eq("uid", c.uid);
   if (error) throw new Error(error.message);
 }
@@ -250,5 +262,14 @@ export async function updateContractor(c: Contractor): Promise<void> {
 export async function deleteContractor(uid: string): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.from(TABLE).delete().eq("uid", uid);
+  if (error) throw new Error(error.message);
+}
+
+export async function updateTimeOffUsage(
+  uid: string,
+  fields: Partial<{ ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; advanceSickLeave: number }>
+): Promise<void> {
+  const sb = getSupabase();
+  const { error } = await sb.from(TABLE).update(fields).eq("uid", uid);
   if (error) throw new Error(error.message);
 }

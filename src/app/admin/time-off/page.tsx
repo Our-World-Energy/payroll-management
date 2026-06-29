@@ -8,12 +8,10 @@ import {
 } from "react-icons/lu";
 import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
 import { calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
-import { fetchAllContractors } from "../contractors/actions";
+import { fetchAllContractors, updateTimeOffUsage } from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
 
 const HOURS_PER_DAY = 8;
-const BIRTHDAY_LEAVE_HOURS = 8; // 1 day advance birthday leave
-const ADVANCE_SICK_LEAVE_HOURS = 8; // 1 day advance sick leave
 const TODAY = new Date();
 
 type RequestDecision = "Approved" | "Pending" | "Declined";
@@ -126,28 +124,6 @@ function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number):
   return roundBalance(unused);
 }
 
-/**
- * Birthday leave: 1 day (8 hrs) advance credit — granted once eligible (after 6-month wait + next month start)
- */
-function calculateBirthdayLeave(hireDate: string): number {
-  const startDate = parseDate(hireDate);
-  if (!startDate) return 0;
-  const eligibilityDate = addMonths(startDate, 6);
-  const accrualStart = firstOfNextMonth(eligibilityDate);
-  return TODAY >= accrualStart ? BIRTHDAY_LEAVE_HOURS : 0;
-}
-
-/**
- * Advance sick leave: 1 day (8 hrs) credit — granted once eligible
- */
-function calculateAdvanceSickLeave(hireDate: string): number {
-  const startDate = parseDate(hireDate);
-  if (!startDate) return 0;
-  const eligibilityDate = addMonths(startDate, 6);
-  const accrualStart = firstOfNextMonth(eligibilityDate);
-  return TODAY >= accrualStart ? ADVANCE_SICK_LEAVE_HOURS : 0;
-}
-
 function effectiveRequestStatus(request: TimeOffRequest, decisions: RequestDecisionMap): RequestDecision | "-" {
   const override = decisions[request.id];
   if (override) return override;
@@ -156,11 +132,6 @@ function effectiveRequestStatus(request: TimeOffRequest, decisions: RequestDecis
   return request.status as RequestDecision;
 }
 
-function approvedHoursFor(name: string, type: "Annual Leave" | "Sick Leave", decisions: RequestDecisionMap): number {
-  return TIME_OFF
-    .filter((r) => r.name === name && r.type === type && effectiveRequestStatus(r, decisions) === "Approved")
-    .reduce((total, r) => total + r.days * HOURS_PER_DAY, 0);
-}
 
 function latestRequestFor(name: string) {
   return TIME_OFF
@@ -242,8 +213,6 @@ export default function TimeOffPage() {
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
   const [modalTab,      setModalTab]      = useState<"details" | "history" | "info">("info");
-  // Tracks how many advance hours have been granted per row (in-session only)
-  const [advanceGrants, setAdvanceGrants] = useState<Record<string, { sick: number; pto: number }>>({});
 
   useEffect(() => {
     let active = true;
@@ -265,11 +234,10 @@ export default function TimeOffPage() {
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
     const latestRequest = latestRequestFor(fullName);
-    const ptoBalance      = calculatePtoBalance(c.hireDate);
+    const ptoBalance       = calculatePtoBalance(c.hireDate);
     const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
-    const ptoUsed        = approvedHoursFor(fullName, "Annual Leave", requestDecisions);
-    const sickLeaveUsed  = approvedHoursFor(fullName, "Sick Leave",  requestDecisions);
-
+    const ptoUsed          = c.ptoUsed;
+    const sickLeaveUsed    = c.sickLeaveUsed;
     const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
     const sickLeaveAvailable = roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0));
 
@@ -281,11 +249,11 @@ export default function TimeOffPage() {
       reviewStatus: latestRequest ? effectiveRequestStatus(latestRequest, requestDecisions) : "-",
       latestRequest, ptoBalance, ptoUsed, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
-      birthdayLeave:    calculateBirthdayLeave(c.hireDate) + (advanceGrants[c.uid]?.pto  ?? 0),
-      advanceSickLeave: calculateAdvanceSickLeave(c.hireDate) + (advanceGrants[c.uid]?.sick ?? 0),
+      birthdayLeave:    c.birthdayLeave,
+      advanceSickLeave: c.advanceSickLeave,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
     };
-  }), [contractors, requestDecisions, advanceGrants]);
+  }), [contractors, requestDecisions]);
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
@@ -533,19 +501,21 @@ export default function TimeOffPage() {
                   const advanceEligible    = isIndia ? hasNoSickBalance : (hasNoPtoBalance && hasNoSickBalance);
                   const isPto = editLeaveType === "Advance PTO/Birthday Leave";
 
-                  function applyAdvanceGrant() {
+                  async function applyAdvanceGrant() {
+                    if (!selectedRow) return;
                     const hoursToAdd = parseFloat(editHours) || 0;
                     if (hoursToAdd <= 0) return;
-                    setAdvanceGrants((cur) => {
-                      const prev = cur[selectedRow.id] ?? { sick: 0, pto: 0 };
-                      return {
-                        ...cur,
-                        [selectedRow.id]: {
-                          sick: prev.sick + (isPto ? 0 : hoursToAdd),
-                          pto:  prev.pto  + (isPto ? hoursToAdd : 0),
-                        },
-                      };
+                    const newBirthday    = isPto ? selectedRow.birthdayLeave + hoursToAdd : selectedRow.birthdayLeave;
+                    const newAdvanceSick = isPto ? selectedRow.advanceSickLeave : selectedRow.advanceSickLeave + hoursToAdd;
+                    await updateTimeOffUsage(selectedRow.id, {
+                      birthdayLeave:    newBirthday,
+                      advanceSickLeave: newAdvanceSick,
                     });
+                    setContractors((prev) => prev.map((c) =>
+                      c.uid === selectedRow.id
+                        ? { ...c, birthdayLeave: newBirthday, advanceSickLeave: newAdvanceSick }
+                        : c
+                    ));
                     setEditHours("");
                   }
 

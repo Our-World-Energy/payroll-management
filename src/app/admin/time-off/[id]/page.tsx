@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuChevronLeft, LuClock } from "react-icons/lu";
+import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot } from "react-icons/lu";
 import { fetchAllContractors } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
 import { calculatePtoBalance, calculateSickLeaveBalance, roundBalance, fmtBalance } from "@/lib/timeOffBalances";
@@ -180,7 +180,7 @@ export default function ContractorTimeOffPage() {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date", "Reason", ...(!isIndia ? ["PTO Available"] : []), "Sick Leave Available", "Status", "Action"].map((h) => (
+                {["Name", "Start Date", "End Date", "Reason", ...(!isIndia ? ["PTO Available"] : []), "Sick Leave Available", "Status", "Action Status", "Action"].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -190,7 +190,7 @@ export default function ContractorTimeOffPage() {
             <tbody className="divide-y divide-slate-100">
               {requests.length === 0 ? (
                 <tr>
-                  <td colSpan={isIndia ? 7 : 8} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     No time-off requests found.
                   </td>
@@ -230,6 +230,23 @@ export default function ContractorTimeOffPage() {
                         );
                       })()}
                     </td>
+                    {/* Action Status */}
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      {status === "Approved" ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <LuCircleCheck size={11} /> Approved
+                        </span>
+                      ) : status === "Declined" ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200">
+                          <LuCircleX size={11} /> Declined
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
+                          <LuCircleDot size={11} /> Pending
+                        </span>
+                      )}
+                    </td>
+                    {/* Action buttons */}
                     <td className="px-5 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <button
@@ -237,7 +254,7 @@ export default function ContractorTimeOffPage() {
                           disabled={status === "Declined" || blocked}
                           className="px-4 py-1.5 bg-red-400 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
                         >
-                          Reject
+                          Decline
                         </button>
                         <button
                           onClick={() => decide(req.id, "Approved")}
