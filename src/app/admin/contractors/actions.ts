@@ -172,6 +172,7 @@ export async function fetchAllContractors(
 export async function createContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.from(TABLE).insert({
+    id:                crypto.randomUUID(),
     uid:               c.uid,
     firstName:         c.firstName,
     middleName:        c.middleName,
