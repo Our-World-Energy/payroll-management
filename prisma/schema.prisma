@@ -229,8 +229,10 @@ model ContractorProfile {
   equipmentProvided Boolean  @default(false)
   worksnapId        String   @default("")
 
-  // Time-off tracking — stored values (balances are calculated from hireDate)
+  // Time-off tracking
+  ptoBalance        Float    @default(0)
   ptoUsed           Float    @default(0)
+  sickLeaveBalance  Float    @default(0)
   sickLeaveUsed     Float    @default(0)
   birthdayLeave     Float    @default(0)
   advanceSickLeave  Float    @default(0)

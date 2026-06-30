@@ -165,7 +165,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       department:     form.department,
       subDepartment:  form.subDepartment,
       role:           form.role,
-      location:       form.state ? `${form.state}, ${form.country}` : form.country,
+      location:       form.country,
       officeLocation: form.officeLocation,
       manager:        form.manager,
       hireDate:       form.hireDate,
@@ -183,7 +183,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
       equipmentProvided:  form.equipmentProvided,
       worksnapId:         form.worksnapId,
+      ptoBalance:         0,
       ptoUsed:            0,
+      sickLeaveBalance:   0,
       sickLeaveUsed:      0,
       birthdayLeave:      0,
       advanceSickLeave:   0,
@@ -295,19 +297,11 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 {errors.role && <span className="text-xs text-red-500">{errors.role}</span>}
               </FIELD>
 
-              {/* Country → resets state */}
+              {/* Country */}
               <FIELD label="Country">
                 <select className={SELECT} value={form.country}
                   onChange={(e) => setForm((f) => ({ ...f, country: e.target.value, state: "" }))}>
                   {COUNTRIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </FIELD>
-
-              {/* State → depends on Country */}
-              <FIELD label="State / Province">
-                <select className={SELECT} value={form.state} onChange={(e) => set("state", e.target.value)}>
-                  <option value="">— Select —</option>
-                  {states.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </FIELD>
 

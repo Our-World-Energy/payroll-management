@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchContractorTimeOff, type ContractorTimeOff } from "./actions";
-import { calculatePtoBalance, calculateSickLeaveBalance, fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuCalendarDays, LuDownload, LuChevronRight, LuInfo,
@@ -131,8 +131,8 @@ export default function ContractorTimeOffPage() {
     );
   }
 
-  const ptoTotal   = calculatePtoBalance(data.hireDate) * HOURS_PER_DAY;
-  const sickTotal  = calculateSickLeaveBalance(data.hireDate) * HOURS_PER_DAY;
+  const ptoTotal   = data.ptoBalance;
+  const sickTotal  = data.sickLeaveBalance;
 
   const now = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 

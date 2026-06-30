@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
+import { calculatePtoBalance, calculateSickLeaveBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
 
 const TABLE = "contractor_profiles";
 
@@ -47,8 +48,10 @@ function toContractor(row: Record<string, unknown>): Contractor {
     dismissalReason:   String(row.dismissalReason   ?? ""),
     equipmentProvided: Boolean(row.equipmentProvided),
     worksnapId:        String(row.worksnapId        ?? ""),
-    ptoUsed:          Number(row.ptoUsed          ?? 0),
-    sickLeaveUsed:    Number(row.sickLeaveUsed    ?? 0),
+    ptoBalance:       Number(row.ptoBalance        ?? 0),
+    ptoUsed:          Number(row.ptoUsed           ?? 0),
+    sickLeaveBalance: Number(row.sickLeaveBalance  ?? 0),
+    sickLeaveUsed:    Number(row.sickLeaveUsed     ?? 0),
     birthdayLeave:    Number(row.birthdayLeave     ?? 0),
     advanceSickLeave: Number(row.advanceSickLeave  ?? 0),
   };
@@ -176,6 +179,8 @@ export async function fetchAllContractors(
 
 export async function createContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
+  const ptoBalance      = calculatePtoBalance(c.hireDate) * HOURS_PER_DAY;
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate) * HOURS_PER_DAY;
   const { error } = await sb.from(TABLE).insert({
     id:                crypto.randomUUID(),
     uid:               c.uid,
@@ -210,10 +215,12 @@ export async function createContractor(c: Contractor): Promise<void> {
     dismissalReason:   c.dismissalReason,
     equipmentProvided: c.equipmentProvided,
     worksnapId:        c.worksnapId,
-    ptoUsed:          c.ptoUsed          ?? 0,
-    sickLeaveUsed:    c.sickLeaveUsed    ?? 0,
-    birthdayLeave:    c.birthdayLeave    ?? 0,
-    advanceSickLeave: c.advanceSickLeave  ?? 0,
+    ptoBalance,
+    ptoUsed:           c.ptoUsed          ?? 0,
+    sickLeaveBalance,
+    sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
+    birthdayLeave:     c.birthdayLeave    ?? 0,
+    advanceSickLeave:  c.advanceSickLeave ?? 0,
   });
   if (error) throw new Error(error.message);
 
@@ -223,6 +230,8 @@ export async function createContractor(c: Contractor): Promise<void> {
 
 export async function updateContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
+  const ptoBalance       = calculatePtoBalance(c.hireDate) * HOURS_PER_DAY;
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate) * HOURS_PER_DAY;
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -255,10 +264,12 @@ export async function updateContractor(c: Contractor): Promise<void> {
     dismissalReason:   c.dismissalReason,
     equipmentProvided: c.equipmentProvided,
     worksnapId:        c.worksnapId,
-    ptoUsed:          c.ptoUsed          ?? 0,
-    sickLeaveUsed:    c.sickLeaveUsed    ?? 0,
-    birthdayLeave:    c.birthdayLeave    ?? 0,
-    advanceSickLeave: c.advanceSickLeave  ?? 0,
+    ptoBalance,
+    ptoUsed:           c.ptoUsed          ?? 0,
+    sickLeaveBalance,
+    sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
+    birthdayLeave:     c.birthdayLeave    ?? 0,
+    advanceSickLeave:  c.advanceSickLeave ?? 0,
   }).eq("uid", c.uid);
   if (error) throw new Error(error.message);
 }
@@ -276,4 +287,20 @@ export async function updateTimeOffUsage(
   const sb = getSupabase();
   const { error } = await sb.from(TABLE).update(fields).eq("uid", uid);
   if (error) throw new Error(error.message);
+}
+
+export async function backfillLeaveBalances(): Promise<{ updated: number }> {
+  const sb = getSupabase();
+  const { data, error } = await sb.from(TABLE).select("uid, hireDate");
+  if (error) throw new Error(error.message);
+
+  let updated = 0;
+  for (const row of data ?? []) {
+    if (!row.hireDate) continue;
+    const ptoBalance       = calculatePtoBalance(row.hireDate) * HOURS_PER_DAY;
+    const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate) * HOURS_PER_DAY;
+    await sb.from(TABLE).update({ ptoBalance, sickLeaveBalance }).eq("uid", row.uid);
+    updated++;
+  }
+  return { updated };
 }
