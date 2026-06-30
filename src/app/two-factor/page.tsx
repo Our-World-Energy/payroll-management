@@ -56,14 +56,16 @@ export default function TwoFactorPage() {
         return;
       }
 
-      // No verified factor: clear any abandoned (unverified) factors, then enroll.
-      const stale = factors.all.filter((f) => f.status === "unverified");
+      // No verified factor: clear ALL existing factors (verified or not) then enroll fresh.
       await Promise.all(
-        stale.map((f) => supabase.auth.mfa.unenroll({ factorId: f.id }))
+        factors.all.map((f) => supabase.auth.mfa.unenroll({ factorId: f.id }))
       );
 
       const { data: enrolled, error: enrollError } =
-        await supabase.auth.mfa.enroll({ factorType: "totp" });
+        await supabase.auth.mfa.enroll({
+          factorType: "totp",
+          friendlyName: `totp-${Date.now()}`,
+        });
       if (enrollError) {
         setError(enrollError.message);
         return;
@@ -100,7 +102,10 @@ export default function TwoFactorPage() {
       return;
     }
 
-    router.replace("/admin");
+    // Route by role: admins → /admin, contractors → /contractor
+    const { data: { user } } = await supabase.auth.getUser();
+    const role = (user?.user_metadata?.role as string) ?? "admin";
+    router.replace(role === "user" ? "/contractor" : "/admin");
     router.refresh();
   }
 

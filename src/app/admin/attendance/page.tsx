@@ -1,5 +1,5 @@
 "use client";
-/* test eslint-disable react-hooks/set-state-in-effect -- data-fetching effects set loading/result state on mount */
+/* eslint-disable react-hooks/exhaustive-deps */
 
 import { useState, useEffect } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar } from "react-icons/lu";

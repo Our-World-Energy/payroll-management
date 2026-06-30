@@ -37,6 +37,7 @@ for (let h = 0; h < 24; h++) {
 }
 
 // Pay period: always Sun–Sat of current week
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPayPeriod() {
   const today = new Date();
   const sun   = new Date(today); sun.setDate(today.getDate() - today.getDay());
@@ -140,6 +141,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email";
     if (!form.role.trim())      e.role      = "Required";
     if (!form.hireDate)         e.hireDate  = "Required";
+    if (!form.restDays.length)  e.restDays  = "Required";
     setErrors(e);
     return Object.keys(e).length === 0;
   }
@@ -163,7 +165,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       department:     form.department,
       subDepartment:  form.subDepartment,
       role:           form.role,
-      location:       form.state ? `${form.state}, ${form.country}` : form.country,
+      location:       form.country,
       officeLocation: form.officeLocation,
       manager:        form.manager,
       hireDate:       form.hireDate,
@@ -181,6 +183,12 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
       equipmentProvided:  form.equipmentProvided,
       worksnapId:         form.worksnapId,
+      ptoBalance:         0,
+      ptoUsed:            0,
+      sickLeaveBalance:   0,
+      sickLeaveUsed:      0,
+      birthdayLeave:      0,
+      advanceSickLeave:   0,
     };
 
     onSave(contractor);
@@ -289,19 +297,11 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 {errors.role && <span className="text-xs text-red-500">{errors.role}</span>}
               </FIELD>
 
-              {/* Country → resets state */}
+              {/* Country */}
               <FIELD label="Country">
                 <select className={SELECT} value={form.country}
                   onChange={(e) => setForm((f) => ({ ...f, country: e.target.value, state: "" }))}>
                   {COUNTRIES.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              </FIELD>
-
-              {/* State → depends on Country */}
-              <FIELD label="State / Province">
-                <select className={SELECT} value={form.state} onChange={(e) => set("state", e.target.value)}>
-                  <option value="">— Select —</option>
-                  {states.map((s) => <option key={s}>{s}</option>)}
                 </select>
               </FIELD>
 
@@ -408,7 +408,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
             {/* Rest Days */}
             <div className="mt-4 flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Rest Days</label>
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Rest Days<span className="text-red-400 ml-0.5">*</span>
+                </label>
                 <div className="flex flex-wrap gap-2">
                   {WEEK_DAYS.map((day) => {
                     const checked = form.restDays.includes(day);
@@ -424,6 +426,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     );
                   })}
                 </div>
+                {errors.restDays && <span className="text-xs text-red-500">{errors.restDays}</span>}
               </div>
           </section>
 

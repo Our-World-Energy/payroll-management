@@ -31,6 +31,12 @@ export type Contractor = {
   dismissalReason: string;
   equipmentProvided: boolean;
   worksnapId: string;
+  ptoBalance: number;
+  ptoUsed: number;
+  sickLeaveBalance: number;
+  sickLeaveUsed: number;
+  birthdayLeave: number;
+  advanceSickLeave: number;
 };
 
 export type ColumnDef = {

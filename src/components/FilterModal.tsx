@@ -186,7 +186,7 @@ export function FilterModal({ initialRules, onApply, onClose }: Props) {
         {/* Rules */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-3">
           {rules.length === 0 && (
-            <p className="text-sm text-slate-400 text-center py-8">No filters added yet. Click "+ Add Filter" to start.</p>
+            <p className="text-sm text-slate-400 text-center py-8">No filters added yet. Click &quot;+ Add Filter&quot; to start.</p>
           )}
 
           {rules.map((rule, idx) => {
