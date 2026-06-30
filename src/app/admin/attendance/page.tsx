@@ -1,8 +1,8 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect } from "react";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar } from "react-icons/lu";
+import { useState, useEffect, useRef } from "react";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChevronDown, LuChartColumn } from "react-icons/lu";
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 
 const WEEKS = [
@@ -42,9 +42,31 @@ function datesBetween(from: string, to: string) {
   return dates;
 }
 
-function nextWeekKeyFor(weekKey: string) {
-  const index = WEEKS.findIndex((week) => week.key === weekKey);
-  return index > 0 ? WEEKS[index - 1].key : null;
+function addDaysIso(iso: string, days: number) {
+  const d = parseIsoDate(iso);
+  d.setDate(d.getDate() + days);
+  return toIsoDate(d);
+}
+
+// Snap any date to the Sunday that starts its week.
+function sundayOf(iso: string) {
+  const d = parseIsoDate(iso);
+  d.setDate(d.getDate() - d.getDay());
+  return toIsoDate(d);
+}
+
+// Today's calendar date in Arizona (America/Phoenix, no DST), as YYYY-MM-DD.
+function arizonaTodayIso(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Phoenix", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
+// The most recent N weeks (Sun→Sat), most-recent first, anchored to the
+// current Arizona week. e.g. on 2026-07-01 → ["2026-06-28", "2026-06-21", …].
+function recentWeeks(count = 12): string[] {
+  const currentSunday = sundayOf(arizonaTodayIso());
+  return Array.from({ length: count }, (_, i) => addDaysIso(currentSunday, -7 * i));
 }
 
 
@@ -70,6 +92,7 @@ type ReviewModalProps = {
 };
 
 type WorksnapEntry = {
+  worksnapUserId?: number | null;
   userName: string | null;
   email: string | null;
   durationMins: number | string | null;
@@ -365,6 +388,7 @@ function initialsFor(name: string) {
 }
 
 type AttendanceRow = AttendanceRecord & {
+  worksnapUserId?: number | null;
   department?: string;
   restDay?: string;
   shiftType?: string;
@@ -402,6 +426,7 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
   const weeklyStatus = computeWeeklyStatus(entry.dailyWorksnapMinutes ?? {}, weekDates, restDaysStr, payCategory);
 
   return {
+    worksnapUserId: entry.worksnapUserId ?? null,
     contractorId: entry.email?.trim() || `worksnap-${index}`,
     name,
     role: entry.email?.trim() || "No email",
@@ -424,7 +449,7 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number> }>();
+  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number> }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -436,6 +461,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
     if (entryDate) dailyWorksnapMinutes[entryDate] = (dailyWorksnapMinutes[entryDate] ?? 0) + durationMins;
 
     rowsByUser.set(key, {
+      worksnapUserId: current?.worksnapUserId ?? entry.worksnapUserId ?? null,
       userName: current?.userName ?? entry.userName,
       email: current?.email ?? entry.email,
       durationMins: (current?.durationMins ?? 0) + durationMins,
@@ -1107,12 +1133,167 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   );
 }
 
+function FilterSelect({ value, onChange, label, className = "", children }: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`relative ${className}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={label}
+        className="peer h-10 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-9 text-sm font-medium text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+      >
+        {children}
+      </select>
+      <LuChevronDown
+        size={16}
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors peer-focus:text-teal-600"
+      />
+    </div>
+  );
+}
+
+function WeekJumpDropdown({ onApply, onClose }: { onApply: (iso: string) => void; onClose: () => void }) {
+  const [date, setDate] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function h(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [onClose]);
+  return (
+    <div ref={ref} className="absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-xl shadow-xl p-4 w-72">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-bold text-[#003527]">Jump to Week</p>
+        <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700 rounded"><LuX size={14} /></button>
+      </div>
+      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pick any date in the week</label>
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+      <div className="flex gap-2 mt-4">
+        <button onClick={onClose} className="flex-1 py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
+        <button onClick={() => { if (date) { onApply(date); onClose(); } }} disabled={!date}
+          className="flex-1 py-2 text-sm font-semibold bg-[#003527] text-white rounded-lg hover:bg-[#064E3B] disabled:opacity-40">Go</button>
+      </div>
+    </div>
+  );
+}
+
+// ── per-user task × date breakdown modal ────────────────────────────────────
+type BreakdownTask = { projectName: string; taskName: string; category: string; perDay: Record<string, number>; total: number };
+type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number> };
+
+const CAT_CHIP: Record<string, string> = { Work: "bg-emerald-50 text-emerald-700", Break: "bg-amber-50 text-amber-700", "Meeting/Training": "bg-sky-50 text-sky-700" };
+
+const signed = (n: number) => (n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString());
+
+function weekLabel(iso: string): string {
+  const start = new Date(`${iso}T00:00:00.000Z`);
+  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+  const mo = (d: Date) => d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const day = (d: Date) => d.getUTCDate();
+  return mo(start) === mo(end) ? `${mo(start)} ${day(start)} – ${day(end)}` : `${mo(start)} ${day(start)} – ${mo(end)} ${day(end)}`;
+}
+
+function breakdownDayHeader(iso: string) {
+  const d = new Date(`${iso}T00:00:00.000Z`);
+  return { dow: d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }), day: d.getUTCDate(), mon: d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }) };
+}
+
+function BreakdownModal({ userId, userName, email, week, onClose }: { userId: number; userName: string; email: string; week: string; onClose: () => void }) {
+  const [data, setData] = useState<BreakdownResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true; setLoading(true);
+    fetch(`/api/attendance/user-breakdown/?userId=${userId}&week=${week}`, { cache: "no-store" })
+      .then((r) => r.json()).then((d: BreakdownResponse) => { if (alive) { setData(d); setLoading(false); } })
+      .catch(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [userId, week]);
+  const days = data?.days ?? [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col">
+        <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-[#003527]">{userName} — Task Breakdown</h3>
+            <p className="text-sm text-slate-500 mt-0.5">{email || "no platform email"} · week of {weekLabel(week)}</p>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700 rounded"><LuX size={18} /></button>
+        </div>
+        <div className="overflow-auto p-2 sm:p-4">
+          {loading && <p className="px-4 py-10 text-center text-sm text-slate-400">Loading…</p>}
+          {!loading && data && data.tasks.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-400">No logged time this week.</p>}
+          {!loading && data && data.tasks.length > 0 && (
+            <table className="w-full text-left text-sm" style={{ minWidth: "640px" }}>
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Project / Task</th>
+                  {days.map((d) => { const h = breakdownDayHeader(d); return (
+                    <th key={d} className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap">
+                      {h.dow}<br /><span className="text-slate-400 font-semibold">{h.day} {h.mon}</span></th>); })}
+                  <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-widest text-slate-500">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.tasks.map((t, i) => (
+                  <tr key={i} className="hover:bg-slate-50/70">
+                    <td className="px-3 py-2"><div className="flex items-center gap-2">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${CAT_CHIP[t.category] ?? "bg-slate-100 text-slate-600"}`}>{t.taskName || t.category}</span>
+                      <span className="text-xs text-slate-400">{t.projectName}</span></div></td>
+                    {days.map((d) => <td key={d} className={`px-2 py-2 text-center tabular-nums ${t.perDay[d] ? "text-slate-800" : "text-slate-300"}`}>{t.perDay[d] ?? "·"}</td>)}
+                    <td className="px-3 py-2 text-right font-bold text-slate-900 tabular-nums">{t.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-slate-200 bg-slate-50">
+                  <td className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-600">Worked (min)</td>
+                  {days.map((d) => <td key={d} className="px-2 py-2 text-center font-bold text-[#003527] tabular-nums">{data.dailyTotals[d] || 0}</td>)}
+                  <td className="px-3 py-2 text-right font-extrabold text-[#003527] tabular-nums">{data.grandTotal}</td>
+                </tr>
+                <tr className="bg-slate-50/60">
+                  <td className="px-3 py-1.5 text-xs font-semibold text-indigo-600">Manual Adjustment</td>
+                  {days.map((d) => { const v = data.adjustments?.[d] ?? 0; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums ${v ? "text-indigo-600 font-semibold" : "text-slate-300"}`}>{v ? signed(v) : "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-right font-bold text-indigo-600 tabular-nums">{signed(days.reduce((s, d) => s + (data.adjustments?.[d] ?? 0), 0))}</td>
+                </tr>
+                <tr className="bg-slate-50/60">
+                  <td className="px-3 py-1.5 text-xs font-semibold text-amber-600">Time Off</td>
+                  {days.map((d) => { const v = data.timeOff?.[d] ?? 0; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums ${v ? "text-amber-600 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-right font-bold text-amber-600 tabular-nums">{days.reduce((s, d) => s + (data.timeOff?.[d] ?? 0), 0)}</td>
+                </tr>
+                <tr className="border-t-2 border-slate-200 bg-emerald-50/60">
+                  <td className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-[#003527]">Total (min)</td>
+                  {days.map((d) => { const v = (data.dailyTotals[d] ?? 0) + (data.adjustments?.[d] ?? 0) + (data.timeOff?.[d] ?? 0); return <td key={d} className={`px-2 py-2 text-center font-bold tabular-nums ${v ? "text-[#003527]" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-2 text-right font-extrabold text-[#003527] tabular-nums">{days.reduce((s, d) => s + (data.dailyTotals[d] ?? 0) + (data.adjustments?.[d] ?? 0) + (data.timeOff?.[d] ?? 0), 0)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AttendancePage() {
-  const [activeWeek, setActiveWeek] = useState("w26");
+  const [weeks, setWeeks] = useState<string[]>([]);
+  const [week, setWeek] = useState("");
+  const [showRangePicker, setShowRangePicker] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<{ record: AttendanceRecord; source: "view" | "review" } | null>(null);
   const [worksnapRows, setWorksnapRows] = useState<AttendanceRow[]>([]);
   const [isLoadingWorksnap, setIsLoadingWorksnap] = useState(true);
   const [worksnapError, setWorksnapError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [breakdownTarget, setBreakdownTarget] = useState<AttendanceRow | null>(null);
   const [nameSearch, setNameSearch] = useState("");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
@@ -1123,10 +1304,9 @@ export default function AttendancePage() {
   const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
   const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
 
-  const selectedWeek = WEEKS.find((week) => week.key === activeWeek) ?? WEEKS[0];
-  const weekDates = datesBetween(selectedWeek.from, selectedWeek.to);
-  const rangeFrom = weekDates[0] ?? selectedWeek.from;
-  const rangeTo = weekDates[weekDates.length - 1] ?? selectedWeek.to;
+  const rangeFrom = week;                 // Sunday (week start)
+  const rangeTo = addDaysIso(week, 6);    // Saturday (week end)
+  const weekDates = datesBetween(rangeFrom, rangeTo);
 
   useEffect(() => {
     fetch("/api/holidays")
@@ -1140,10 +1320,20 @@ export default function AttendancePage() {
       .catch(() => {});
   }, []);
 
+  // Week selector = recent Sun→Sat weeks in Arizona time, anchored to the
+  // current week (e.g. Jun 28 – Jul 4). Computed on the client to use the
+  // browser's clock without an SSR/hydration mismatch.
+  useEffect(() => {
+    const list = recentWeeks();
+    setWeeks(list);
+    setWeek((current) => current || list[0]);
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
 
     async function loadWorksnapEntries() {
+      if (!rangeFrom) return; // wait until the week list resolves
       setIsLoadingWorksnap(true);
       setWorksnapError("");
 
@@ -1157,6 +1347,7 @@ export default function AttendancePage() {
         setWorksnapError(result.error ?? "Unable to load Worksnap entries.");
       } else {
         setWorksnapRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates));
+        setLastSyncedAt(result.lastSyncedAt ?? null);
       }
 
       setIsLoadingWorksnap(false);
@@ -1167,12 +1358,40 @@ export default function AttendancePage() {
     return () => {
       isMounted = false;
     };
-  }, [rangeFrom, rangeTo]);
+  }, [rangeFrom, rangeTo, reloadKey]);
+
+  async function handleSync() {
+    setSyncing(true);
+    setWorksnapError("");
+    try {
+      const response = await fetch("/api/attendance/sync/", { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setWorksnapError(result.error ?? "Sync failed. Please try again.");
+        return;
+      }
+      if (result.syncedAt) setLastSyncedAt(result.syncedAt);
+      // Re-run the loader effect to pull the freshly synced entries.
+      setReloadKey((key) => key + 1);
+    } catch {
+      setWorksnapError("Sync failed. Please try again.");
+    } finally {
+      setSyncing(false);
+    }
+  }
 
 
   function formatRangeLabel(from: string, to: string) {
+    if (!from || !to) return "—";
     const fmt = (d: string) => parseIsoDate(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     return `${fmt(from)} – ${fmt(to)}`;
+  }
+
+  function formatArizona(iso: string | null): string {
+    if (!iso) return "never";
+    return new Date(iso).toLocaleString("en-US", {
+      timeZone: "America/Phoenix", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
+    }) + " MST";
   }
 
   const attendanceRows: AttendanceRow[] = worksnapError ? ATTENDANCE as AttendanceRow[] : worksnapRows;
@@ -1180,7 +1399,7 @@ export default function AttendancePage() {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
     const payCategory = payCategoryForAttendanceRow(row);
-    const matchesName = !query || row.name.toLowerCase().includes(query);
+    const matchesName = !query || row.name.toLowerCase().includes(query) || (row.role ?? "").toLowerCase().includes(query);
     const matchesPayCategory = payCategoryFilter === "All" || payCategory === payCategoryFilter;
     const matchesCountry = countryFilter === "All" || row.region === countryFilter;
     const matchesShiftType = shiftTypeFilter === "All" || row.shiftType === shiftTypeFilter;
@@ -1194,6 +1413,23 @@ export default function AttendancePage() {
   const shiftTypeOptions = Array.from(new Set(attendanceRows.map((r) => r.shiftType ?? "").filter(Boolean))).sort();
   const payCategoryOptions = Array.from(new Set(attendanceRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
 
+  const filtersActive =
+    nameSearch.trim() !== "" ||
+    payCategoryFilter !== "All" ||
+    countryFilter !== "All" ||
+    shiftTypeFilter !== "All" ||
+    departmentFilter !== "All" ||
+    statusFilter !== "All";
+
+  function clearFilters() {
+    setNameSearch("");
+    setPayCategoryFilter("All");
+    setCountryFilter("All");
+    setShiftTypeFilter("All");
+    setDepartmentFilter("All");
+    setStatusFilter("All");
+  }
+
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
   const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
   const reviewedCount    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed").length;
@@ -1205,7 +1441,7 @@ export default function AttendancePage() {
   ];
 
   function appliedOffsetCreditFor(row: AttendanceRow) {
-    return offsetCreditsByWeek[activeWeek]?.[row.contractorId] ?? 0;
+    return offsetCreditsByWeek[week]?.[row.contractorId] ?? 0;
   }
 
   function handleReviewSave(contractorId: string, completionMinutes: number, offsetCreditApplied = 0) {
@@ -1215,8 +1451,8 @@ export default function AttendancePage() {
         : r
     ));
 
-    const nextWeekKey = nextWeekKeyFor(activeWeek);
-    if (!nextWeekKey || offsetCreditApplied <= 0) return;
+    if (offsetCreditApplied <= 0) return;
+    const nextWeekKey = addDaysIso(week, 7); // carry the credit into the following week
 
     setOffsetCreditsByWeek((current) => ({
       ...current,
@@ -1261,114 +1497,133 @@ export default function AttendancePage() {
             <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
               <LuFileText size={16} /><span className="hidden sm:inline">Export Timesheet</span><span className="sm:hidden">Export</span>
             </button>
-            <button className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold transition-all shadow-md">
-              <LuRefreshCw size={16} strokeWidth={2} /><span className="hidden sm:inline">Sync All Data</span><span className="sm:hidden">Sync</span>
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold transition-all shadow-md disabled:opacity-50"
+            >
+              <LuRefreshCw size={16} strokeWidth={2} className={syncing ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span>
+              <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
             </button>
           </div>
+          <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className="bg-white p-4 md:p-6 rounded-xl border border-slate-200 flex items-center gap-3 md:gap-4">
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={20} strokeWidth={1.75} /></div>
-            <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl md:text-2xl font-bold mt-0.5 ${color}`}>{value}</p></div>
+          <div key={label} className="bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-3 md:gap-4">
+            <div className={`w-11 h-11 md:w-12 md:h-12 rounded-xl ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={20} strokeWidth={1.75} /></div>
+            <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-2xl md:text-3xl font-bold mt-0.5 tabular-nums ${color}`}>{value}</p></div>
           </div>
         ))}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {/* Table header toolbar */}
-        <div className="p-4 md:p-6 border-b border-slate-100 flex flex-col gap-3 bg-slate-50/50">
-          <div>
-            <h3 className="text-xl md:text-2xl font-semibold text-[#003527]">Weekly Time Tracking</h3>
-            <p className="mt-1 text-xs font-medium text-slate-500">
-              Actual minutes are summed from Worksnap entries dated {formatRangeLabel(rangeFrom, rangeTo)}.
-            </p>
-            {isLoadingWorksnap && (
-              <p className="mt-1 text-xs font-medium text-slate-500">Loading Worksnap entries...</p>
-            )}
-            {!isLoadingWorksnap && worksnapError && (
-              <p className="mt-1 text-xs font-medium text-red-600">Using fallback attendance data. {worksnapError}</p>
-            )}
-            {!isLoadingWorksnap && !worksnapError && attendanceRows.length === 0 && (
-              <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
-            )}
+        <div className="px-4 md:px-6 py-5 border-b border-slate-100 flex flex-col gap-5 bg-linear-to-b from-slate-50/80 to-white">
+          {/* Row 1: title + week selector */}
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="hidden sm:grid size-11 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+                <LuChartColumn size={20} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-xl md:text-2xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
+                <p className="mt-0.5 text-xs font-medium text-slate-500">
+                  Summed from Worksnap entries · <span className="font-semibold text-slate-600">{formatRangeLabel(rangeFrom, rangeTo)}</span>
+                </p>
+                {isLoadingWorksnap && (
+                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                    <LuRefreshCw size={12} className="animate-spin" /> Loading Worksnap entries…
+                  </p>
+                )}
+                {!isLoadingWorksnap && worksnapError && (
+                  <p className="mt-1 text-xs font-medium text-red-600">Using fallback attendance data. {worksnapError}</p>
+                )}
+                {!isLoadingWorksnap && !worksnapError && attendanceRows.length === 0 && (
+                  <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-full md:w-auto overflow-x-auto">
+              <div className="flex gap-1">
+                {weeks.slice(0, 4).map((w) => (
+                  <button key={w} onClick={() => setWeek(w)}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
+                ))}
+              </div>
+              <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
+              <div className="relative shrink-0">
+                <button onClick={() => setShowRangePicker((v) => !v)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
+                  <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
+                </button>
+                {showRangePicker && <WeekJumpDropdown onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
+              </div>
+            </div>
           </div>
+
+          {/* Row 2: search + filters (single wrapping row) */}
           <div className="flex flex-wrap items-center gap-2">
-            <select
-              value={payCategoryFilter}
-              onChange={(event) => setPayCategoryFilter(event.target.value)}
-              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Filter by pay category"
-            >
+            <div className="relative w-full sm:w-64">
+              <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={nameSearch}
+                onChange={(event) => setNameSearch(event.target.value)}
+                placeholder="Search by name or email…"
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-800 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+              />
+              {nameSearch && (
+                <button
+                  onClick={() => setNameSearch("")}
+                  aria-label="Clear search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 grid size-5 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <LuX size={13} />
+                </button>
+              )}
+            </div>
+
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
               <option value="All">All Pay Categories</option>
-              {payCategoryOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <select
-              value={countryFilter}
-              onChange={(event) => setCountryFilter(event.target.value)}
-              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Filter by country"
-            >
+              {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </FilterSelect>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={countryFilter} onChange={setCountryFilter} label="Filter by country">
               <option value="All">All Countries</option>
-              {countryOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-            <select
-              value={shiftTypeFilter}
-              onChange={(event) => setShiftTypeFilter(event.target.value)}
-              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Filter by shift type"
-            >
+              {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+            </FilterSelect>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
               <option value="All">All Shift Types</option>
-              {shiftTypeOptions.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <input
-              type="search"
-              value={nameSearch}
-              onChange={(event) => setNameSearch(event.target.value)}
-              placeholder="Search name"
-              className="h-10 w-full sm:w-52 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-            />
-            <select
-              value={departmentFilter}
-              onChange={(event) => setDepartmentFilter(event.target.value)}
-              className="h-10 w-full sm:w-48 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Filter by department"
-            >
+              {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </FilterSelect>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by department">
               <option value="All">All Departments</option>
-              {departmentOptions.map((department) => (
-                <option key={department} value={department}>{department}</option>
-              ))}
-            </select>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-10 w-full sm:w-44 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Filter by status"
-            >
+              {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+            </FilterSelect>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={statusFilter} onChange={setStatusFilter} label="Filter by status">
               <option value="All">All Statuses</option>
               <option value="For Review">For Review</option>
               <option value="Reviewed">Reviewed</option>
               <option value="Standard Met">Standard Met</option>
-            </select>
-            <select
-              value={activeWeek}
-              onChange={(event) => setActiveWeek(event.target.value)}
-              className="h-10 w-full sm:w-56 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition-all focus:ring-2 focus:ring-teal-500"
-              aria-label="Select week"
-            >
-              {WEEKS.map((w) => (
-                <option key={w.key} value={w.key}>{w.label}</option>
-              ))}
-            </select>
+            </FilterSelect>
+
+            <div className="flex items-center gap-2 ml-auto">
+              {filtersActive && (
+                <button
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  <LuX size={14} strokeWidth={2.5} /> Clear
+                </button>
+              )}
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 whitespace-nowrap">
+                <span className="font-bold text-[#003527]">{filteredAttendanceRows.length}</span> shown
+              </span>
+            </div>
           </div>
         </div>
 
@@ -1425,7 +1680,13 @@ export default function AttendancePage() {
                           {row.avatar}
                         </div>
                         <div>
-                          <p className="text-sm font-semibold text-slate-900 whitespace-nowrap">{row.name}</p>
+                          <button
+                            onClick={() => setBreakdownTarget(row)}
+                            title="Task breakdown"
+                            className="text-sm font-semibold text-slate-900 whitespace-nowrap hover:text-emerald-700 hover:underline text-left"
+                          >
+                            {row.name}
+                          </button>
                           <p className="text-xs text-slate-500 whitespace-nowrap">{row.role}</p>
                         </div>
                       </div>
@@ -1576,6 +1837,16 @@ export default function AttendancePage() {
           onClose={() => setShowBulkApproveModal(false)}
           onApprove={handleBulkApprove}
           usaHolidays={usaHolidays}
+        />
+      )}
+
+      {breakdownTarget && breakdownTarget.worksnapUserId != null && (
+        <BreakdownModal
+          userId={breakdownTarget.worksnapUserId}
+          userName={breakdownTarget.name}
+          email={breakdownTarget.role}
+          week={rangeFrom}
+          onClose={() => setBreakdownTarget(null)}
         />
       )}
     </div>

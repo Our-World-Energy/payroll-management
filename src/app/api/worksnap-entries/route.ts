@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     const end = start + pageSize - 1;
     const { data: pageData, error } = await supabase
       .from("worksnap_entries")
-      .select("userName,email,durationMins,entryDate")
+      .select("worksnapUserId,userName,email,durationMins,entryDate")
       .gte("entryDate", from)
       .lte("entryDate", to)
       .range(start, end);
@@ -74,5 +74,13 @@ export async function GET(request: Request) {
     };
   });
 
-  return NextResponse.json({ entries });
+  // Most recent sync timestamp across all entries (the table is rewritten on each sync).
+  const { data: latestSync } = await supabase
+    .from("worksnap_entries")
+    .select("syncedAt")
+    .order("syncedAt", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return NextResponse.json({ entries, lastSyncedAt: latestSync?.syncedAt ?? null });
 }
