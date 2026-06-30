@@ -289,19 +289,6 @@ export default function TimeOffPage() {
     }
   }, [searchParams, rows]);
 
-  function setSelectedRequestDecision(decision: "Approved" | "Declined") {
-    if (!selectedRow?.latestRequest) return;
-    setRequestDecisions((cur) => ({ ...cur, [selectedRow.latestRequest!.id]: decision }));
-  }
-
-  function revertSelectedRequest() {
-    if (!selectedRow?.latestRequest) return;
-    setRequestDecisions((cur) => {
-      const next = { ...cur };
-      delete next[selectedRow.latestRequest!.id];
-      return next;
-    });
-  }
 
   function exportCSV() {
     const headers = [
