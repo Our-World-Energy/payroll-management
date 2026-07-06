@@ -245,8 +245,10 @@ model ContractorProfile {
 enum TimeOffKind {
   HO_HOLIDAY
   PTO
+  SICK_LEAVE
   SICK_LEAVE_HALF_DAY
   PTO_HALF_DAY
+  UNPAID_LEAVE
   OPEN
   NOT_SET
 }
@@ -313,6 +315,7 @@ model AttendanceWeekStatus {
   timeOffStatus        TimeOffKind             @default(NOT_SET)
   requestStatus        AttendanceRequestStatus @default(NOT_SET)
   manualAdjustmentTime Int                     @default(0)
+  completionMinutes    Int?
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())
 
@@ -332,16 +335,23 @@ model Holiday {
   @@map("holidays")
 }
 
-/// Per-employee per-DAY time-off + manual adjustment (admin picks the date).
+/// Per-employee per-DAY attendance review snapshot (admin picks the date) —
+/// mirrors every column of the Attendance Review modal's daily table so a
+/// reopened review always matches exactly what was last saved.
 model AttendanceDayStatus {
-  id                   String      @id @default(uuid()) @db.Uuid
+  id                   String                  @id @default(uuid()) @db.Uuid
   worksnapUserId       Int
-  email                String      @default("")
-  date                 DateTime    @db.Date
-  timeOffStatus        TimeOffKind @default(NOT_SET)
-  manualAdjustmentTime Int         @default(0)
+  email                String                  @default("")
+  date                 DateTime                @db.Date
+  decisionStatus       AttendanceRequestStatus @default(NOT_SET) // "Approval Status"
+  evaluatedMinutes     Int                     @default(0)       // "Evaluated Time"
+  adjustedMinutes      Int?                                       // "Adjusted Time" (null = no manual override)
+  holidayMinutes       Int                     @default(0)       // "Holiday Time"
+  timeOffStatus        TimeOffKind             @default(NOT_SET) // "Time Off Status"
+  timeOffMinutes       Int                     @default(0)       // "Time Off Time"
+  manualAdjustmentTime Int                     @default(0)
   note                 String?
-  updatedAt            DateTime    @updatedAt @default(now())
+  updatedAt            DateTime                @updatedAt @default(now())
 
   @@unique([worksnapUserId, date], name: "attendance_day_key")
   @@index([date])
