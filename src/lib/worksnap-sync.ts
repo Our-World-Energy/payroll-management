@@ -66,6 +66,42 @@ async function ws(path: string): Promise<string> {
   return res.text();
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ws() with retry — Worksnaps rate-limits bursts (429/403), so back off and retry.
+async function wsRetry(path: string, tries = 3): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      return await ws(path);
+    } catch (err) {
+      lastErr = err;
+      await sleep(500 * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
+// Run tasks with a bounded number in flight, so we don't burst the API.
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
 function categorize(taskName: string): string {
   const n = (taskName || "").toLowerCase();
   if (n.includes("break") || n.includes("lunch")) return "Break";
@@ -175,53 +211,67 @@ type DailyLog = {
   entries: number;
 };
 
+// The time-entries endpoint effectively honours a *single* user_ids value —
+// repeated / comma / bracket forms either overwrite (last wins) or error — so
+// we must query one (project, user) pair per request and aggregate ourselves.
+const FETCH_CONCURRENCY = 10;
+
 // Per-user per-local-day first clock-in / last clock-out, from raw time entries.
 // The manager_report only carries date-level durations, so we read the granular
 // /projects/{id}/time_entries.xml endpoint (each entry has a from_timestamp).
 async function buildDailyLogs(
-  projectIds: number[],
+  projectUsers: Map<number, Set<number>>,
   userMeta: Map<number, { email: string; userName: string }>,
   fromTs: number,
   toTs: number,
 ): Promise<DailyLog[]> {
-  const userIds = [...userMeta.keys()].join(",");
-  if (!userIds || projectIds.length === 0) return [];
+  if (projectUsers.size === 0) return [];
 
   type Acc = { start: number; end: number; mins: number; count: number };
   const agg = new Map<string, Acc>();
 
-  await Promise.all(
-    projectIds.map(async (pid) => {
-      let xml: string;
-      try {
-        xml = await ws(
-          `/projects/${pid}/time_entries.xml?user_ids=${userIds}` +
-            `&from_timestamp=${fromTs}&to_timestamp=${toTs}`,
-        );
-      } catch {
-        return; // skip projects whose entries can't be read
+  // one request per (project, user) — the endpoint returns a single user's data
+  const requests: { pid: number; uid: number }[] = [];
+  for (const [pid, users] of projectUsers) {
+    for (const uid of users) requests.push({ pid, uid });
+  }
+
+  let failed = 0;
+  await mapLimit(requests, FETCH_CONCURRENCY, async ({ pid, uid }) => {
+    let xml: string;
+    try {
+      xml = await wsRetry(
+        `/projects/${pid}/time_entries.xml?user_ids=${uid}` +
+          `&from_timestamp=${fromTs}&to_timestamp=${toTs}`,
+      );
+    } catch (err) {
+      failed++;
+      console.error(`worksnap daily-log fetch failed (project ${pid}, user ${uid}):`, err);
+      return; // skip requests whose entries can't be read
+    }
+    for (const te of blocks(xml, "time_entry")) {
+      const uid = field(te, "user_id");
+      const startTs = Number(field(te, "from_timestamp"));
+      if (!uid || !startTs) continue;
+      const mins = Math.round(
+        parseFloat(field(te, "duration_in_minutes") || "0"),
+      );
+      const endTs = startTs + mins * 60;
+      const key = `${uid}|${localDateOf(startTs)}`;
+      const cur = agg.get(key);
+      if (cur) {
+        if (startTs < cur.start) cur.start = startTs;
+        if (endTs > cur.end) cur.end = endTs;
+        cur.mins += mins;
+        cur.count += 1;
+      } else {
+        agg.set(key, { start: startTs, end: endTs, mins, count: 1 });
       }
-      for (const te of blocks(xml, "time_entry")) {
-        const uid = field(te, "user_id");
-        const startTs = Number(field(te, "from_timestamp"));
-        if (!uid || !startTs) continue;
-        const mins = Math.round(
-          parseFloat(field(te, "duration_in_minutes") || "0"),
-        );
-        const endTs = startTs + mins * 60;
-        const key = `${uid}|${localDateOf(startTs)}`;
-        const cur = agg.get(key);
-        if (cur) {
-          if (startTs < cur.start) cur.start = startTs;
-          if (endTs > cur.end) cur.end = endTs;
-          cur.mins += mins;
-          cur.count += 1;
-        } else {
-          agg.set(key, { start: startTs, end: endTs, mins, count: 1 });
-        }
-      }
-    }),
-  );
+    }
+  });
+  if (failed) {
+    console.warn(`worksnap daily-log: ${failed}/${requests.length} user fetches failed`);
+  }
 
   const out: DailyLog[] = [];
   for (const [key, a] of agg) {
@@ -266,15 +316,21 @@ export async function runWorksnapSync() {
   await prisma.$executeRawUnsafe(REFRESH_WEEKLY_TASK, fromDate);
 
   // Daily first-in / last-out, derived from granular time entries.
-  const projectIds = [...new Set(rows.map((r) => r.projectId))];
+  const projectUsers = new Map<number, Set<number>>();
   const userMeta = new Map<number, { email: string; userName: string }>();
   for (const r of rows) {
+    let users = projectUsers.get(r.projectId);
+    if (!users) {
+      users = new Set<number>();
+      projectUsers.set(r.projectId, users);
+    }
+    users.add(r.worksnapUserId);
     if (!userMeta.has(r.worksnapUserId)) {
       userMeta.set(r.worksnapUserId, { email: r.email, userName: r.userName });
     }
   }
   const dailyLogs = await buildDailyLogs(
-    projectIds,
+    projectUsers,
     userMeta,
     unixOfLocalDateStart(fromDate),
     unixOfLocalDateStart(toDate) + 86400, // through end of the last local day

@@ -102,5 +102,25 @@ export async function GET(request: Request) {
     if (s.timeOffStatus !== "NOT_SET") timeOffStatusByDate[d] = s.timeOffStatus;
   }
 
-  return Response.json({ userId, userName, email, week, days, tasks, dailyTotals, grandTotal, adjustments, timeOff, timeOffStatusByDate });
+  // per-day first clock-in / last clock-out (AZ time), from worksnap_daily_log
+  const dailyLogs = await prisma.worksnapDailyLog.findMany({
+    where: { worksnapUserId: userId, entryDate: { gte: weekStart, lte: weekEnd } },
+    select: { entryDate: true, firstIn: true, lastOut: true },
+  });
+  const fmtTime = (d: Date) =>
+    d.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Phoenix",
+    });
+  const firstIn: Record<string, string> = {};
+  const lastOut: Record<string, string> = {};
+  for (const l of dailyLogs) {
+    const d = toISODate(l.entryDate);
+    firstIn[d] = fmtTime(l.firstIn);
+    lastOut[d] = fmtTime(l.lastOut);
+  }
+
+  return Response.json({ userId, userName, email, week, days, tasks, dailyTotals, grandTotal, adjustments, timeOff, timeOffStatusByDate, firstIn, lastOut });
 }

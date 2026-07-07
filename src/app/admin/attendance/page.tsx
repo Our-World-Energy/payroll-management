@@ -1363,7 +1363,7 @@ function WeekJumpDropdown({ onApply, onClose }: { onApply: (iso: string) => void
 
 // ── per-user task × date breakdown modal ────────────────────────────────────
 type BreakdownTask = { projectName: string; taskName: string; category: string; perDay: Record<string, number>; total: number };
-type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number> };
+type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number>; firstIn: Record<string, string>; lastOut: Record<string, string> };
 
 const CAT_CHIP: Record<string, string> = { Work: "bg-emerald-50 text-emerald-700", Break: "bg-amber-50 text-amber-700", "Meeting/Training": "bg-sky-50 text-sky-700" };
 
@@ -1430,7 +1430,17 @@ function BreakdownModal({ userId, userName, email, week, onClose }: { userId: nu
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t-2 border-slate-200 bg-slate-50">
+                <tr className="border-t-2 border-slate-200 bg-slate-50/60">
+                  <td className="px-3 py-1.5 text-xs font-semibold text-teal-700">First In</td>
+                  {days.map((d) => { const v = data.firstIn?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-teal-700 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-right text-slate-300">—</td>
+                </tr>
+                <tr className="bg-slate-50/60">
+                  <td className="px-3 py-1.5 text-xs font-semibold text-rose-600">Last Out</td>
+                  {days.map((d) => { const v = data.lastOut?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-right text-slate-300">—</td>
+                </tr>
+                <tr className="border-t border-slate-200 bg-slate-50">
                   <td className="px-3 py-2 text-xs font-bold uppercase tracking-wider text-slate-600">Worked (min)</td>
                   {days.map((d) => <td key={d} className="px-2 py-2 text-center font-bold text-[#003527] tabular-nums">{data.dailyTotals[d] || 0}</td>)}
                   <td className="px-3 py-2 text-right font-extrabold text-[#003527] tabular-nums">{data.grandTotal}</td>
