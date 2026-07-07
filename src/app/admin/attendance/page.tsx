@@ -87,7 +87,7 @@ type ReviewModalProps = {
   weekDates: string[];
   onClose: () => void;
   appliedOffsetCredit?: number;
-  onSave: (contractorId: string, completionMinutes: number, offsetCreditApplied?: number) => void;
+  onSave: (contractorId: string, offsetCreditApplied?: number) => void;
   usaHolidays: HolidayEntry[];
 };
 
@@ -115,6 +115,34 @@ const TIME_OFF_STATUS_OPTIONS = [
 ];
 
 const EMPTY_DAILY_WORKSNAP_MINUTES: Record<string, number> = {};
+
+// UI status strings ↔ the enum values stored on attendance_day_status / attendance_week_status.
+const TIME_OFF_API_BY_UI: Record<string, string> = {
+  "No Time Off": "NOT_SET",
+  "PTO": "PTO",
+  "Sick Leave": "SICK_LEAVE",
+  "PTO Half Day": "PTO_HALF_DAY",
+  "Sick Leave Half Day": "SICK_LEAVE_HALF_DAY",
+  "Unpaid Leave": "UNPAID_LEAVE",
+};
+const TIME_OFF_UI_BY_API: Record<string, string> = Object.fromEntries(
+  Object.entries(TIME_OFF_API_BY_UI).map(([ui, api]) => [api, ui])
+);
+function timeOffStatusToApi(uiStatus: string) {
+  return TIME_OFF_API_BY_UI[uiStatus] ?? "NOT_SET";
+}
+function timeOffStatusFromApi(apiStatus: string) {
+  return TIME_OFF_UI_BY_API[apiStatus] ?? "No Time Off";
+}
+
+const DECISION_API_BY_UI: Record<string, string> = { "No Status": "NOT_SET", "Approved": "APPROVED", "Rejected": "REJECTED" };
+const DECISION_UI_BY_API: Record<string, string> = { NOT_SET: "No Status", APPROVED: "Approved", REJECTED: "Rejected", OPEN: "No Status" };
+function decisionStatusToApi(uiStatus: string) {
+  return DECISION_API_BY_UI[uiStatus] ?? "NOT_SET";
+}
+function decisionStatusFromApi(apiStatus: string) {
+  return DECISION_UI_BY_API[apiStatus] ?? "No Status";
+}
 
 function dashIfEmpty(value: string) {
   return value && value !== "â€”" ? value : "-";
@@ -354,6 +382,35 @@ function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[
   }, 0);
 }
 
+// Per-day attendance_day_status snapshot for a Bulk Approve save: every logged
+// day is Approved (no per-day reject/override in this flow), time off comes
+// from the row's default status, mirroring what the Review modal would save.
+function buildBulkApproveDaySnapshots(row: AttendanceRow, weekDates: string[], usaHolidays: HolidayEntry[]) {
+  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+  const restDaysStr = restDaysForAttendanceRow(row);
+  const shiftType = shiftTypeForAttendanceRow(row);
+  const timeOffStatusUi = defaultTimeOffStatusFor(row);
+  const timeOffMinutes = timeValueToMinutes(timeOffTimeFor(timeOffStatusUi));
+
+  return weekDates.map((date) => {
+    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+    const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
+    const isRestDay = isRestDayDate(date, restDaysStr);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType);
+    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+
+    return {
+      date,
+      decisionStatus: decisionStatusToApi(dailyDecisionStatus),
+      evaluatedMinutes: timeValueToMinutes(evaluatedTime),
+      adjustedMinutes: null as number | null,
+      holidayMinutes: timeValueToMinutes(holidayTime),
+      timeOffStatus: timeOffStatusToApi(timeOffStatusUi),
+      timeOffMinutes,
+    };
+  });
+}
+
 function approvalStatusClassName(status: string) {
   if (status === "Approved") return "text-emerald-600 font-semibold";
   if (status === "Rejected") return "text-red-600 font-semibold";
@@ -531,6 +588,8 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
   const evaluationShiftType = isIndia ? undefined : shiftType;
   const [offsetCredit, setOffsetCredit] = useState(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const worksnapTotalMinutes = worksnapTotalMinutesFor(weekDates, dailyWorksnapMinutes);
   const indiaTotalMinutes = Math.min(worksnapTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
@@ -568,6 +627,33 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
     setOffsetCredit(0);
+
+    // Overlay whatever was actually last saved for this contractor/week, so the
+    // modal always reopens showing the latest saved review instead of resetting.
+    const worksnapUserId = (record as AttendanceRow).worksnapUserId;
+    const week = weekDates[0];
+    if (worksnapUserId == null || !week) return;
+
+    let isCancelled = false;
+    fetch(`/api/attendance/day-status?userId=${worksnapUserId}&week=${week}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { days?: Array<{ date: string; decisionStatus: string | null; timeOffStatus: string | null; adjustedMinutes: number | null }> } | null) => {
+        if (isCancelled || !data?.days) return;
+        const decisionByDate: Record<string, string> = {};
+        const timeOffByDate: Record<string, string> = {};
+        const adjustedByDate: Record<string, string> = {};
+        data.days.forEach((d) => {
+          if (d.decisionStatus) decisionByDate[d.date] = decisionStatusFromApi(d.decisionStatus);
+          if (d.timeOffStatus) timeOffByDate[d.date] = timeOffStatusFromApi(d.timeOffStatus);
+          if (d.adjustedMinutes != null) adjustedByDate[d.date] = formatMinutesAsMins(d.adjustedMinutes);
+        });
+        if (Object.keys(decisionByDate).length) setDailyDecisionStatuses((current) => ({ ...current, ...decisionByDate }));
+        if (Object.keys(timeOffByDate).length) setDailyTimeOffStatuses((current) => ({ ...current, ...timeOffByDate }));
+        if (Object.keys(adjustedByDate).length) setAdjustedTimes((current) => ({ ...current, ...adjustedByDate }));
+      })
+      .catch(() => {});
+
+    return () => { isCancelled = true; };
   }, [record, weekDates, appliedOffsetCredit]);
 
   useEffect(() => {
@@ -607,6 +693,66 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   function applyTimeCredit() {
     const credit = 2400 - completionTotalMinutes;
     setOffsetCredit(credit);
+  }
+
+  async function handleSaveClick() {
+    const finalCompletionMinutes = isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes;
+    const finalOffsetCredit = isIndia ? offsetCredit : 0;
+
+    if (record.worksnapUserId != null) {
+      setIsSaving(true);
+      setSaveError("");
+      try {
+        const days = weekDates.map((date) => {
+          const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+          const isRestDay = isRestDayDate(date, restDaysStr);
+          const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
+          const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
+          const adjustedTime = adjustedTimes[date] ?? "";
+          const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
+          const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
+          const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+          const adjustedMinutesParsed = timeValueToMinutes(adjustedTime);
+
+          return {
+            date,
+            decisionStatus: decisionStatusToApi(dailyDecisionStatus),
+            evaluatedMinutes: timeValueToMinutes(evaluatedTime),
+            adjustedMinutes: adjustedMinutesParsed > 0 ? adjustedMinutesParsed : null,
+            holidayMinutes: timeValueToMinutes(holidayTime),
+            timeOffStatus: timeOffStatusToApi(dailyTimeOffStatus),
+            timeOffMinutes: timeValueToMinutes(timeOffTime),
+          };
+        });
+
+        const response = await fetch("/api/attendance/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            worksnapUserId: record.worksnapUserId,
+            email: record.role.includes("@") ? record.role : "",
+            week: weekDates[0],
+            requestStatus: "APPROVED",
+            completionMinutes: finalCompletionMinutes,
+            days,
+          }),
+        });
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          setSaveError(result.error ?? "Failed to save. Please try again.");
+          setIsSaving(false);
+          return;
+        }
+      } catch {
+        setSaveError("Failed to save. Please try again.");
+        setIsSaving(false);
+        return;
+      }
+      setIsSaving(false);
+    }
+
+    onSave(record.contractorId, finalOffsetCredit);
+    onClose();
   }
 
   return (
@@ -878,6 +1024,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           )}
         </div>
         <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
+          {saveError && <p className="mr-auto text-sm font-medium text-red-600">{saveError}</p>}
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
@@ -906,10 +1053,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           )}
           <button
             type="button"
-            onClick={() => { onSave(record.contractorId, isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes, isIndia ? offsetCredit : 0); onClose(); }}
-            className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
+            onClick={handleSaveClick}
+            disabled={isSaving}
+            className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Save
+            {isSaving ? "Saving…" : "Save"}
           </button>
         </div>
       </div>
@@ -920,7 +1068,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
 function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   worksnapRows: AttendanceRow[];
   onClose: () => void;
-  onApprove: (ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) => void;
+  onApprove: () => void;
   usaHolidays: HolidayEntry[];
 }) {
   const [modalWeek, setModalWeek] = useState("w26");
@@ -932,6 +1080,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
+  const [isSavingBulk, setIsSavingBulk] = useState(false);
+  const [bulkSaveError, setBulkSaveError] = useState("");
 
   const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
   const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
@@ -989,14 +1139,39 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
     setProcessedApprovals(map);
   }
 
-  function handleSave() {
+  async function handleSave() {
     const approvedMinutesById = processedApprovals.size > 0
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
           .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + rowHolidayBonus(r)])
         );
-    onApprove(selectedIds, modalWeekDates, approvedMinutesById);
+
+    const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
+    setIsSavingBulk(true);
+    setBulkSaveError("");
+    const results = await Promise.all(rowsToSave.map((r) =>
+      fetch("/api/attendance/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          worksnapUserId: r.worksnapUserId,
+          email: r.role.includes("@") ? r.role : "",
+          week: modalWeekDates[0],
+          requestStatus: "APPROVED",
+          completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
+          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays),
+        }),
+      }).then((res) => res.ok).catch(() => false)
+    ));
+    setIsSavingBulk(false);
+
+    if (results.some((ok) => !ok)) {
+      setBulkSaveError("Some approvals failed to save. Please try again.");
+      return;
+    }
+
+    onApprove();
     onClose();
   }
 
@@ -1103,7 +1278,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
           </table>
         </div>
 
-        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
+          {bulkSaveError && <p className="mr-auto text-sm font-medium text-red-600">{bulkSaveError}</p>}
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
             Close
           </button>
@@ -1121,10 +1297,11 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
             <button
               type="button"
               onClick={handleSave}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors"
+              disabled={isSavingBulk}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
-              Save
+              {isSavingBulk ? "Saving…" : "Save"}
             </button>
           )}
         </div>
@@ -1337,7 +1514,10 @@ export default function AttendancePage() {
       setIsLoadingWorksnap(true);
       setWorksnapError("");
 
-      const response = await fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`);
+      const [response, weekStatusResponse] = await Promise.all([
+        fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
+        fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
+      ]);
       const result = await response.json();
 
       if (!isMounted) return;
@@ -1346,7 +1526,20 @@ export default function AttendancePage() {
         setWorksnapRows([]);
         setWorksnapError(result.error ?? "Unable to load Worksnap entries.");
       } else {
-        setWorksnapRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates));
+        const rows = worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates);
+        const weekStatusResult = weekStatusResponse.ok ? await weekStatusResponse.json() : { weekStatuses: [] };
+        const savedByUserId = new Map<number, { requestStatus: string; completionMinutes: number | null }>(
+          (weekStatusResult.weekStatuses ?? []).map((s: { worksnapUserId: number; requestStatus: string; completionMinutes: number | null }) => [s.worksnapUserId, s])
+        );
+        setWorksnapRows(rows.map((row) => {
+          const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
+          if (!saved) return row;
+          return {
+            ...row,
+            completionMinutes: saved.completionMinutes ?? row.completionMinutes,
+            weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
+          };
+        }));
         setLastSyncedAt(result.lastSyncedAt ?? null);
       }
 
@@ -1444,12 +1637,10 @@ export default function AttendancePage() {
     return offsetCreditsByWeek[week]?.[row.contractorId] ?? 0;
   }
 
-  function handleReviewSave(contractorId: string, completionMinutes: number, offsetCreditApplied = 0) {
-    setWorksnapRows((rows) => rows.map((r) =>
-      r.contractorId === contractorId
-        ? { ...r, completionMinutes, weeklyStatus: "Reviewed" as const }
-        : r
-    ));
+  function handleReviewSave(contractorId: string, offsetCreditApplied = 0) {
+    // Re-fetch from Supabase rather than trust a local mutation, so the table
+    // always ends up showing exactly what was persisted.
+    setReloadKey((key) => key + 1);
 
     if (offsetCreditApplied <= 0) return;
     const nextWeekKey = addDaysIso(week, 7); // carry the credit into the following week
@@ -1463,18 +1654,10 @@ export default function AttendancePage() {
     }));
   }
 
-  function handleBulkApprove(ids: Set<string>, weekDates: string[], approvedMinutesById: Map<string, number>) {
-    setWorksnapRows((rows) => rows.map((r) => {
-      if (!ids.has(r.contractorId)) return r;
-      const approvedMinutes = approvedMinutesById.get(r.contractorId) ?? computeApprovedCompletionMinutes(r, weekDates);
-      const dailyWorksnapMinutes = r.dailyWorksnapMinutes ?? {};
-      const savedDailyDecisionStatuses: Record<string, string> = {};
-      weekDates.forEach((date) => {
-        const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-        savedDailyDecisionStatuses[date] = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
-      });
-      return { ...r, completionMinutes: approvedMinutes, weeklyStatus: "Reviewed" as const, savedDailyDecisionStatuses };
-    }));
+  function handleBulkApprove() {
+    // Re-fetch from Supabase rather than trust a local mutation, so the table
+    // always ends up showing exactly what was persisted.
+    setReloadKey((key) => key + 1);
   }
 
   return (

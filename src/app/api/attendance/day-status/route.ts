@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -42,7 +41,17 @@ export async function GET(request: Request) {
     }),
     prisma.attendanceDayStatus.findMany({
       where: { worksnapUserId: userId, date: { gte: weekStart, lte: weekEnd } },
-      select: { date: true, timeOffStatus: true, manualAdjustmentTime: true, note: true },
+      select: {
+        date: true,
+        decisionStatus: true,
+        evaluatedMinutes: true,
+        adjustedMinutes: true,
+        holidayMinutes: true,
+        timeOffStatus: true,
+        timeOffMinutes: true,
+        manualAdjustmentTime: true,
+        note: true,
+      },
     }),
     prisma.attendanceWeekStatus.findUnique({
       where: { attendance_week_key: { worksnapUserId: userId, weekStart } },
@@ -57,12 +66,20 @@ export async function GET(request: Request) {
   }
   const statusByDate = new Map(statuses.map((s) => [toISODate(s.date), s]));
 
+  // decisionStatus/timeOffStatus are `null` (not "NOT_SET") when no row exists yet
+  // for that date, so the caller can tell "never reviewed" apart from "explicitly
+  // set back to No Status / No Time Off" and keep its own smart defaults for the former.
   const days = dates.map((d) => {
     const st = statusByDate.get(d);
     return {
       date: d,
       actualMins: actualByDate.get(d) ?? 0,
-      timeOffStatus: st?.timeOffStatus ?? "NOT_SET",
+      decisionStatus: st?.decisionStatus ?? null,
+      evaluatedMinutes: st?.evaluatedMinutes ?? 0,
+      adjustedMinutes: st?.adjustedMinutes ?? null,
+      holidayMinutes: st?.holidayMinutes ?? 0,
+      timeOffStatus: st?.timeOffStatus ?? null,
+      timeOffMinutes: st?.timeOffMinutes ?? 0,
       manualAdjustmentTime: st?.manualAdjustmentTime ?? 0,
       note: st?.note ?? "",
     };
