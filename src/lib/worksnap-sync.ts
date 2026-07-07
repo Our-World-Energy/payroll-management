@@ -79,6 +79,15 @@ function isoDaysAgo(days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Local (TZ_OFFSET) midnight of a YYYY-MM-DD date, expressed as UTC unix seconds.
+function unixOfLocalDateStart(dateStr: string): number {
+  return Date.parse(`${dateStr}T00:00:00.000Z`) / 1000 - TZ_OFFSET * 3600;
+}
+// Local (TZ_OFFSET) calendar date of a UTC unix-second timestamp.
+function localDateOf(ts: number): string {
+  return new Date((ts + TZ_OFFSET * 3600) * 1000).toISOString().slice(0, 10);
+}
+
 type Row = {
   worksnapUserId: number;
   email: string;
@@ -155,6 +164,84 @@ async function buildRows(fromDate: string, toDate: string): Promise<Row[]> {
   return [...agg.values()];
 }
 
+type DailyLog = {
+  worksnapUserId: number;
+  email: string;
+  userName: string;
+  entryDate: Date;
+  firstIn: Date;
+  lastOut: Date;
+  totalMins: number;
+  entries: number;
+};
+
+// Per-user per-local-day first clock-in / last clock-out, from raw time entries.
+// The manager_report only carries date-level durations, so we read the granular
+// /projects/{id}/time_entries.xml endpoint (each entry has a from_timestamp).
+async function buildDailyLogs(
+  projectIds: number[],
+  userMeta: Map<number, { email: string; userName: string }>,
+  fromTs: number,
+  toTs: number,
+): Promise<DailyLog[]> {
+  const userIds = [...userMeta.keys()].join(",");
+  if (!userIds || projectIds.length === 0) return [];
+
+  type Acc = { start: number; end: number; mins: number; count: number };
+  const agg = new Map<string, Acc>();
+
+  await Promise.all(
+    projectIds.map(async (pid) => {
+      let xml: string;
+      try {
+        xml = await ws(
+          `/projects/${pid}/time_entries.xml?user_ids=${userIds}` +
+            `&from_timestamp=${fromTs}&to_timestamp=${toTs}`,
+        );
+      } catch {
+        return; // skip projects whose entries can't be read
+      }
+      for (const te of blocks(xml, "time_entry")) {
+        const uid = field(te, "user_id");
+        const startTs = Number(field(te, "from_timestamp"));
+        if (!uid || !startTs) continue;
+        const mins = Math.round(
+          parseFloat(field(te, "duration_in_minutes") || "0"),
+        );
+        const endTs = startTs + mins * 60;
+        const key = `${uid}|${localDateOf(startTs)}`;
+        const cur = agg.get(key);
+        if (cur) {
+          if (startTs < cur.start) cur.start = startTs;
+          if (endTs > cur.end) cur.end = endTs;
+          cur.mins += mins;
+          cur.count += 1;
+        } else {
+          agg.set(key, { start: startTs, end: endTs, mins, count: 1 });
+        }
+      }
+    }),
+  );
+
+  const out: DailyLog[] = [];
+  for (const [key, a] of agg) {
+    const [uidStr, dateStr] = key.split("|");
+    const uid = Number(uidStr);
+    const meta = userMeta.get(uid) ?? { email: "", userName: "" };
+    out.push({
+      worksnapUserId: uid,
+      email: meta.email,
+      userName: meta.userName,
+      entryDate: new Date(`${dateStr}T00:00:00.000Z`),
+      firstIn: new Date(a.start * 1000),
+      lastOut: new Date(a.end * 1000),
+      totalMins: a.mins,
+      entries: a.count,
+    });
+  }
+  return out;
+}
+
 export async function runWorksnapSync() {
   const fromDate = isoDaysAgo(WINDOW_DAYS - 1);
   const toDate = isoDaysAgo(0);
@@ -178,10 +265,36 @@ export async function runWorksnapSync() {
   await prisma.$executeRawUnsafe(PRUNE_WEEKLY_TASK, fromDate);
   await prisma.$executeRawUnsafe(REFRESH_WEEKLY_TASK, fromDate);
 
+  // Daily first-in / last-out, derived from granular time entries.
+  const projectIds = [...new Set(rows.map((r) => r.projectId))];
+  const userMeta = new Map<number, { email: string; userName: string }>();
+  for (const r of rows) {
+    if (!userMeta.has(r.worksnapUserId)) {
+      userMeta.set(r.worksnapUserId, { email: r.email, userName: r.userName });
+    }
+  }
+  const dailyLogs = await buildDailyLogs(
+    projectIds,
+    userMeta,
+    unixOfLocalDateStart(fromDate),
+    unixOfLocalDateStart(toDate) + 86400, // through end of the last local day
+  );
+
+  await prisma.worksnapDailyLog.deleteMany({
+    where: { entryDate: { gte: from, lte: to } },
+  });
+  for (let i = 0; i < dailyLogs.length; i += CHUNK) {
+    await prisma.worksnapDailyLog.createMany({
+      data: dailyLogs.slice(i, i + CHUNK),
+      skipDuplicates: true,
+    });
+  }
+
   return {
     ok: true as const,
     window: { fromDate, toDate },
     rows: rows.length,
+    dailyLogs: dailyLogs.length,
     users: new Set(rows.map((r) => r.worksnapUserId)).size,
     totalMinutes: rows.reduce((s, r) => s + r.durationMins, 0),
     syncedAt: new Date().toISOString(),

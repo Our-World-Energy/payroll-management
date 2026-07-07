@@ -306,6 +306,25 @@ model WorksnapWeeklyTask {
   @@map("worksnap_weekly_task")
 }
 
+/// Per-user per-day first clock-in / last clock-out, derived from Worksnaps time entries.
+model WorksnapDailyLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  worksnapUserId Int
+  email          String   @default("")
+  userName       String
+  entryDate      DateTime @db.Date
+  firstIn        DateTime @db.Timestamptz(3)
+  lastOut        DateTime @db.Timestamptz(3)
+  totalMins      Int      @default(0)
+  entries        Int      @default(0)
+  syncedAt       DateTime @default(now())
+
+  @@unique([worksnapUserId, entryDate], name: "worksnap_daily_log_key")
+  @@index([entryDate])
+  @@index([email, entryDate])
+  @@map("worksnap_daily_log")
+}
+
 /// Per-employee per-week attendance workflow status (request status set by admin).
 model AttendanceWeekStatus {
   id                   String                  @id @default(uuid()) @db.Uuid
