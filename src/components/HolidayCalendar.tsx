@@ -39,6 +39,100 @@ function buildCalendar(year: number, month: number) {
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
+// Regional mini-calendars: each reads "today" in its own IANA time zone rather
+// than the viewer's local time, so e.g. India's calendar can already show
+// tomorrow while it's still today in the US.
+const REGIONAL_CALENDARS = [
+  { country: "Philippines",   timeZone: "Asia/Manila" },
+  { country: "India",         timeZone: "Asia/Kolkata" },
+  { country: "Mexico",        timeZone: "America/Mexico_City" },
+  { country: "United States", timeZone: "America/Phoenix" },
+];
+
+function todayPartsInTz(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type: string) => Number(parts.find(p => p.type === type)?.value ?? 0);
+  return { year: get("year"), month: get("month") - 1, day: get("day") };
+}
+
+function MiniCountryCalendar({ country, holidays, loading, todayParts, isActive, onSelect }: {
+  country: string;
+  holidays: Holiday[];
+  loading: boolean;
+  todayParts?: { year: number; month: number; day: number };
+  isActive?: boolean;
+  onSelect?: () => void;
+}) {
+  if (!todayParts) return null;
+  const { year, month, day } = todayParts;
+  const cells = buildCalendar(year, month);
+  const monthPrefix = `${year}-${pad(month + 1)}`;
+  const monthHolidays = holidays
+    .filter(h => h.country === country && h.date.startsWith(monthPrefix))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const holidayByDay = new Map(monthHolidays.map(h => [parseInt(h.date.split("-")[2]), h]));
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`flex-1 min-w-[160px] text-left rounded-lg border p-3 transition-colors cursor-pointer ${
+        isActive ? "border-[#003527] ring-2 ring-[#003527]/20 bg-teal-50/40" : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-1.5">
+          <span className={`w-2 h-2 rounded-full ${COUNTRY_COLORS[country] ?? "bg-slate-400"}`} />
+          <span className="text-xs font-bold text-slate-700">{country}</span>
+        </div>
+        <span className="text-[10px] text-slate-400 font-medium">{MONTHS[month].slice(0, 3)} {year}</span>
+      </div>
+      <div className="grid grid-cols-7 gap-0.5 mb-1">
+        {DAYS_OF_WEEK.map(d => (
+          <div key={d} className="text-center text-[9px] font-semibold text-slate-300">{d[0]}</div>
+        ))}
+      </div>
+      {loading ? (
+        <div className="flex items-center justify-center py-4">
+          <LuLoader size={16} className="text-slate-300 animate-spin" />
+        </div>
+      ) : (
+        <div className="grid grid-cols-7 gap-0.5">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="h-5" />;
+            const isToday = d === day;
+            const holiday = holidayByDay.get(d);
+            return (
+              <div
+                key={i}
+                title={holiday?.name}
+                className={`h-5 flex items-center justify-center rounded text-[9px] font-medium ${
+                  isToday ? "bg-[#003527] text-white"
+                  : holiday ? `${COUNTRY_COLORS[country] ?? "bg-slate-400"} text-white`
+                  : "text-slate-500"
+                }`}
+              >
+                {d}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {monthHolidays.length > 0 && (
+        <div className="mt-2 pt-2 border-t border-slate-100 space-y-0.5">
+          {monthHolidays.slice(0, 2).map(h => (
+            <p key={h.id} className="text-[10px] text-slate-500 truncate">
+              <span className="font-semibold text-slate-600">{parseInt(h.date.split("-")[2])}</span> · {h.name}
+            </p>
+          ))}
+        </div>
+      )}
+    </button>
+  );
+}
+
 export function HolidayCalendar() {
   const [mounted,       setMounted]       = useState(false);
   const [holidays,      setHolidays]      = useState<Holiday[]>([]);
@@ -50,6 +144,8 @@ export function HolidayCalendar() {
   const [filterCountry, setFilterCountry] = useState("All");
   const [todayStr,      setTodayStr]      = useState("");
   const [isPending,     startTransition]  = useTransition();
+  const [regionalToday, setRegionalToday] = useState<Record<string, { year: number; month: number; day: number }>>({});
+  const [mainCalendarCountry, setMainCalendarCountry] = useState<string | null>(null);
 
   // Add form state
   const [newName,    setNewName]    = useState("");
@@ -61,6 +157,7 @@ export function HolidayCalendar() {
     setMounted(true);
     const now = new Date();
     setTodayStr(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
+    setRegionalToday(Object.fromEntries(REGIONAL_CALENDARS.map(r => [r.country, todayPartsInTz(r.timeZone)])));
     loadHolidays();
   }, []);
 
@@ -115,11 +212,27 @@ export function HolidayCalendar() {
 
   function closeAll() { setShowModal(false); setShowAdd(false); setAddError(""); }
 
+  // Clicking a regional mini-calendar swaps the main calendar to that
+  // country's own month/today and filters it to just that country — clicking
+  // the same one again (or "Show All") goes back to every country combined.
+  function selectRegionalCountry(country: string) {
+    setMainCalendarCountry(prev => {
+      const next = prev === country ? null : country;
+      const parts = regionalToday[country];
+      if (next && parts) {
+        setCalYear(parts.year);
+        setCalMonth(parts.month);
+      }
+      return next;
+    });
+  }
+
   const cells = buildCalendar(calYear, calMonth);
+  const activeCountryToday = mainCalendarCountry ? regionalToday[mainCalendarCountry] : undefined;
 
   const monthHolidays = holidays.filter(h => {
     const [y, m] = h.date.split("-").map(Number);
-    return y === calYear && m - 1 === calMonth;
+    return y === calYear && m - 1 === calMonth && (!mainCalendarCountry || h.country === mainCalendarCountry);
   });
 
   const dotsByDay: Record<number, Holiday[]> = {};
@@ -169,6 +282,18 @@ export function HolidayCalendar() {
         <div className="flex flex-1 overflow-hidden divide-x divide-slate-100">
           {/* Calendar grid */}
           <div className="flex-1 flex flex-col p-5 overflow-y-auto">
+            {/* Active country indicator */}
+            {mainCalendarCountry && (
+              <div className="flex items-center justify-between mb-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                  <span className={`w-2 h-2 rounded-full ${COUNTRY_COLORS[mainCalendarCountry] ?? "bg-slate-400"}`} />
+                  Showing {mainCalendarCountry}
+                </span>
+                <button onClick={() => setMainCalendarCountry(null)} className="text-xs font-semibold text-teal-600 hover:underline">
+                  Show All
+                </button>
+              </div>
+            )}
             {/* Month nav */}
             <div className="flex items-center justify-between mb-4 h-9">
               <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors text-slate-600 shrink-0">
@@ -214,7 +339,9 @@ export function HolidayCalendar() {
                 {cells.map((day, i) => {
                   if (!day) return <div key={i} />;
                   const dateStr = `${calYear}-${pad(calMonth + 1)}-${pad(day)}`;
-                  const isToday = dateStr === todayStr;
+                  const isToday = activeCountryToday
+                    ? calYear === activeCountryToday.year && calMonth === activeCountryToday.month && day === activeCountryToday.day
+                    : dateStr === todayStr;
                   const dots = dotsByDay[day] ?? [];
                   return (
                     <div key={i} className={`min-h-[52px] rounded-lg p-1.5 flex flex-col items-center gap-0.5 border transition-colors ${
@@ -240,6 +367,24 @@ export function HolidayCalendar() {
               </div>
             )}
 
+            {/* Regional mini-calendars — each shows "today" in its own time zone */}
+            <div className="mt-4 pt-3 border-t border-slate-100">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">Regional Calendars</p>
+              <div className="flex flex-wrap gap-3">
+                {REGIONAL_CALENDARS.map(r => (
+                  <MiniCountryCalendar
+                    key={r.country}
+                    country={r.country}
+                    holidays={holidays}
+                    loading={loading}
+                    todayParts={regionalToday[r.country]}
+                    isActive={mainCalendarCountry === r.country}
+                    onSelect={() => selectRegionalCountry(r.country)}
+                  />
+                ))}
+              </div>
+            </div>
+
             {/* Legend */}
             <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-slate-100">
               {COUNTRIES.map(c => (
@@ -252,7 +397,7 @@ export function HolidayCalendar() {
           </div>
 
           {/* Sidebar */}
-          <div className="w-64 shrink-0 flex flex-col p-4 overflow-hidden">
+          <div className="w-52 shrink-0 flex flex-col p-4 overflow-hidden">
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs font-bold uppercase tracking-widest text-slate-500">All Holidays</span>
               <select

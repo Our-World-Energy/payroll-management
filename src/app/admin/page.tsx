@@ -53,12 +53,14 @@ export default function AdminPage() {
           const email = String(e.email ?? "").trim().toLowerCase();
           if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
         }
-        const emailsWithTime = new Set<string>(minutesByEmail.keys());
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
 
+        // Absent = no actual Worksnap time logged today at all (matches the same
+        // "Worksnap Actual Time" total shown in Attendance Review) — checked by
+        // total minutes, not just whether a (possibly zero-duration) entry exists.
         setAbsentRows(
           activeContractors
-            .filter((c) => !emailsWithTime.has(c.email!.trim().toLowerCase()))
+            .filter((c) => (minutesByEmail.get(c.email!.trim().toLowerCase()) ?? 0) === 0)
             .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: "Absent" }))
         );
 
