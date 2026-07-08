@@ -1,73 +1,12 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useRef } from "react";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChevronDown, LuChartColumn } from "react-icons/lu";
+import { useState, useEffect } from "react";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
-
-const WEEKS = [
-  { label: "Week 26 (Jun 21 - 27)", key: "w26", from: "2026-06-21", to: "2026-06-27" },
-  { label: "Week 25 (Jun 14 - 20)", key: "w25", from: "2026-06-14", to: "2026-06-20" },
-  { label: "Week 24 (Jun 7 - 13)",  key: "w24", from: "2026-06-07", to: "2026-06-13" },
-  { label: "Week 23 (May 31 - Jun 6)", key: "w23", from: "2026-05-31", to: "2026-06-06" },
-  { label: "Week 22 (May 24 - 30)", key: "w22", from: "2026-05-24", to: "2026-05-30" },
-  { label: "Week 21 (May 17 - 23)", key: "w21", from: "2026-05-17", to: "2026-05-23" },
-  { label: "Week 20 (May 10 - 16)", key: "w20", from: "2026-05-10", to: "2026-05-16" },
-  { label: "Week 19 (May 3 - 9)",   key: "w19", from: "2026-05-03", to: "2026-05-09" },
-];
-
-
-function parseIsoDate(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-function toIsoDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function datesBetween(from: string, to: string) {
-  const dates: string[] = [];
-  const current = parseIsoDate(from);
-  const end = parseIsoDate(to);
-
-  while (current <= end) {
-    dates.push(toIsoDate(current));
-    current.setDate(current.getDate() + 1);
-  }
-
-  return dates;
-}
-
-function addDaysIso(iso: string, days: number) {
-  const d = parseIsoDate(iso);
-  d.setDate(d.getDate() + days);
-  return toIsoDate(d);
-}
-
-// Snap any date to the Sunday that starts its week.
-function sundayOf(iso: string) {
-  const d = parseIsoDate(iso);
-  d.setDate(d.getDate() - d.getDay());
-  return toIsoDate(d);
-}
-
-// Today's calendar date in Arizona (America/Phoenix, no DST), as YYYY-MM-DD.
-function arizonaTodayIso(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Phoenix", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date());
-}
-
-// The most recent N weeks (Sun→Sat), most-recent first, anchored to the
-// current Arizona week. e.g. on 2026-07-01 → ["2026-06-28", "2026-06-21", …].
-function recentWeeks(count = 12): string[] {
-  const currentSunday = sundayOf(arizonaTodayIso());
-  return Array.from({ length: count }, (_, i) => addDaysIso(currentSunday, -7 * i));
-}
+import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
+import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
+import { FilterSelect } from "@/components/FilterSelect";
 
 
 function formatDayLabel(date: string) {
@@ -1071,7 +1010,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   onApprove: () => void;
   usaHolidays: HolidayEntry[];
 }) {
-  const [modalWeek, setModalWeek] = useState("w26");
+  const [weeks, setWeeks] = useState<string[]>([]);
+  const [modalWeek, setModalWeek] = useState("");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
@@ -1083,22 +1023,45 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [bulkSaveError, setBulkSaveError] = useState("");
 
-  const modalWeekObj = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
-  const modalWeekDates = datesBetween(modalWeekObj.from, modalWeekObj.to);
+  // Same recent-Sun→Sat-weeks list the main page uses, anchored to the current
+  // Arizona week, so the latest week is always selectable here too.
+  useEffect(() => {
+    const list = recentWeeks();
+    setWeeks(list);
+    setModalWeek((current) => current || list[0]);
+  }, []);
+
+  const modalWeekDates = modalWeek ? datesBetween(modalWeek, addDaysIso(modalWeek, 6)) : [];
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
   const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
   useEffect(() => {
-    const week = WEEKS.find((w) => w.key === modalWeek) ?? WEEKS[0];
-    const dates = datesBetween(week.from, week.to);
-    const from = dates[0] ?? week.from;
-    const to = dates[dates.length - 1] ?? week.to;
+    if (!modalWeek) return;
+    const dates = datesBetween(modalWeek, addDaysIso(modalWeek, 6));
+    const from = dates[0];
+    const to = dates[dates.length - 1];
     setIsLoading(true);
-    fetch(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
-      .then((r) => r.json())
-      .then((result) => setModalRows(worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], dates)))
+    Promise.all([
+      fetch(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
+      fetch(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
+    ])
+      .then(([entriesResult, weekStatusResult]) => {
+        const rows = worksnapEntriesToAttendanceRecords((entriesResult.entries ?? []) as WorksnapEntry[], dates);
+        const savedByUserId = new Map<number, { requestStatus: string; completionMinutes: number | null }>(
+          (weekStatusResult.weekStatuses ?? []).map((s: { worksnapUserId: number; requestStatus: string; completionMinutes: number | null }) => [s.worksnapUserId, s])
+        );
+        setModalRows(rows.map((row) => {
+          const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
+          if (!saved) return row;
+          return {
+            ...row,
+            completionMinutes: saved.completionMinutes ?? row.completionMinutes,
+            weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
+          };
+        }));
+      })
       .finally(() => setIsLoading(false));
   }, [modalWeek]);
 
@@ -1206,7 +1169,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
             {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
-            {WEEKS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
+            {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
           </select>
         </div>
         {/* Table */}
@@ -1232,7 +1195,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const rowHolidayBonusMins = rowHolidayBonus(row);
-                const completionMins = processedMins ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + rowHolidayBonusMins);
+                const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + rowHolidayBonusMins);
                 const isProcessed = processedMins !== undefined;
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
@@ -1310,57 +1273,6 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays }: {
   );
 }
 
-function FilterSelect({ value, onChange, label, className = "", children }: {
-  value: string;
-  onChange: (value: string) => void;
-  label: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className={`relative ${className}`}>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={label}
-        className="peer h-10 w-full cursor-pointer appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-9 text-sm font-medium text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
-      >
-        {children}
-      </select>
-      <LuChevronDown
-        size={16}
-        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors peer-focus:text-teal-600"
-      />
-    </div>
-  );
-}
-
-function WeekJumpDropdown({ onApply, onClose }: { onApply: (iso: string) => void; onClose: () => void }) {
-  const [date, setDate] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    function h(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) onClose(); }
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [onClose]);
-  return (
-    <div ref={ref} className="absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-xl shadow-xl p-4 w-72">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm font-bold text-[#003527]">Jump to Week</p>
-        <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-700 rounded"><LuX size={14} /></button>
-      </div>
-      <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Pick any date in the week</label>
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-        className="mt-1 w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-      <div className="flex gap-2 mt-4">
-        <button onClick={onClose} className="flex-1 py-2 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">Cancel</button>
-        <button onClick={() => { if (date) { onApply(date); onClose(); } }} disabled={!date}
-          className="flex-1 py-2 text-sm font-semibold bg-[#003527] text-white rounded-lg hover:bg-[#064E3B] disabled:opacity-40">Go</button>
-      </div>
-    </div>
-  );
-}
-
 // ── per-user task × date breakdown modal ────────────────────────────────────
 type BreakdownTask = { projectName: string; taskName: string; category: string; perDay: Record<string, number>; total: number };
 type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number>; firstIn: Record<string, string>; lastOut: Record<string, string> };
@@ -1368,14 +1280,6 @@ type BreakdownResponse = { userName: string; email: string; week: string; days: 
 const CAT_CHIP: Record<string, string> = { Work: "bg-emerald-50 text-emerald-700", Break: "bg-amber-50 text-amber-700", "Meeting/Training": "bg-sky-50 text-sky-700" };
 
 const signed = (n: number) => (n > 0 ? `+${n.toLocaleString()}` : n.toLocaleString());
-
-function weekLabel(iso: string): string {
-  const start = new Date(`${iso}T00:00:00.000Z`);
-  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
-  const mo = (d: Date) => d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
-  const day = (d: Date) => d.getUTCDate();
-  return mo(start) === mo(end) ? `${mo(start)} ${day(start)} – ${day(end)}` : `${mo(start)} ${day(start)} – ${mo(end)} ${day(end)}`;
-}
 
 function breakdownDayHeader(iso: string) {
   const d = new Date(`${iso}T00:00:00.000Z`);

@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { LuCalendar, LuChevronLeft, LuChevronRight, LuPlus, LuX, LuFlag, LuTrash2, LuLoader } from "react-icons/lu";
 import { fetchHolidays, createHoliday, deleteHoliday, type Holiday } from "@/app/admin/holidays/actions";
+import { COUNTRY_TIME_ZONES, hourOffsetDifference } from "@/lib/countryTimeZones";
 
 const COUNTRY_COLORS: Record<string, string> = {
   "United States": "bg-blue-500",
@@ -39,15 +40,31 @@ function buildCalendar(year: number, month: number) {
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 
+// `date`/`arizonaDate` come back as naive "YYYY-MM-DDTHH:mm:ss" strings (no
+// zone) — force UTC interpretation so the literal stored numbers are
+// displayed as-is, not re-shifted by the viewer's own browser time zone.
+function formatNaiveDateTime(iso: string): string {
+  const withZone = iso.endsWith("Z") ? iso : `${iso}Z`;
+  return new Date(withZone).toLocaleString("en-US", {
+    timeZone: "UTC", weekday: "short", month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+function formatHourDiff(hours: number): string {
+  const rounded = Number.isInteger(hours) ? hours : Math.round(hours * 10) / 10;
+  if (rounded === 0) return "Same time";
+  return `${rounded > 0 ? "+" : ""}${rounded}h`;
+}
+
 // Regional mini-calendars: each reads "today" in its own IANA time zone rather
 // than the viewer's local time, so e.g. India's calendar can already show
 // tomorrow while it's still today in the US.
-const REGIONAL_CALENDARS = [
-  { country: "Philippines",   timeZone: "Asia/Manila" },
-  { country: "India",         timeZone: "Asia/Kolkata" },
-  { country: "Mexico",        timeZone: "America/Mexico_City" },
-  { country: "United States", timeZone: "America/Phoenix" },
-];
+const REGIONAL_CALENDAR_COUNTRIES = ["Philippines", "India", "Mexico", "United States"];
+const REGIONAL_CALENDARS = REGIONAL_CALENDAR_COUNTRIES.map((country) => ({
+  country,
+  timeZone: COUNTRY_TIME_ZONES[country],
+}));
 
 function todayPartsInTz(timeZone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -146,6 +163,7 @@ export function HolidayCalendar() {
   const [isPending,     startTransition]  = useTransition();
   const [regionalToday, setRegionalToday] = useState<Record<string, { year: number; month: number; day: number }>>({});
   const [mainCalendarCountry, setMainCalendarCountry] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState<{ date: string; holidays: Holiday[] } | null>(null);
 
   // Add form state
   const [newName,    setNewName]    = useState("");
@@ -172,6 +190,8 @@ export function HolidayCalendar() {
       setLoading(false);
     }
   }
+
+  useEffect(() => { setSelectedDay(null); }, [calYear, calMonth]);
 
   function prevMonth() {
     if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); }
@@ -210,7 +230,7 @@ export function HolidayCalendar() {
     });
   }
 
-  function closeAll() { setShowModal(false); setShowAdd(false); setAddError(""); }
+  function closeAll() { setShowModal(false); setShowAdd(false); setAddError(""); setSelectedDay(null); }
 
   // Clicking a regional mini-calendar swaps the main calendar to that
   // country's own month/today and filters it to just that country — clicking
@@ -343,12 +363,21 @@ export function HolidayCalendar() {
                     ? calYear === activeCountryToday.year && calMonth === activeCountryToday.month && day === activeCountryToday.day
                     : dateStr === todayStr;
                   const dots = dotsByDay[day] ?? [];
+                  const isSelected = selectedDay?.date === dateStr;
                   return (
-                    <div key={i} className={`min-h-[52px] rounded-lg p-1.5 flex flex-col items-center gap-0.5 border transition-colors ${
-                      isToday ? "bg-[#003527] border-[#003527]"
-                      : dots.length > 0 ? "bg-teal-50 border-teal-200"
-                      : "bg-white border-slate-100 hover:bg-slate-50"
-                    }`}>
+                    <button
+                      type="button"
+                      key={i}
+                      disabled={dots.length === 0}
+                      onClick={() => setSelectedDay((current) => current?.date === dateStr ? null : { date: dateStr, holidays: dots })}
+                      className={`min-h-[52px] rounded-lg p-1.5 flex flex-col items-center gap-0.5 border transition-colors ${dots.length > 0 ? "cursor-pointer" : "cursor-default"} ${
+                        isSelected ? "ring-2 ring-[#003527] ring-offset-1" : ""
+                      } ${
+                        isToday ? "bg-[#003527] border-[#003527]"
+                        : dots.length > 0 ? "bg-teal-50 border-teal-200 hover:bg-teal-100"
+                        : "bg-white border-slate-100 hover:bg-slate-50"
+                      }`}
+                    >
                       <span className={`text-xs font-semibold ${isToday ? "text-white" : "text-slate-700"}`}>{day}</span>
                       <div className="flex flex-wrap justify-center gap-0.5 mt-0.5">
                         {dots.slice(0, 3).map((h, di) => (
@@ -361,7 +390,7 @@ export function HolidayCalendar() {
                           {dots[0].name}
                         </span>
                       )}
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -498,6 +527,65 @@ export function HolidayCalendar() {
     </div>
   );
 
+  const holidayDetailsModal = selectedDay && (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedDay(null)} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="size-9 rounded-xl bg-[#003527] text-white grid place-items-center">
+              <LuFlag size={17} strokeWidth={2} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-[#003527]">Holiday Details</h3>
+              <p className="text-xs text-slate-400">
+                {new Date(`${selectedDay.date}T00:00:00.000Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+              </p>
+            </div>
+          </div>
+          <button onClick={() => setSelectedDay(null)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+            <LuX size={18} />
+          </button>
+        </div>
+        <div className="p-6">
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50">
+                <tr>
+                  {["Holiday", "Local Date & Time", "Arizona Date & Time", "Hours Difference"].map((h) => (
+                    <th key={h} className="px-3 py-2 font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {selectedDay.holidays.map((h) => {
+                  const diff = hourOffsetDifference(h.date.slice(0, 10), h.country);
+                  return (
+                    <tr key={h.id}>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
+                        <span className="font-semibold text-slate-700">{h.name}</span>
+                        <span className="text-slate-400"> ({h.country})</span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-600">{formatNaiveDateTime(h.date)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-slate-600">{h.arizonaDate ? formatNaiveDateTime(h.arizonaDate) : "—"}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-[#003527]">{diff != null ? formatHourDiff(diff) : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="px-6 py-4 border-t border-slate-100 flex justify-end bg-slate-50">
+          <button onClick={() => setSelectedDay(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       {/* Widget card */}
@@ -539,8 +627,9 @@ export function HolidayCalendar() {
       </div>
 
       {/* Portals */}
-      {mounted && showModal && createPortal(calendarModal, document.body)}
-      {mounted && showAdd  && createPortal(addModal,      document.body)}
+      {mounted && showModal   && createPortal(calendarModal,       document.body)}
+      {mounted && showAdd     && createPortal(addModal,            document.body)}
+      {mounted && selectedDay && createPortal(holidayDetailsModal, document.body)}
     </>
   );
 }
