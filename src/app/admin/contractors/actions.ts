@@ -345,9 +345,50 @@ export async function updateLeaveRequestStatus(
   status: "Approved" | "Rejected"
 ): Promise<void> {
   const sb = getSupabase();
-  const { error } = await sb
+
+  // Fetch the request so we know email, type, durationDays, and prior status
+  const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .update({ status, updatedAt: new Date().toISOString() })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+    .select("email, type, durationDays, status")
+    .eq("id", id)
+    .single();
+  if (fetchErr || !req) throw new Error(fetchErr?.message ?? "Request not found");
+
+  const prevStatus   = String(req.status);
+  const email        = String(req.email);
+  const type         = String(req.type);           // "PTO" | "Sick Leave"
+  const hours        = Number(req.durationDays) * 8;
+  const isPto        = type === "PTO";
+  const usedField    = isPto ? "ptoUsed" : "sickLeaveUsed";
+
+  // Fetch current contractor balances
+  const { data: profile, error: profileErr } = await sb
+    .from(TABLE)
+    .select("ptoUsed, sickLeaveUsed, ptoBalance, sickLeaveBalance")
+    .eq("email", email)
+    .single();
+  if (profileErr || !profile) throw new Error(profileErr?.message ?? "Contractor not found");
+
+  const currentUsed = Number(profile[usedField] ?? 0);
+  const balance     = Number(isPto ? profile.ptoBalance : profile.sickLeaveBalance);
+
+  let newUsed = currentUsed;
+
+  if (status === "Approved" && prevStatus !== "Approved") {
+    // Add hours used (cap at balance so it doesn't go negative available)
+    newUsed = Math.min(currentUsed + hours, balance);
+  } else if (status === "Rejected" && prevStatus === "Approved") {
+    // Reverse the previously-deducted hours
+    newUsed = Math.max(currentUsed - hours, 0);
+  }
+  // If status unchanged or no balance impact, newUsed stays the same
+
+  // Update both tables
+  const [{ error: reqErr }, { error: profileUpdateErr }] = await Promise.all([
+    sb.from(LEAVE_TABLE).update({ status, updatedAt: new Date().toISOString() }).eq("id", id),
+    sb.from(TABLE).update({ [usedField]: newUsed }).eq("email", email),
+  ]);
+
+  if (reqErr)           throw new Error(reqErr.message);
+  if (profileUpdateErr) throw new Error(profileUpdateErr.message);
 }
