@@ -345,11 +345,13 @@ model AttendanceWeekStatus {
 }
 
 model Holiday {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String
-  country   String
-  date      DateTime @db.Date
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String
+  country     String
+  date        DateTime
+  timeZone    String? // IANA zone for `country` (e.g. "Asia/Manila")
+  arizonaDate DateTime? // Arizona local date+time for midnight of `date` in `timeZone`
+  createdAt   DateTime  @default(now())
 
   @@map("holidays")
 }

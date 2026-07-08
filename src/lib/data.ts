@@ -29,19 +29,6 @@ export type AttendanceRecord = {
   weeklyStatus: "Standard Met" | "For Review" | "On Leave" | "Reviewed";
 };
 
-export type PayrollRecord = {
-  id: string;
-  name: string;
-  region: string;
-  role: string;
-  hours: number;
-  rate: number;
-  gross: number;
-  deductions: number;
-  net: number;
-  status: "Paid" | "Pending" | "On Leave" | "On Hold";
-};
-
 export type TimeOffRequest = {
   id: string;
   name: string;
@@ -82,21 +69,6 @@ export const ATTENDANCE: AttendanceRecord[] = [
   { contractorId: "C010", name: "Aisha Patel",    role: "Project Manager",     avatar: "AP", region: "India",       date: "2026-05-15", checkIn: "08:50", checkOut: "17:45", hours: "8h 55m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
   { contractorId: "C011", name: "Tom Bradley",    role: "Grid Technician",     avatar: "TB", region: "US",          date: "2026-05-15", checkIn: "09:30", checkOut: "17:00", hours: "7h 30m", status: "Late",     standardMinutes: 2700, actualMinutes: 2220, weeklyStatus: "For Review"    },
   { contractorId: "C012", name: "Rosa Mendez",    role: "Field Engineer",      avatar: "RM", region: "Mexico",      date: "2026-05-15", checkIn: "08:05", checkOut: "17:05", hours: "9h 00m", status: "Present",  standardMinutes: 2700, actualMinutes: 2400, weeklyStatus: "Standard Met"    },
-];
-
-export const PAYROLL: PayrollRecord[] = [
-  { id: "PR-0041", name: "Sarah Jenkins",  region: "US",          role: "Solar Technician",    hours: 92, rate: 45, gross: 4140, deductions: 621, net: 3519, status: "Paid"    },
-  { id: "PR-0042", name: "Michael Chen",   region: "US",          role: "Safety Officer",      hours: 88, rate: 52, gross: 4576, deductions: 686, net: 3890, status: "Paid"    },
-  { id: "PR-0043", name: "Priya Sharma",   region: "India",       role: "Electrical Engineer", hours: 90, rate: 38, gross: 3420, deductions: 513, net: 2907, status: "Pending" },
-  { id: "PR-0044", name: "Carlos Rivera",  region: "Mexico",      role: "Site Manager",        hours: 95, rate: 41, gross: 3895, deductions: 584, net: 3311, status: "Pending" },
-  { id: "PR-0045", name: "Ana Santos",     region: "Philippines", role: "Logistics Lead",      hours: 40, rate: 28, gross: 1120, deductions: 168, net: 952,  status: "On Leave"},
-  { id: "PR-0046", name: "James Okoye",    region: "US",          role: "Grid Technician",     hours: 96, rate: 44, gross: 4224, deductions: 634, net: 3590, status: "Paid"    },
-  { id: "PR-0047", name: "Li Wei",         region: "India",       role: "Data Analyst",        hours: 0,  rate: 35, gross: 0,    deductions: 0,   net: 0,    status: "On Hold" },
-  { id: "PR-0048", name: "Maria Lopez",    region: "Mexico",      role: "Field Engineer",      hours: 94, rate: 40, gross: 3760, deductions: 564, net: 3196, status: "Paid"    },
-  { id: "PR-0049", name: "John Reyes",     region: "Philippines", role: "Solar Technician",    hours: 90, rate: 30, gross: 2700, deductions: 405, net: 2295, status: "Paid"    },
-  { id: "PR-0050", name: "Aisha Patel",    region: "India",       role: "Project Manager",     hours: 92, rate: 42, gross: 3864, deductions: 580, net: 3284, status: "Pending" },
-  { id: "PR-0051", name: "Tom Bradley",    region: "US",          role: "Grid Technician",     hours: 88, rate: 44, gross: 3872, deductions: 581, net: 3291, status: "Paid"    },
-  { id: "PR-0052", name: "Rosa Mendez",    region: "Mexico",      role: "Field Engineer",      hours: 94, rate: 40, gross: 3760, deductions: 564, net: 3196, status: "Pending" },
 ];
 
 export const TIME_OFF: TimeOffRequest[] = [

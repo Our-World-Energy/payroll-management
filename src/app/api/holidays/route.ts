@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { timeZoneForCountry, arizonaDateForCountryDate } from "@/lib/countryTimeZones";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -11,7 +12,7 @@ export async function GET() {
   const sb = getSupabase();
   const { data, error } = await sb
     .from("holidays")
-    .select("id, name, country, date")
+    .select("id, name, country, date, timeZone, arizonaDate")
     .order("date", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -25,10 +26,12 @@ export async function POST(request: Request) {
   }
 
   const sb = getSupabase();
+  const timeZone = timeZoneForCountry(country);
+  const arizonaDate = arizonaDateForCountryDate(date, country);
   const { data, error } = await sb
     .from("holidays")
-    .insert({ name, country, date })
-    .select("id, name, country, date")
+    .insert({ name, country, date, timeZone, arizonaDate })
+    .select("id, name, country, date, timeZone, arizonaDate")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
