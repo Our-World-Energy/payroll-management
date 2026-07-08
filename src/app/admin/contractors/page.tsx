@@ -7,12 +7,7 @@ import {
   LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle,
 } from "react-icons/lu";
 import type { Contractor, FilterRule } from "./types";
-import {
-  approvedHoursFor,
-  calculatePtoBalance,
-  calculateSickLeaveBalance,
-  fmtBalance,
-} from "@/lib/timeOffBalances";
+import { fmtBalance } from "@/lib/timeOffBalances";
 import { AddContractorModal } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
@@ -68,13 +63,11 @@ function contractorFullName(contractor: Contractor) {
 }
 
 function getContractorTimeOff(contractor: Contractor) {
-  const fullName = contractorFullName(contractor);
-
   return {
-    ptoBalance: calculatePtoBalance(contractor.hireDate),
-    ptoUsed: approvedHoursFor(fullName, "Annual Leave"),
-    sickLeaveBalance: calculateSickLeaveBalance(contractor.hireDate),
-    sickLeaveUsed: approvedHoursFor(fullName, "Sick Leave"),
+    ptoBalance:       contractor.ptoBalance,
+    ptoUsed:          contractor.ptoUsed,
+    sickLeaveBalance: contractor.sickLeaveBalance,
+    sickLeaveUsed:    contractor.sickLeaveUsed,
   };
 }
 

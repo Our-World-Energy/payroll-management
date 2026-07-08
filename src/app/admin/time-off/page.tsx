@@ -1,43 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronRight, LuDownload, LuHistory, LuRotateCcw, LuCalendarPlus,
+  LuShieldCheck, LuChevronRight, LuDownload, LuCalendarPlus, LuUmbrella, LuStethoscope,
 } from "react-icons/lu";
-import { TIME_OFF, type TimeOffRequest } from "@/lib/data";
-import { calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
-import { fetchAllContractors, updateTimeOffUsage } from "../contractors/actions";
+import {
+  fetchAllContractors, updateTimeOffUsage,
+  fetchAllLeaveRequestsAdmin, type AdminLeaveRequest,
+} from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
-
-type RequestDecision = "Approved" | "Pending" | "Declined";
-type RequestDecisionMap = Record<string, RequestDecision>;
-
-type TimeOffRow = {
-  id: string;
-  fullName: string;
-  email: string;
-  country: string;
-  department: string;
-  role: string;
-  hireDate: string;
-  requestStatus: "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Leave" | "-";
-  reviewStatus: RequestDecision | "-";
-  latestRequest: TimeOffRequest | null;
-  ptoBalance: number;
-  ptoUsed: number;
-  ptoAvailable: number;
-  sickLeaveBalance: number;
-  sickLeaveUsed: number;
-  sickLeaveAvailable: number;
-  birthdayLeave: number;       // advance birthday leave (hrs)
-  advanceSickLeave: number;    // advance sick leave (hrs)
-  unusedSickLeave: number;     // carry-forward from prior year before Mar 1 reset
-};
 
 function fmtDate(date: string) {
   if (!date) return "-";
@@ -56,12 +32,10 @@ function addMonths(date: Date, months: number) {
   return result;
 }
 
-// First day of the month AFTER the given date's month
 function firstOfNextMonth(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth() + 1, 1);
 }
 
-// How many complete months have elapsed from start → end (both on 1st of month)
 function calendarMonthDiff(start: Date, end: Date) {
   return Math.max(
     (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth(),
@@ -69,7 +43,6 @@ function calendarMonthDiff(start: Date, end: Date) {
   );
 }
 
-// Sick leave accrual period resets on March 1 each year
 function sickLeaveYearStart(date: Date): Date {
   const marchFirst = new Date(date.getFullYear(), 2, 1);
   return date >= marchFirst
@@ -88,64 +61,23 @@ function fmtBalance(value: number) {
   });
 }
 
-
-
-/**
- * Unused sick leave from the PREVIOUS year (before the most recent March 1 reset).
- * Any sick leave balance that was accrued before the current March 1 cutoff and
- * not used is captured here as a carry-forward credit.
- */
 function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number): number {
   const startDate = parseDate(hireDate);
   if (!startDate) return 0;
-
   const eligibilityDate = addMonths(startDate, 6);
   const accrualStart = firstOfNextMonth(eligibilityDate);
-
-  // Current sick leave year started on this March 1
   const currentYearStart = sickLeaveYearStart(TODAY);
-
-  // Previous year ended on currentYearStart - 1 day
   const prevYearEnd = new Date(currentYearStart.getTime() - 86400000);
-  const prevYearStart = new Date(currentYearStart.getFullYear() - 1, 2, 1); // Mar 1 prev year
-
-  // Effective start of previous year accrual
+  const prevYearStart = new Date(currentYearStart.getFullYear() - 1, 2, 1);
   const effectiveStart = accrualStart > prevYearStart ? accrualStart : prevYearStart;
-
-  // If accrual hadn't started before current year began, no prior-year balance
   if (effectiveStart >= currentYearStart) return 0;
-
   const prevYearEndFirst = new Date(prevYearEnd.getFullYear(), prevYearEnd.getMonth(), 1);
   const monthsInPrevYear = calendarMonthDiff(effectiveStart, prevYearEndFirst) + 1;
   const prevYearAccrued = roundBalance(monthsInPrevYear * 3.33);
-
-  // Unused = what was accrued in prior year minus what was used (approximate: all used hours attributed to prior year)
-  const unused = Math.max(prevYearAccrued - sickLeaveUsedHours, 0);
-  return roundBalance(unused);
+  return roundBalance(Math.max(prevYearAccrued - sickLeaveUsedHours, 0));
 }
 
-function effectiveRequestStatus(request: TimeOffRequest, decisions: RequestDecisionMap): RequestDecision | "-" {
-  const override = decisions[request.id];
-  if (override) return override;
-  // Map legacy "Rejected" from data to "Declined"
-  if (request.status === "Rejected") return "Declined";
-  return request.status as RequestDecision;
-}
-
-
-function latestRequestFor(name: string) {
-  return TIME_OFF
-    .filter((item) => item.name === name && (item.type === "Annual Leave" || item.type === "Sick Leave" || item.type === "Unpaid Leave"))
-    .sort((a, b) => b.from.localeCompare(a.from))[0] ?? null;
-}
-
-function deriveRequestStatus(req: TimeOffRequest | null): "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Leave" | "-" {
-  if (!req) return "-";
-  if (req.type === "Annual Leave") return req.days <= 0.5 ? "PTO Half Day" : "PTO";
-  if (req.type === "Sick Leave")   return req.days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
-  if (req.type === "Unpaid Leave") return "Unpaid Leave";
-  return "-";
-}
+type RequestDecision = "Approved" | "Pending" | "Declined";
 
 function countryFromLocation(location: string) {
   const parts = location.split(",").map((p) => p.trim()).filter(Boolean);
@@ -160,12 +92,9 @@ function avatarInitials(name: string) {
 }
 
 const AVATAR_COLORS = [
-  "bg-teal-100 text-teal-700",
-  "bg-blue-100 text-blue-700",
-  "bg-purple-100 text-purple-700",
-  "bg-orange-100 text-orange-700",
-  "bg-pink-100 text-pink-700",
-  "bg-emerald-100 text-emerald-700",
+  "bg-teal-100 text-teal-700", "bg-blue-100 text-blue-700",
+  "bg-purple-100 text-purple-700", "bg-orange-100 text-orange-700",
+  "bg-pink-100 text-pink-700", "bg-emerald-100 text-emerald-700",
   "bg-amber-100 text-amber-700",
 ];
 
@@ -196,33 +125,60 @@ const REVIEW_ICON: Record<RequestDecision, React.ReactNode> = {
   Declined: <LuCircleX size={11} />,
 };
 
+type TimeOffRow = {
+  id: string;
+  fullName: string;
+  email: string;
+  country: string;
+  department: string;
+  role: string;
+  hireDate: string;
+  ptoBalance: number;
+  ptoUsed: number;
+  ptoAvailable: number;
+  sickLeaveBalance: number;
+  sickLeaveUsed: number;
+  sickLeaveAvailable: number;
+  birthdayLeave: number;
+  advanceSickLeave: number;
+  unusedSickLeave: number;
+  latestRequest: AdminLeaveRequest | null;
+};
+
 export default function TimeOffPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [contractors, setContractors] = useState<Contractor[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [loadError, setLoadError]     = useState("");
-  const [countryFilter, setCountryFilter]         = useState("All Countries");
-  const [departmentFilter, setDepartmentFilter]   = useState("All Departments");
+
+  const [contractors,   setContractors]   = useState<Contractor[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [loadError,     setLoadError]     = useState("");
+
+  const [countryFilter,      setCountryFilter]      = useState("All Countries");
+  const [departmentFilter,   setDepartmentFilter]   = useState("All Departments");
   const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
-  const [selectedRowId, setSelectedRowId]       = useState<string | null>(null);
-  const [requestDecisions, setRequestDecisions] = useState<RequestDecisionMap>({});
+
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  const [modalTab,      setModalTab]      = useState<"details" | "info">("info");
+
   const [editLeaveType, setEditLeaveType] = useState<"Advance Sick Leave" | "Advance PTO/Birthday Leave">("Advance Sick Leave");
   const [editHours,     setEditHours]     = useState("");
   const [editReason,    setEditReason]    = useState("");
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
-  const [modalTab,      setModalTab]      = useState<"details" | "history" | "info">("info");
 
   useEffect(() => {
     let active = true;
     async function load() {
       setLoading(true); setLoadError("");
       try {
-        const all = await fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] });
-        if (active) setContractors(all);
+        const [all, requests] = await Promise.all([
+          fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
+          fetchAllLeaveRequestsAdmin(),
+        ]);
+        if (active) { setContractors(all); setLeaveRequests(requests); }
       } catch (err) {
-        if (active) { setLoadError(err instanceof Error ? err.message : "Unable to load contractors."); setContractors([]); }
+        if (active) setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
       } finally {
         if (active) setLoading(false);
       }
@@ -231,55 +187,53 @@ export default function TimeOffPage() {
     return () => { active = false; };
   }, []);
 
+  // Map email → latest leave request (already sorted newest-first)
+  const latestByEmail = useMemo<Record<string, AdminLeaveRequest>>(() => {
+    const map: Record<string, AdminLeaveRequest> = {};
+    for (const r of leaveRequests) {
+      if (!map[r.email]) map[r.email] = r;
+    }
+    return map;
+  }, [leaveRequests]);
+
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
-    const latestRequest = latestRequestFor(fullName);
-    const ptoBalance       = calculatePtoBalance(c.hireDate);
-    const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
+    const ptoBalance       = c.ptoBalance;
+    const sickLeaveBalance = c.sickLeaveBalance;
     const ptoUsed          = c.ptoUsed;
     const sickLeaveUsed    = c.sickLeaveUsed;
     const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
     const sickLeaveAvailable = roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0));
-
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, role: c.role, hireDate: c.hireDate,
-      requestStatus: deriveRequestStatus(latestRequest),
-      reviewStatus: latestRequest ? effectiveRequestStatus(latestRequest, requestDecisions) : "-",
-      latestRequest, ptoBalance, ptoUsed, ptoAvailable,
+      ptoBalance, ptoUsed, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
       birthdayLeave:    c.birthdayLeave,
       advanceSickLeave: c.advanceSickLeave,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
+      latestRequest:    latestByEmail[c.email] ?? null,
     };
-  }), [contractors, requestDecisions]);
+  }), [contractors, latestByEmail]);
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
   const filtersActive = countryFilter !== "All Countries" || departmentFilter !== "All Departments" || reviewStatusFilter !== "All Statuses";
 
   const filteredRows = rows.filter((r) => {
-    const cm = countryFilter      === "All Countries"   || r.country === countryFilter;
-    const dm = departmentFilter   === "All Departments" || (r.department || "Unassigned") === departmentFilter;
-    const sm = reviewStatusFilter === "All Statuses"    || r.requestStatus === reviewStatusFilter;
+    const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
+    const dm = departmentFilter === "All Departments" || (r.department || "Unassigned") === departmentFilter;
+    const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
     return cm && dm && sm;
   });
 
-  const visibleNames   = new Set(filteredRows.map((r) => r.fullName));
-  const pendingRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Pending" && visibleNames.has(r.name)
-  ).length;
-  const approvedRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Approved" && visibleNames.has(r.name)
-  ).length;
-  const declinedRequests = TIME_OFF.filter((r) =>
-    effectiveRequestStatus(r, requestDecisions) === "Declined" && visibleNames.has(r.name)
-  ).length;
+  const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
+  const approvedCount = leaveRequests.filter((r) => r.status === "Approved").length;
+  const rejectedCount = leaveRequests.filter((r) => r.status === "Rejected").length;
 
   const selectedRow = rows.find((r) => r.id === selectedRowId) ?? null;
 
-  // Auto-open modal when navigating back from [id] page with ?open=<id>
   useEffect(() => {
     const openId = searchParams.get("open");
     if (openId && rows.length > 0 && !selectedRowId) {
@@ -287,16 +241,24 @@ export default function TimeOffPage() {
       setModalTab("info");
       router.replace("/admin/time-off");
     }
-  }, [searchParams, rows]);
+  }, [searchParams, rows, selectedRowId, router]);
 
+  const isIndia = countryFilter === "India";
+
+  const COLS = [
+    "Employee", "Country", "Department", "Hire Date",
+    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
+    "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
+    ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
+    "Advance Sick Leave", "Status", "Action",
+  ];
 
   function exportCSV() {
     const headers = [
       "Name", "Country", "Department", "Hire Date",
-      "PTO Accrual (h)", "PTO Used (h)", "PTO Accrual Available (h)",
-      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Accrual Available (h)",
-      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
-      "Status",
+      "PTO Accrual (h)", "PTO Used (h)", "PTO Available (h)",
+      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Available (h)",
+      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)", "Status",
     ];
     const csvRows = [
       headers.join(","),
@@ -306,40 +268,25 @@ export default function TimeOffPage() {
           r.ptoBalance, r.ptoUsed, r.ptoAvailable,
           r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
           r.birthdayLeave, r.advanceSickLeave,
-          `"${r.requestStatus === "-" ? "No Request" : r.requestStatus}"`,
+          `"${r.latestRequest?.status ?? "No Request"}"`,
         ].join(",")
       ),
     ];
     const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `time-off-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    a.href = url; a.download = `time-off-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
   }
-
-  const isIndia = countryFilter === "India";
-
-  const COLS = [
-    "Employee", "Country", "Department", "Hire Date",
-    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
-    "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
-    ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
-    "Advance Sick Leave",
-    "Status", "Action",
-  ];
 
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-full">
 
-      {/* ── Detail Modal ──────────────────────────────────────────── */}
+      {/* ── Detail Modal ── */}
       {selectedRow && (() => {
-        const employeeHistory = TIME_OFF
-          .filter((r) => r.name === selectedRow.fullName)
-          .sort((a, b) => b.from.localeCompare(a.from));
-        const currentStatus = selectedRow.reviewStatus;
-        const isDecided = currentStatus === "Approved" || currentStatus === "Declined";
+        const currentStatus = selectedRow.latestRequest?.status as RequestDecision | undefined;
+        const reviewStatus: RequestDecision | "-" = currentStatus ?? "-";
+        const isRowIndia = selectedRow.country === "India";
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -364,8 +311,8 @@ export default function TimeOffPage() {
               </div>
 
               {/* Balance summary bar */}
-              <div className={`grid ${isIndia ? "grid-cols-1" : "grid-cols-2 divide-x divide-slate-100"} border-b border-slate-100`}>
-                {!isIndia && (
+              <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-2 divide-x divide-slate-100"} border-b border-slate-100`}>
+                {!isRowIndia && (
                   <div className="px-5 py-3">
                     <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Accrual Available</p>
                     <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
@@ -405,15 +352,13 @@ export default function TimeOffPage() {
               <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
 
                 {modalTab === "info" ? (
-                  /* ── Contractor Time-Off Detail tab ── */
                   <div className="space-y-4">
-                    {/* Info fields grid */}
                     <div className="grid grid-cols-2 gap-2">
                       {([
                         ["Hire Date",      fmtDate(selectedRow.hireDate)],
-                        ["Status Request", selectedRow.requestStatus === "-" ? "—" : selectedRow.requestStatus],
-                        ["Request Hours",  selectedRow.latestRequest ? `${fmtBalance(selectedRow.latestRequest.days * HOURS_PER_DAY)}h` : "—"],
-                        ["Review Status",  currentStatus === "-" ? "—" : currentStatus],
+                        ["Status Request", selectedRow.latestRequest?.type ?? "—"],
+                        ["Request Days",   selectedRow.latestRequest ? `${selectedRow.latestRequest.durationDays} day${selectedRow.latestRequest.durationDays !== 1 ? "s" : ""}` : "—"],
+                        ["Review Status",  reviewStatus === "-" ? "—" : reviewStatus],
                         ["Request Reason", selectedRow.latestRequest?.reason ?? "—"],
                       ] as [string, string][]).map(([label, value]) => (
                         <div key={label} className={`bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 ${label === "Request Reason" ? "col-span-2" : ""}`}>
@@ -424,7 +369,7 @@ export default function TimeOffPage() {
                     </div>
 
                     {/* PTO section — hidden for India */}
-                    {!isIndia && (
+                    {!isRowIndia && (
                       <div>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
                         <div className="grid grid-cols-3 gap-2">
@@ -447,8 +392,8 @@ export default function TimeOffPage() {
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
                       <div className="grid grid-cols-3 gap-2">
                         {([
-                          ["Sick Leave Accrual",   `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
-                          ["Sick Leave Used",      `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
+                          ["Sick Leave Accrual",     `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
+                          ["Sick Leave Used",        `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
                           ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
                         ] as [string, string][]).map(([label, value]) => (
                           <div key={label} className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2.5">
@@ -459,16 +404,16 @@ export default function TimeOffPage() {
                       </div>
                     </div>
 
-                    {/* Current review status */}
+                    {/* Current review status + eye icon to go to full page */}
                     <div className="bg-slate-50 rounded-xl border border-slate-100 px-4 py-3 flex items-center justify-between">
                       <div>
                         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Current Review Status</p>
-                        {currentStatus === "-" ? (
+                        {reviewStatus === "-" ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500">No request</span>
                         ) : (
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[currentStatus]}`}>
-                            {REVIEW_ICON[currentStatus]}
-                            {currentStatus}
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[reviewStatus]}`}>
+                            {REVIEW_ICON[reviewStatus]}
+                            {reviewStatus}
                           </span>
                         )}
                       </div>
@@ -481,11 +426,11 @@ export default function TimeOffPage() {
                       </button>
                     </div>
                   </div>
+
                 ) : modalTab === "details" ? (() => {
-                  // Contractor is eligible for advance leave only if they have NO regular balance yet
-                  const hasNoPtoBalance    = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
-                  const hasNoSickBalance   = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
-                  const advanceEligible    = isIndia ? hasNoSickBalance : (hasNoPtoBalance && hasNoSickBalance);
+                  const hasNoPtoBalance  = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
+                  const hasNoSickBalance = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
+                  const advanceEligible  = isRowIndia ? hasNoSickBalance : (hasNoPtoBalance && hasNoSickBalance);
                   const isPto = editLeaveType === "Advance PTO/Birthday Leave";
 
                   async function applyAdvanceGrant() {
@@ -494,10 +439,7 @@ export default function TimeOffPage() {
                     if (hoursToAdd <= 0) return;
                     const newBirthday    = isPto ? selectedRow.birthdayLeave + hoursToAdd : selectedRow.birthdayLeave;
                     const newAdvanceSick = isPto ? selectedRow.advanceSickLeave : selectedRow.advanceSickLeave + hoursToAdd;
-                    await updateTimeOffUsage(selectedRow.id, {
-                      birthdayLeave:    newBirthday,
-                      advanceSickLeave: newAdvanceSick,
-                    });
+                    await updateTimeOffUsage(selectedRow.id, { birthdayLeave: newBirthday, advanceSickLeave: newAdvanceSick });
                     setContractors((prev) => prev.map((c) =>
                       c.uid === selectedRow.id
                         ? { ...c, birthdayLeave: newBirthday, advanceSickLeave: newAdvanceSick }
@@ -507,156 +449,111 @@ export default function TimeOffPage() {
                   }
 
                   return (<>
-                  {/* Leave balance cards */}
-                  <div className={`grid ${isIndia ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
-                    {!isIndia && (
-                      <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
-                        <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
-                        <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
-                          {selectedRow.birthdayLeave > 0
-                            ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
-                            : <span className="text-sm text-pink-300">Not eligible</span>}
+                    <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
+                      {!isRowIndia && (
+                        <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
+                          <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
+                          <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
+                            {selectedRow.birthdayLeave > 0
+                              ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
+                              : <span className="text-sm text-pink-300">Not eligible</span>}
+                          </p>
+                        </div>
+                      )}
+                      <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
+                        <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
+                        <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
+                          {selectedRow.advanceSickLeave > 0
+                            ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></>
+                            : <span className="text-sm text-blue-300">Not eligible</span>}
                         </p>
                       </div>
-                    )}
-                    <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
-                      <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
-                      <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
-                        {selectedRow.advanceSickLeave > 0
-                          ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></>
-                          : <span className="text-sm text-blue-300">Not eligible</span>}
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Contractor Info</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {([
+                          ["Country",   selectedRow.country],
+                          ["Hire Date", fmtDate(selectedRow.hireDate)],
+                        ] as [string, string][]).map(([label, value]) => (
+                          <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+                            <p className="text-sm font-medium text-slate-700 mt-0.5">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                        <LuCalendarPlus size={13} /> Advance Leave Request
                       </p>
-                    </div>
-                  </div>
-
-                  {/* Contractor info */}
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Contractor Info</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {([
-                        ["Country",   selectedRow.country],
-                        ["Hire Date", fmtDate(selectedRow.hireDate)],
-                      ] as [string, string][]).map(([label, value]) => (
-                        <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
-                          <p className="text-sm font-medium text-slate-700 mt-0.5">{value}</p>
+                      {!advanceEligible ? (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
+                          <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
+                          <p className="text-xs text-slate-500 leading-relaxed">
+                            Advance leave is only available to contractors who have <strong>no regular PTO or sick leave balance</strong>. This contractor has an existing leave balance and is not eligible for advance leave.
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Advance Leave Request */}
-                  <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
-                      <LuCalendarPlus size={13} /> Advance Leave Request
-                    </p>
-
-                    {!advanceEligible ? (
-                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
-                        <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
-                        <p className="text-xs text-slate-500 leading-relaxed">
-                          Advance leave is only available to contractors who have <strong>no regular PTO or sick leave balance</strong>. This contractor has an existing leave balance and is not eligible for advance leave.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          {/* Advance Leave Type */}
-                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
-                            <select
-                              value={editLeaveType}
-                              onChange={(e) => {
-                                setEditLeaveType(e.target.value as typeof editLeaveType);
-                                setEditHours("");
-                              }}
-                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                            >
-                              <option value="Advance Sick Leave">Advance Sick Leave</option>
-                              {!isIndia && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
-                            </select>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
+                              <select
+                                value={editLeaveType}
+                                onChange={(e) => { setEditLeaveType(e.target.value as typeof editLeaveType); setEditHours(""); }}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                              >
+                                <option value="Advance Sick Leave">Advance Sick Leave</option>
+                                {!isRowIndia && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
+                              </select>
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Request Hours <span className="text-red-400">*</span></p>
+                              <input type="number" min="1" value={editHours} onChange={(e) => setEditHours(e.target.value)} placeholder="Enter hours e.g. 8"
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">From Date</p>
+                              <input type="date" value={editFrom} onChange={(e) => setEditFrom(e.target.value)}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">To Date</p>
+                              <input type="date" value={editTo} onChange={(e) => setEditTo(e.target.value)}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
                           </div>
-
-                          {/* Request Hours */}
-                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                              Request Hours <span className="text-red-400">*</span>
-                            </p>
-                            <input
-                              type="number"
-                              min="1"
-                              value={editHours}
-                              onChange={(e) => setEditHours(e.target.value)}
-                              placeholder="Enter hours e.g. 8"
-                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                            />
-                          </div>
-
-                          {/* From date */}
                           <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">From Date</p>
-                            <input
-                              type="date"
-                              value={editFrom}
-                              onChange={(e) => setEditFrom(e.target.value)}
-                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                            />
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
+                            <textarea value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Enter reason for advance leave request..." rows={2}
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
                           </div>
-
-                          {/* To date */}
-                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">To Date</p>
-                            <input
-                              type="date"
-                              value={editTo}
-                              onChange={(e) => setEditTo(e.target.value)}
-                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                            />
-                          </div>
+                          <button onClick={applyAdvanceGrant} disabled={!editHours || parseFloat(editHours) <= 0}
+                            className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                            <LuCircleCheck size={15} strokeWidth={2} /> Apply Advance Leave
+                          </button>
                         </div>
-
-                        {/* Reason */}
-                        <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
-                          <textarea
-                            value={editReason}
-                            onChange={(e) => setEditReason(e.target.value)}
-                            placeholder="Enter reason for advance leave request..."
-                            rows={2}
-                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
-                          />
-                        </div>
-
-                        {/* Apply button */}
-                        <button
-                          onClick={applyAdvanceGrant}
-                          disabled={!editHours || parseFloat(editHours) <= 0}
-                          className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-                        >
-                          <LuCircleCheck size={15} strokeWidth={2} />
-                          Apply Advance Leave
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
                   </>);
                 })() : null}
               </div>
 
-              {/* Footer actions */}
+              {/* Footer */}
               <div className="shrink-0 px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setSelectedRowId(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
-                    Close
-                  </button>
-                </div>
+                <button onClick={() => setSelectedRowId(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+                  Close
+                </button>
               </div>
             </div>
           </div>
         );
       })()}
 
-      {/* ── Page header ───────────────────────────────────────────── */}
+      {/* ── Page header ── */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
         <div>
           <nav className="flex mb-2">
@@ -671,34 +568,32 @@ export default function TimeOffPage() {
         </div>
       </div>
 
-      {/* ── Stat cards ────────────────────────────────────────────── */}
+      {/* ── Stat cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
         <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4 flex items-start justify-between">
           <div>
             <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
-            <p className="text-3xl font-black text-amber-600 mt-1">{pendingRequests}</p>
+            <p className="text-3xl font-black text-amber-600 mt-1">{pendingCount}</p>
             <p className="text-xs text-amber-400 mt-1">Awaiting review</p>
           </div>
           <div className="size-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
             <LuClock size={18} className="text-amber-600" />
           </div>
         </div>
-
         <div className="bg-emerald-50 rounded-xl border border-emerald-200 shadow-sm p-4 flex items-start justify-between">
           <div>
             <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">Approved</p>
-            <p className="text-3xl font-black text-emerald-700 mt-1">{approvedRequests}</p>
+            <p className="text-3xl font-black text-emerald-700 mt-1">{approvedCount}</p>
             <p className="text-xs text-emerald-400 mt-1">Requests approved</p>
           </div>
           <div className="size-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
             <LuCircleCheck size={18} className="text-emerald-600" />
           </div>
         </div>
-
         <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-4 flex items-start justify-between">
           <div>
             <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Declined</p>
-            <p className="text-3xl font-black text-red-600 mt-1">{declinedRequests}</p>
+            <p className="text-3xl font-black text-red-600 mt-1">{rejectedCount}</p>
             <p className="text-xs text-red-300 mt-1">Requests declined</p>
           </div>
           <div className="size-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
@@ -707,96 +602,59 @@ export default function TimeOffPage() {
         </div>
       </div>
 
-      {/* ── Filters ───────────────────────────────────────────────── */}
+      {/* ── Filters ── */}
       <div className="mb-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center">
         <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
-
-        <select
-          value={countryFilter}
-          onChange={(e) => setCountryFilter(e.target.value)}
-          disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
+        <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} disabled={loading}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Countries</option>
           {countryOptions.map((c) => <option key={c}>{c}</option>)}
         </select>
-
-        <select
-          value={departmentFilter}
-          onChange={(e) => setDepartmentFilter(e.target.value)}
-          disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
+        <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} disabled={loading}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Departments</option>
           {departmentOptions.map((d) => <option key={d}>{d}</option>)}
         </select>
-
-        <select
-          value={reviewStatusFilter}
-          onChange={(e) => setReviewStatusFilter(e.target.value)}
-          disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
-        >
+        <select value={reviewStatusFilter} onChange={(e) => setReviewStatusFilter(e.target.value)} disabled={loading}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option value="All Statuses">All Statuses</option>
-          <option value="PTO">PTO</option>
-          <option value="PTO Half Day">PTO Half Day</option>
-          <option value="Sick Leave">Sick Leave</option>
-          <option value="Sick Leave Half Day">Sick Leave Half Day</option>
-          <option value="Unpaid Leave">Unpaid Leave</option>
-          <option value="-">No Request</option>
+          <option value="Pending">Pending</option>
+          <option value="Approved">Approved</option>
+          <option value="Rejected">Rejected</option>
         </select>
-
         {filtersActive && (
-          <button
-            onClick={() => { setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
-            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-            title="Clear filters"
-          >
+          <button onClick={() => { setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
+            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={16} strokeWidth={2} />
           </button>
         )}
-
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-2 text-xs text-slate-400">
             <LuShieldCheck size={14} className="text-teal-500" />
             <span>{filteredRows.length} contractors shown</span>
           </div>
-          <button
-            onClick={exportCSV}
-            disabled={loading || filteredRows.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#003527] border border-[#003527]/30 bg-white hover:bg-[#003527] hover:text-white rounded-lg transition-colors disabled:opacity-40"
-          >
-            <LuDownload size={13} strokeWidth={2} />
-            Export CSV
+          <button onClick={exportCSV} disabled={loading || filteredRows.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#003527] border border-[#003527]/30 bg-white hover:bg-[#003527] hover:text-white rounded-lg transition-colors disabled:opacity-40">
+            <LuDownload size={13} strokeWidth={2} /> Export CSV
           </button>
         </div>
       </div>
 
-      {/* ── Table ─────────────────────────────────────────────────── */}
+      {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
-          <table
-            className="w-full text-left"
-            style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}
-          >
+          <table className="w-full text-left" style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                  style={{ minWidth: 210, background: "#003527" }}>
-                  Employee
-                </th>
+                  style={{ minWidth: 210, background: "#003527" }}>Employee</th>
                 {COLS.slice(1, -1).map((h) => (
-                  <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20">
-                    {h}
-                  </th>
+                  <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20">{h}</th>
                 ))}
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 border-l border-white/20"
-                  style={{ background: "#003527" }}>
-                  Action
-                </th>
+                  style={{ background: "#003527" }}>Action</th>
               </tr>
             </thead>
-
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
@@ -804,147 +662,107 @@ export default function TimeOffPage() {
                     <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: 210 }}>
                       <div className="flex items-center gap-3">
                         <div className="size-8 rounded-full bg-slate-100 shrink-0" />
-                        <div className="space-y-1.5">
-                          <div className="h-3 bg-slate-100 rounded w-28" />
-                          <div className="h-2 bg-slate-100 rounded w-20" />
-                        </div>
+                        <div className="space-y-1.5"><div className="h-3 bg-slate-100 rounded w-28" /><div className="h-2 bg-slate-100 rounded w-20" /></div>
                       </div>
                     </td>
                     {COLS.slice(1, -1).map((h) => (
-                      <td key={h} className="px-4 py-3 border-r border-slate-100">
-                        <div className="h-3 bg-slate-100 rounded w-16" />
-                      </td>
+                      <td key={h} className="px-4 py-3 border-r border-slate-100"><div className="h-3 bg-slate-100 rounded w-16" /></td>
                     ))}
-                    <td className="px-4 py-3 sticky right-0 bg-white border-l border-slate-200">
-                      <div className="h-3 bg-slate-100 rounded w-12" />
-                    </td>
+                    <td className="px-4 py-3 sticky right-0 bg-white border-l border-slate-200"><div className="h-3 bg-slate-100 rounded w-12" /></td>
                   </tr>
                 ))
               ) : loadError ? (
-                <tr>
-                  <td colSpan={COLS.length} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td>
-                </tr>
+                <tr><td colSpan={COLS.length} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr>
-                  <td colSpan={COLS.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>
-                    No contractors match the selected filters.
-                  </td>
-                </tr>
-              ) : filteredRows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
-                  {/* Employee cell */}
-                  <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 210 }}>
-                    <div className="flex items-center gap-3">
-                      <div className={`size-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
-                        {avatarInitials(row.fullName)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#003527] truncate">{row.fullName}</p>
-                        <p className="text-xs text-slate-400 truncate">{row.role || "—"}</p>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{row.country}</td>
-                  <td className="px-4 py-3 text-sm text-slate-700 whitespace-nowrap border-r border-slate-100">{row.department || "Unassigned"}</td>
-                  <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap font-mono text-xs border-r border-slate-100">{fmtDate(row.hireDate)}</td>
-
-                  {/* PTO — hidden when India filter active; grayed out per-row for India contractors */}
-                  {!isIndia && <>
-                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                      {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoBalance)}h`}
-                    </td>
-                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                      {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
-                    </td>
-                    <td className="px-4 py-3 border-r border-slate-100">
-                      {row.country === "India" ? <span className="text-slate-300">—</span> : (
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-semibold tabular-nums text-teal-700">{fmtBalance(row.ptoAvailable)}h</span>
-                          <div className="w-12">
-                            <BalanceBar used={row.ptoUsed} total={row.ptoBalance} color="bg-teal-400" />
-                          </div>
+                <tr><td colSpan={COLS.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>No contractors match the selected filters.</td></tr>
+              ) : filteredRows.map((row) => {
+                const latest = row.latestRequest;
+                const reviewStatus: RequestDecision | "-" = (latest?.status as RequestDecision) ?? "-";
+                return (
+                  <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
+                    <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 210 }}>
+                      <div className="flex items-center gap-3">
+                        <div className={`size-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
+                          {avatarInitials(row.fullName)}
                         </div>
-                      )}
-                    </td>
-                  </>}
-
-                  {/* Sick */}
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
-                  <td className="px-4 py-3 border-r border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold tabular-nums text-orange-600">{fmtBalance(row.sickLeaveAvailable)}h</span>
-                      <div className="w-12">
-                        <BalanceBar used={row.sickLeaveUsed} total={row.sickLeaveBalance} color="bg-orange-400" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-[#003527] truncate">{row.fullName}</p>
+                          <p className="text-xs text-slate-400 truncate">{row.role || "—"}</p>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-
-                  {/* Advance PTO/Birthday Leave — hidden when India filter active; blank per-row for India contractors */}
-                  {!isIndia && (
-                    <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                      {row.country === "India" ? <span className="text-slate-300">—</span> : (
-                        row.birthdayLeave > 0
-                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
-                          : <span className="text-slate-300">—</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{row.country}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap border-r border-slate-100">{row.department || "Unassigned"}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap font-mono text-xs border-r border-slate-100">{fmtDate(row.hireDate)}</td>
+                    {!isIndia && <>
+                      <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoBalance)}h`}
+                      </td>
+                      <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
+                      </td>
+                      <td className="px-4 py-2.5 border-r border-slate-100">
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : (
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold tabular-nums text-teal-700">{fmtBalance(row.ptoAvailable)}h</span>
+                            <div className="w-12"><BalanceBar used={row.ptoUsed} total={row.ptoBalance} color="bg-teal-400" /></div>
+                          </div>
+                        )}
+                      </td>
+                    </>}
+                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
+                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
+                    <td className="px-4 py-2.5 border-r border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold tabular-nums text-orange-600">{fmtBalance(row.sickLeaveAvailable)}h</span>
+                        <div className="w-12"><BalanceBar used={row.sickLeaveUsed} total={row.sickLeaveBalance} color="bg-orange-400" /></div>
+                      </div>
+                    </td>
+                    {!isIndia && (
+                      <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : (
+                          row.birthdayLeave > 0
+                            ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-pink-50 text-pink-700 border border-pink-200">{fmtBalance(row.birthdayLeave)}h</span>
+                            : <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                      {row.advanceSickLeave > 0
+                        ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">{fmtBalance(row.advanceSickLeave)}h</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                    {/* Status */}
+                    <td className="px-4 py-2.5 whitespace-nowrap border-r border-slate-100">
+                      {latest ? (
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                          reviewStatus === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                          reviewStatus === "Declined" || reviewStatus === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
+                          "bg-amber-50 text-amber-700 border-amber-200"
+                        }`}>
+                          {reviewStatus === "Approved" ? <LuCircleCheck size={11} /> : reviewStatus === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
+                          {latest.type} · {reviewStatus}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-sm">—</span>
                       )}
                     </td>
-                  )}
-                  {/* Advance Sick Leave */}
-                  <td className="px-4 py-3 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                    {row.advanceSickLeave > 0
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">{fmtBalance(row.advanceSickLeave)}h</span>
-                      : <span className="text-slate-300">—</span>}
-                  </td>
-
-                  {/* Status */}
-                  <td className="px-4 py-3 whitespace-nowrap border-r border-slate-100">
-                    {row.requestStatus === "-" ? (
-                      <span className="text-slate-300 text-sm">—</span>
-                    ) : (
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                        row.requestStatus === "PTO"                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                        row.requestStatus === "PTO Half Day"         ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
-                        row.requestStatus === "Sick Leave"           ? "bg-amber-50 text-amber-700 border border-amber-200"       :
-                        row.requestStatus === "Sick Leave Half Day"  ? "bg-amber-50 text-amber-600 border border-amber-200"       :
-                                                                       "bg-slate-100 text-slate-600 border border-slate-200"
-                      }`}>
-                        {row.requestStatus}
-                      </span>
-                    )}
-                  </td>
-
-                  {/* Action — sticky right */}
-                  <td className="px-4 py-3 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
-                    <button
-                      onClick={() => {
-                        setSelectedRowId(row.id);
-                        setModalTab("info");
-                        setEditLeaveType("Advance Sick Leave");
-                        setEditHours("");
-                        setEditFrom("");
-                        setEditTo("");
-                        setEditReason("");
-                      }}
-                      title="View details"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
-                    >
-                      <LuEye size={14} strokeWidth={1.75} />
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td className="px-4 py-2.5 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
+                      <button
+                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); setEditFrom(""); setEditTo(""); setEditReason(""); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
+                      >
+                        <LuEye size={14} strokeWidth={1.75} /> View
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-
-        {/* Footer */}
         <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <p className="text-xs text-slate-400 font-medium">
-            {filteredRows.length} of {rows.length} contractors
-          </p>
+          <p className="text-xs text-slate-400 font-medium">{filteredRows.length} of {rows.length} contractors</p>
           <div className="flex items-center gap-1.5 text-xs text-slate-400">
             <LuTrendingUp size={13} className="text-teal-500" />
             Balances calculated from hire date

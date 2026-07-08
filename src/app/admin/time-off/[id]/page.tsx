@@ -1,48 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot } from "react-icons/lu";
-import { fetchAllContractors } from "../../contractors/actions";
+import {
+  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus,
+  type AdminLeaveRequest,
+} from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
-import { calculatePtoBalance, calculateSickLeaveBalance, roundBalance, fmtBalance } from "@/lib/timeOffBalances";
+import { fmtBalance } from "@/lib/timeOffBalances";
 
-type RequestDecision = "Approved" | "Pending" | "Declined";
-type RequestDecisionMap = Record<string, RequestDecision>;
-
-type LeaveType = "Annual Leave" | "Sick Leave" | "Unpaid Leave";
-
-type DummyRequest = {
-  id: string;
-  from: string;
-  to: string;
-  reason: string;
-  type: LeaveType;
-  days: number;
-  status: RequestDecision;
-};
-
-const DUMMY_REQUESTS: DummyRequest[] = [
-  { id: "TOR-001", from: "2026-01-06", to: "2026-01-08", reason: "Family vacation planned in advance.", type: "Annual Leave",  days: 3,   status: "Approved" },
-  { id: "TOR-002", from: "2026-02-14", to: "2026-02-14", reason: "Personal day off.",                  type: "Annual Leave",  days: 0.5, status: "Pending"  },
-  { id: "TOR-003", from: "2026-03-03", to: "2026-03-05", reason: "Medical appointment and recovery.",  type: "Sick Leave",    days: 3,   status: "Declined" },
-  { id: "TOR-004", from: "2026-04-21", to: "2026-04-23", reason: "Attending a family event out of town.", type: "Annual Leave", days: 3, status: "Approved" },
-  { id: "TOR-005", from: "2026-05-18", to: "2026-05-18", reason: "Sick leave — fever.",               type: "Sick Leave",    days: 0.5, status: "Pending"  },
-];
-
-const DUMMY_HISTORY: DummyRequest[] = [
-  { id: "TOR-H01", from: "2025-03-10", to: "2025-03-12", reason: "Annual family trip.",               type: "Annual Leave",  days: 3,   status: "Approved" },
-  { id: "TOR-H02", from: "2025-05-05", to: "2025-05-05", reason: "Doctor visit.",                     type: "Sick Leave",    days: 1,   status: "Approved" },
-  { id: "TOR-H03", from: "2025-07-14", to: "2025-07-18", reason: "Summer vacation.",                  type: "Annual Leave",  days: 5,   status: "Approved" },
-  { id: "TOR-H04", from: "2025-09-22", to: "2025-09-22", reason: "Personal errand.",                  type: "Annual Leave",  days: 0.5, status: "Declined" },
-  { id: "TOR-H05", from: "2025-11-03", to: "2025-11-05", reason: "Extended sick leave.",              type: "Sick Leave",    days: 3,   status: "Approved" },
-  { id: "TOR-H06", from: "2025-12-24", to: "2025-12-26", reason: "Holiday travel.",                   type: "Unpaid Leave",  days: 3,   status: "Approved" },
-];
-
-function deriveLeaveStatus(req: DummyRequest): string {
-  if (req.type === "Annual Leave") return req.days <= 0.5 ? "PTO Half Day" : "PTO";
-  if (req.type === "Sick Leave")   return req.days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
-  return "Unpaid Leave";
+function roundBalance(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function fmtDate(date: string) {
@@ -51,23 +20,42 @@ function fmtDate(date: string) {
   return year && month && day ? `${month}-${day}-${year}` : date;
 }
 
+function fmtDateTime(iso: string) {
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  } catch {
+    return iso.slice(0, 10);
+  }
+}
+
+// Split into "current" (pending) and "historical" (decided) buckets
+const CUTOFF_DATE = "2026-01-01"; // requests from before this treated as historical even if pending
 
 export default function ContractorTimeOffPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const [contractor, setContractor] = useState<Contractor | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [decisions, setDecisions] = useState<RequestDecisionMap>({});
+  const [contractor,   setContractor]   = useState<Contractor | null>(null);
+  const [allRequests,  setAllRequests]  = useState<AdminLeaveRequest[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     let active = true;
     async function load() {
       try {
-        const all = await fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] });
+        const [all, requests] = await Promise.all([
+          fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
+          fetchAllLeaveRequestsAdmin(),
+        ]);
         if (active) {
           const found = all.find((c) => c.uid === id) ?? null;
           setContractor(found);
+          // filter to only this contractor's requests
+          if (found) {
+            setAllRequests(requests.filter((r) => r.email === found.email));
+          }
         }
       } finally {
         if (active) setLoading(false);
@@ -84,15 +72,27 @@ export default function ContractorTimeOffPage() {
   const country = contractor?.location?.split(",").map((p) => p.trim()).filter(Boolean).at(-1) ?? "";
   const isIndia = country.toLowerCase() === "india";
 
-  const requests = DUMMY_REQUESTS;
+  // Current = Pending requests; Historical = Approved or Rejected
+  const currentRequests    = allRequests.filter((r) => r.status === "Pending");
+  const historicalRequests = allRequests.filter((r) => r.status !== "Pending");
 
-  function decide(reqId: string, decision: "Approved" | "Declined") {
-    setDecisions((cur) => ({ ...cur, [reqId]: decision }));
+  async function decide(reqId: string, decision: "Approved" | "Rejected") {
+    // Optimistic update
+    setAllRequests((prev) => prev.map((r) => r.id === reqId ? { ...r, status: decision } : r));
+    try {
+      await updateLeaveRequestStatus(reqId, decision);
+    } catch {
+      // revert on error
+      setAllRequests((prev) => prev.map((r) => r.id === reqId ? { ...r, status: "Pending" } : r));
+    }
   }
 
-  function effectiveStatus(req: DummyRequest): RequestDecision {
-    return decisions[req.id] ?? req.status;
-  }
+  const ptoBalance       = contractor?.ptoBalance        ?? 0;
+  const ptoUsed          = contractor?.ptoUsed           ?? 0;
+  const ptoAvailable     = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
+  const sickBalance      = contractor?.sickLeaveBalance  ?? 0;
+  const sickUsed         = contractor?.sickLeaveUsed     ?? 0;
+  const sickAvailable    = roundBalance(Math.max(sickBalance - sickUsed, 0));
 
   if (loading) {
     return (
@@ -134,53 +134,44 @@ export default function ContractorTimeOffPage() {
 
       {/* Score Cards */}
       <div className={`grid grid-cols-2 ${isIndia ? "md:grid-cols-3" : "md:grid-cols-3 lg:grid-cols-6"} gap-4 mb-8`}>
-        {/* PTO cards — hidden for India */}
         {!isIndia && <>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
-            <p className="text-2xl font-black text-[#003527]">
-              {contractor.hireDate ? `${fmtBalance(calculatePtoBalance(contractor.hireDate))}h` : "—"}
-            </p>
+            <p className="text-2xl font-black text-[#003527]">{fmtBalance(ptoBalance)}h</p>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
-            <p className="text-2xl font-black text-slate-700">0h</p>
+            <p className="text-2xl font-black text-slate-700">{fmtBalance(ptoUsed)}h</p>
           </div>
           <div className="bg-emerald-50 rounded-2xl border border-emerald-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">PTO Available</p>
-            <p className="text-2xl font-black text-emerald-700">
-              {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "—"}
-            </p>
+            <p className="text-2xl font-black text-emerald-700">{fmtBalance(ptoAvailable)}h</p>
           </div>
         </>}
-        {/* Sick Leave Accrual */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
-          <p className="text-2xl font-black text-[#003527]">
-            {contractor.hireDate ? `${fmtBalance(calculateSickLeaveBalance(contractor.hireDate))}h` : "—"}
-          </p>
+          <p className="text-2xl font-black text-[#003527]">{fmtBalance(sickBalance)}h</p>
         </div>
-        {/* Sick Leave Used */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Used</p>
-          <p className="text-2xl font-black text-slate-700">0h</p>
+          <p className="text-2xl font-black text-slate-700">{fmtBalance(sickUsed)}h</p>
         </div>
-        {/* Sick Leave Available */}
         <div className="bg-amber-50 rounded-2xl border border-amber-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1">Sick Leave Available</p>
-          <p className="text-2xl font-black text-amber-700">
-            {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculateSickLeaveBalance(contractor.hireDate), 0)))}h` : "—"}
-          </p>
+          <p className="text-2xl font-black text-amber-700">{fmtBalance(sickAvailable)}h</p>
         </div>
       </div>
 
-      {/* Table */}
+      {/* Current Requests Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date", "Reason", ...(!isIndia ? ["PTO Available"] : []), "Sick Leave Available", "Status", "Action Status", "Action"].map((h) => (
+                {["Name", "Start Date", "End Date", "Duration", "Reason",
+                  ...(!isIndia ? ["PTO Available"] : []),
+                  "Sick Leave Available", "Type", "Action Status", "Action"
+                ].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -188,78 +179,60 @@ export default function ContractorTimeOffPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {requests.length === 0 ? (
+              {currentRequests.length === 0 ? (
                 <tr>
                   <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
-                    No time-off requests found.
+                    No pending time-off requests.
                   </td>
                 </tr>
-              ) : requests.map((req) => {
-                const status = effectiveStatus(req);
-                const blocked = isIndia && req.type !== "Sick Leave";
+              ) : currentRequests.map((req) => {
+                const isSick = req.type === "Sick Leave";
                 return (
-                  <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
+                  <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{req.durationDays} day{req.durationDays !== 1 ? "s" : ""}</td>
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
                     {!isIndia && (
                       <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
-                        {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculatePtoBalance(contractor.hireDate), 0)))}h` : "-"}
+                        {fmtBalance(ptoAvailable)}h
                       </td>
                     )}
                     <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
-                      {contractor.hireDate ? `${fmtBalance(roundBalance(Math.max(calculateSickLeaveBalance(contractor.hireDate), 0)))}h` : "-"}
+                      {fmtBalance(sickAvailable)}h
                     </td>
+                    {/* Type badge */}
                     <td className="px-5 py-4 whitespace-nowrap">
-                      {(() => {
-                        const ls = deriveLeaveStatus(req);
-                        return (
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                            ls === "PTO"                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                            ls === "PTO Half Day"        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
-                            ls === "Sick Leave"          ? "bg-amber-50 text-amber-700 border border-amber-200"       :
-                            ls === "Sick Leave Half Day" ? "bg-amber-50 text-amber-600 border border-amber-200"       :
-                                                          "bg-slate-100 text-slate-600 border border-slate-200"
-                          }`}>
-                            {ls}
-                          </span>
-                        );
-                      })()}
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        isSick
+                          ? "bg-amber-50 text-amber-700 border border-amber-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                      }`}>
+                        {req.type}
+                      </span>
                     </td>
                     {/* Action Status */}
                     <td className="px-5 py-4 whitespace-nowrap">
-                      {status === "Approved" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                          <LuCircleCheck size={11} /> Approved
-                        </span>
-                      ) : status === "Declined" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-600 border border-red-200">
-                          <LuCircleX size={11} /> Declined
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
-                          <LuCircleDot size={11} /> Pending
-                        </span>
-                      )}
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
+                        <LuCircleDot size={11} /> Pending
+                      </span>
                     </td>
                     {/* Action buttons */}
                     <td className="px-5 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => decide(req.id, "Declined")}
-                          disabled={status === "Declined" || blocked}
-                          className="px-4 py-1.5 bg-red-400 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
+                          onClick={() => decide(req.id, "Rejected")}
+                          className="px-4 py-1.5 bg-red-400 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors"
                         >
                           Decline
                         </button>
                         <button
                           onClick={() => decide(req.id, "Approved")}
-                          disabled={status === "Approved" || blocked}
-                          className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
+                          className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors"
                         >
                           Approve
                         </button>
@@ -284,7 +257,7 @@ export default function ContractorTimeOffPage() {
             <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  {["Name", "Start Date", "End Date", "Reason", "Status", "Review"].map((h) => (
+                  {["Name", "Start Date", "End Date", "Duration", "Reason", "Submitted", "Type", "Review"].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                       {h}
                     </th>
@@ -292,41 +265,42 @@ export default function ContractorTimeOffPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {DUMMY_HISTORY.length === 0 ? (
+                {historicalRequests.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-5 py-16 text-center text-sm text-slate-400">
+                    <td colSpan={8} className="px-5 py-16 text-center text-sm text-slate-400">
                       <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                       No historical requests found.
                     </td>
                   </tr>
-                ) : DUMMY_HISTORY.map((req) => {
-                  const ls = deriveLeaveStatus(req);
-                  const blocked = isIndia && req.type !== "Sick Leave";
+                ) : historicalRequests.map((req) => {
+                  const isSick = req.type === "Sick Leave";
+                  const isApproved = req.status === "Approved";
                   return (
-                    <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
+                    <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{req.durationDays} day{req.durationDays !== 1 ? "s" : ""}</td>
                       <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                         <span className="line-clamp-2">{req.reason || "-"}</span>
                       </td>
+                      <td className="px-5 py-4 text-sm text-slate-400 whitespace-nowrap">{fmtDateTime(req.createdAt)}</td>
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          ls === "PTO"                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                          ls === "PTO Half Day"        ? "bg-emerald-50 text-emerald-600 border border-emerald-200" :
-                          ls === "Sick Leave"          ? "bg-amber-50 text-amber-700 border border-amber-200"       :
-                          ls === "Sick Leave Half Day" ? "bg-amber-50 text-amber-600 border border-amber-200"       :
-                                                        "bg-slate-100 text-slate-600 border border-slate-200"
+                          isSick
+                            ? "bg-amber-50 text-amber-700 border border-amber-200"
+                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
                         }`}>
-                          {ls}
+                          {req.type}
                         </span>
                       </td>
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          req.status === "Approved" ? "bg-green-50 text-green-700 border border-green-200" :
-                          req.status === "Declined" ? "bg-red-50 text-red-600 border border-red-200"       :
-                                                      "bg-amber-50 text-amber-600 border border-amber-200"
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                          isApproved
+                            ? "bg-green-50 text-green-700 border border-green-200"
+                            : "bg-red-50 text-red-600 border border-red-200"
                         }`}>
+                          {isApproved ? <LuCircleCheck size={11} /> : <LuCircleX size={11} />}
                           {req.status}
                         </span>
                       </td>

@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
 
 const TABLE = "contractor_profiles";
 
@@ -179,8 +179,8 @@ export async function fetchAllContractors(
 
 export async function createContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
-  const ptoBalance      = calculatePtoBalance(c.hireDate) * HOURS_PER_DAY;
-  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate) * HOURS_PER_DAY;
+  const ptoBalance      = calculatePtoBalance(c.hireDate);
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
   const { error } = await sb.from(TABLE).insert({
     id:                crypto.randomUUID(),
     uid:               c.uid,
@@ -230,8 +230,8 @@ export async function createContractor(c: Contractor): Promise<void> {
 
 export async function updateContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
-  const ptoBalance       = calculatePtoBalance(c.hireDate) * HOURS_PER_DAY;
-  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate) * HOURS_PER_DAY;
+  const ptoBalance       = calculatePtoBalance(c.hireDate);
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -297,10 +297,57 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
   let updated = 0;
   for (const row of data ?? []) {
     if (!row.hireDate) continue;
-    const ptoBalance       = calculatePtoBalance(row.hireDate) * HOURS_PER_DAY;
-    const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate) * HOURS_PER_DAY;
+    const ptoBalance       = calculatePtoBalance(row.hireDate);
+    const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate);
     await sb.from(TABLE).update({ ptoBalance, sickLeaveBalance }).eq("uid", row.uid);
     updated++;
   }
   return { updated };
+}
+
+const LEAVE_TABLE = "contractor_leave_requests";
+
+export type AdminLeaveRequest = {
+  id:           string;
+  email:        string;
+  type:         string;
+  startDate:    string;
+  endDate:      string;
+  durationDays: number;
+  reason:       string;
+  status:       string;
+  createdAt:    string;
+};
+
+export async function fetchAllLeaveRequestsAdmin(): Promise<AdminLeaveRequest[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(LEAVE_TABLE)
+    .select("id, email, type, startDate, endDate, durationDays, reason, status, createdAt")
+    .order("createdAt", { ascending: false });
+
+  if (error || !data) return [];
+  return data.map((r) => ({
+    id:           String(r.id),
+    email:        String(r.email),
+    type:         String(r.type),
+    startDate:    String(r.startDate),
+    endDate:      String(r.endDate),
+    durationDays: Number(r.durationDays),
+    reason:       String(r.reason ?? ""),
+    status:       String(r.status ?? "Pending"),
+    createdAt:    String(r.createdAt),
+  }));
+}
+
+export async function updateLeaveRequestStatus(
+  id: string,
+  status: "Approved" | "Rejected"
+): Promise<void> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from(LEAVE_TABLE)
+    .update({ status, updatedAt: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
 }
