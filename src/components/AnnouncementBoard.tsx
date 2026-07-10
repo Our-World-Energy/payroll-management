@@ -59,7 +59,7 @@ export function AnnouncementBoard() {
       : announcements.filter((a) => a.location === filterLocation);
 
   return (
-    <div className="lg:col-span-2 bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
+    <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Offshore Announcement</h4>

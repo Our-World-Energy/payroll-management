@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { LuDownload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw } from "react-icons/lu";
 import { fetchAllContractors } from "../contractors/actions";
+import { fetchHolidays, type Holiday } from "../holidays/actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -15,6 +16,8 @@ type PayrollRow = {
   email: string;
   name: string;
   country: string;
+  localHoliday: string;
+  localHolidayMinutes: number | null;
   department: string;
   payCategory: string;
   shiftType: string;
@@ -44,6 +47,16 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
 function countryFromLocation(location: string) {
   const parts = location.split(",");
   return parts[parts.length - 1]?.trim() || "-";
+}
+
+function formatHolidayDate(dateIso: string) {
+  const [y, m, d] = dateIso.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+}
+
+function formatLocalHolidays(matches: Holiday[]) {
+  if (matches.length === 0) return "-";
+  return matches.map((h) => `${formatHolidayDate(h.date)}: ${h.name}`).join("; ");
 }
 
 function formatMinutesAsHours(minutes: number) {
@@ -89,10 +102,11 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, holidays] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
+          fetchHolidays().catch(() => [] as Holiday[]),
         ]);
 
         if (!isMounted) return;
@@ -103,11 +117,13 @@ export default function PayrollPage() {
           if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
         }
 
-        const weekStatusByEmail = new Map<string, { requestStatus: string; completionMinutes: number | null }>(
+        const weekStatusByEmail = new Map<string, { requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null }>(
           (weekStatusResult.weekStatuses ?? [])
             .filter((s: { email?: string }) => s.email)
-            .map((s: { email: string; requestStatus: string; completionMinutes: number | null }) => [s.email.trim().toLowerCase(), s])
+            .map((s: { email: string; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null }) => [s.email.trim().toLowerCase(), s])
         );
+
+        const holidaysInWeek = holidays.filter((h) => h.date.slice(0, 10) >= rangeFrom && h.date.slice(0, 10) <= rangeTo);
 
         const nextRows: PayrollRow[] = contractors
           .filter((c) => c.email)
@@ -121,11 +137,15 @@ export default function PayrollPage() {
             const gross = hours != null ? hours * hourlyRate : null;
             const deductions = gross != null ? gross * DEDUCTION_RATE : null;
             const net = gross != null && deductions != null ? gross - deductions : null;
+            const country = countryFromLocation(c.location || "");
+            const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
 
             return {
               email,
               name: c.fullName || email,
-              country: countryFromLocation(c.location || ""),
+              country,
+              localHoliday,
+              localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
               department: c.department || "-",
               payCategory: c.payCategory || "-",
               shiftType: c.shiftType || "-",
@@ -334,7 +354,7 @@ export default function PayrollPage() {
           <table className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
-                {["Name", "Country", "Department", "Pay Category", "Shift Type", "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status"].map((h, i) => (
+                {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time", "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-r border-slate-100 last:border-r-0 ${
@@ -349,7 +369,7 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-5 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
@@ -360,6 +380,8 @@ export default function PayrollPage() {
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.shiftType}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.localHoliday}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.currency} {r.hourlyRate.toFixed(2)}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.hourlyRate.toFixed(2)}</td>

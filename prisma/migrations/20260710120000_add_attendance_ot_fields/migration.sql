@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "attendance_day_status"
+  ADD COLUMN "evaluatedRegularMinutes" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "regularOtMinutes" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "rdOtMinutes" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "hoOtMinutes" INTEGER NOT NULL DEFAULT 0;

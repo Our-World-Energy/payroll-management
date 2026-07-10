@@ -15,12 +15,20 @@ export function timeZoneForCountry(country: string): string | null {
   return COUNTRY_TIME_ZONES[country] ?? null;
 }
 
-// The UTC instant corresponding to midnight (00:00) on `dateIso` as observed
+// `location` is stored as free text like "Jalisco, Mexico" or just
+// "Philippines" — the country is always the last comma-separated part.
+export function countryFromLocation(location: string): string {
+  const parts = location.split(",");
+  return parts[parts.length - 1]?.trim() || "-";
+}
+
+// The UTC instant corresponding to `hour`:`minute` on `dateIso` as observed
 // in `timeZone`. Standard "zoned wall-clock time → UTC" conversion via Intl,
-// so it holds even for zones that observe DST.
-function utcInstantForMidnightInTz(dateIso: string, timeZone: string): Date {
+// so it holds even for zones that observe DST. `hour`/`minute` may overflow
+// (e.g. minute 65) — Date.UTC normalizes that correctly.
+export function utcInstantForLocalTime(dateIso: string, hour: number, minute: number, timeZone: string): Date {
   const [year, month, day] = dateIso.split("-").map(Number);
-  const utcGuess = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
 
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone, hour12: false,
@@ -32,6 +40,10 @@ function utcInstantForMidnightInTz(dateIso: string, timeZone: string): Date {
   const wallAsUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
   const offsetMs = wallAsUtc - utcGuess.getTime();
   return new Date(utcGuess.getTime() - offsetMs);
+}
+
+function utcInstantForMidnightInTz(dateIso: string, timeZone: string): Date {
+  return utcInstantForLocalTime(dateIso, 0, 0, timeZone);
 }
 
 // Wall-clock date+time parts as observed in `timeZone` at the given instant.

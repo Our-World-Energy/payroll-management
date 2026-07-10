@@ -5,44 +5,22 @@ import { useParams, useRouter } from "next/navigation";
 import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot } from "react-icons/lu";
 import { fetchAllContractors } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
+import { fetchLeaveRequestsForEmail, updateLeaveRequestStatus, type LeaveRequest } from "../actions";
 import { calculatePtoBalance, calculateSickLeaveBalance, roundBalance, fmtBalance } from "@/lib/timeOffBalances";
 
 type RequestDecision = "Approved" | "Pending" | "Declined";
-type RequestDecisionMap = Record<string, RequestDecision>;
 
-type LeaveType = "Annual Leave" | "Sick Leave" | "Unpaid Leave";
+function deriveLeaveStatus(type: string, days: number): string {
+  const t = type.toLowerCase();
+  if (t.includes("sick"))   return days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
+  if (t.includes("unpaid")) return "Unpaid Leave";
+  return days <= 0.5 ? "PTO Half Day" : "PTO";
+}
 
-type DummyRequest = {
-  id: string;
-  from: string;
-  to: string;
-  reason: string;
-  type: LeaveType;
-  days: number;
-  status: RequestDecision;
-};
-
-const DUMMY_REQUESTS: DummyRequest[] = [
-  { id: "TOR-001", from: "2026-01-06", to: "2026-01-08", reason: "Family vacation planned in advance.", type: "Annual Leave",  days: 3,   status: "Approved" },
-  { id: "TOR-002", from: "2026-02-14", to: "2026-02-14", reason: "Personal day off.",                  type: "Annual Leave",  days: 0.5, status: "Pending"  },
-  { id: "TOR-003", from: "2026-03-03", to: "2026-03-05", reason: "Medical appointment and recovery.",  type: "Sick Leave",    days: 3,   status: "Declined" },
-  { id: "TOR-004", from: "2026-04-21", to: "2026-04-23", reason: "Attending a family event out of town.", type: "Annual Leave", days: 3, status: "Approved" },
-  { id: "TOR-005", from: "2026-05-18", to: "2026-05-18", reason: "Sick leave — fever.",               type: "Sick Leave",    days: 0.5, status: "Pending"  },
-];
-
-const DUMMY_HISTORY: DummyRequest[] = [
-  { id: "TOR-H01", from: "2025-03-10", to: "2025-03-12", reason: "Annual family trip.",               type: "Annual Leave",  days: 3,   status: "Approved" },
-  { id: "TOR-H02", from: "2025-05-05", to: "2025-05-05", reason: "Doctor visit.",                     type: "Sick Leave",    days: 1,   status: "Approved" },
-  { id: "TOR-H03", from: "2025-07-14", to: "2025-07-18", reason: "Summer vacation.",                  type: "Annual Leave",  days: 5,   status: "Approved" },
-  { id: "TOR-H04", from: "2025-09-22", to: "2025-09-22", reason: "Personal errand.",                  type: "Annual Leave",  days: 0.5, status: "Declined" },
-  { id: "TOR-H05", from: "2025-11-03", to: "2025-11-05", reason: "Extended sick leave.",              type: "Sick Leave",    days: 3,   status: "Approved" },
-  { id: "TOR-H06", from: "2025-12-24", to: "2025-12-26", reason: "Holiday travel.",                   type: "Unpaid Leave",  days: 3,   status: "Approved" },
-];
-
-function deriveLeaveStatus(req: DummyRequest): string {
-  if (req.type === "Annual Leave") return req.days <= 0.5 ? "PTO Half Day" : "PTO";
-  if (req.type === "Sick Leave")   return req.days <= 0.5 ? "Sick Leave Half Day" : "Sick Leave";
-  return "Unpaid Leave";
+function normalizeStatus(status: string): RequestDecision {
+  if (status === "Rejected") return "Declined";
+  if (status === "Approved") return "Approved";
+  return "Pending";
 }
 
 function fmtDate(date: string) {
@@ -57,18 +35,22 @@ export default function ContractorTimeOffPage() {
   const router = useRouter();
 
   const [contractor, setContractor] = useState<Contractor | null>(null);
+  const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
-  const [decisions, setDecisions] = useState<RequestDecisionMap>({});
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   useEffect(() => {
     let active = true;
     async function load() {
       try {
         const all = await fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] });
-        if (active) {
-          const found = all.find((c) => c.uid === id) ?? null;
-          setContractor(found);
-        }
+        if (!active) return;
+        const found = all.find((c) => c.uid === id) ?? null;
+        setContractor(found);
+        const email = found?.email?.trim();
+        const reqs = email ? await fetchLeaveRequestsForEmail(email) : [];
+        if (active) setRequests(reqs);
       } finally {
         if (active) setLoading(false);
       }
@@ -84,15 +66,26 @@ export default function ContractorTimeOffPage() {
   const country = contractor?.location?.split(",").map((p) => p.trim()).filter(Boolean).at(-1) ?? "";
   const isIndia = country.toLowerCase() === "india";
 
-  const requests = DUMMY_REQUESTS;
-
-  function decide(reqId: string, decision: "Approved" | "Declined") {
-    setDecisions((cur) => ({ ...cur, [reqId]: decision }));
+  async function decide(reqId: string, decision: "Approved" | "Declined") {
+    const dbStatus = decision === "Declined" ? "Rejected" : "Approved";
+    setActionError("");
+    setUpdatingId(reqId);
+    try {
+      await updateLeaveRequestStatus(reqId, dbStatus);
+      setRequests((prev) => prev.map((r) => (r.id === reqId ? { ...r, status: dbStatus } : r)));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update the request.");
+    } finally {
+      setUpdatingId(null);
+    }
   }
 
-  function effectiveStatus(req: DummyRequest): RequestDecision {
-    return decisions[req.id] ?? req.status;
+  function effectiveStatus(req: LeaveRequest): RequestDecision {
+    return normalizeStatus(req.status);
   }
+
+  const currentRequests = requests.filter((r) => effectiveStatus(r) === "Pending");
+  const historicalRequests = requests.filter((r) => effectiveStatus(r) !== "Pending");
 
   if (loading) {
     return (
@@ -174,6 +167,12 @@ export default function ContractorTimeOffPage() {
         </div>
       </div>
 
+      {actionError && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          {actionError}
+        </div>
+      )}
+
       {/* Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -188,21 +187,21 @@ export default function ContractorTimeOffPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {requests.length === 0 ? (
+              {currentRequests.length === 0 ? (
                 <tr>
                   <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     No time-off requests found.
                   </td>
                 </tr>
-              ) : requests.map((req) => {
+              ) : currentRequests.map((req) => {
                 const status = effectiveStatus(req);
-                const blocked = isIndia && req.type !== "Sick Leave";
+                const blocked = isIndia && !req.type.toLowerCase().includes("sick");
                 return (
                   <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
                     <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
@@ -216,7 +215,7 @@ export default function ContractorTimeOffPage() {
                     </td>
                     <td className="px-5 py-4 whitespace-nowrap">
                       {(() => {
-                        const ls = deriveLeaveStatus(req);
+                        const ls = deriveLeaveStatus(req.type, req.durationDays);
                         return (
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
                             ls === "PTO"                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
@@ -251,14 +250,14 @@ export default function ContractorTimeOffPage() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => decide(req.id, "Declined")}
-                          disabled={status === "Declined" || blocked}
+                          disabled={blocked || updatingId === req.id}
                           className="px-4 py-1.5 bg-red-400 hover:bg-red-500 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
                         >
                           Decline
                         </button>
                         <button
                           onClick={() => decide(req.id, "Approved")}
-                          disabled={status === "Approved" || blocked}
+                          disabled={blocked || updatingId === req.id}
                           className="px-4 py-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-40"
                         >
                           Approve
@@ -292,21 +291,22 @@ export default function ContractorTimeOffPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {DUMMY_HISTORY.length === 0 ? (
+                {historicalRequests.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-5 py-16 text-center text-sm text-slate-400">
                       <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                       No historical requests found.
                     </td>
                   </tr>
-                ) : DUMMY_HISTORY.map((req) => {
-                  const ls = deriveLeaveStatus(req);
-                  const blocked = isIndia && req.type !== "Sick Leave";
+                ) : historicalRequests.map((req) => {
+                  const ls = deriveLeaveStatus(req.type, req.durationDays);
+                  const reviewStatus = effectiveStatus(req);
+                  const blocked = isIndia && !req.type.toLowerCase().includes("sick");
                   return (
                     <tr key={req.id} className={`transition-colors ${blocked ? "opacity-40 bg-slate-50" : "hover:bg-slate-50"}`}>
                       <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.from)}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.to)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
                       <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                         <span className="line-clamp-2">{req.reason || "-"}</span>
                       </td>
@@ -323,11 +323,11 @@ export default function ContractorTimeOffPage() {
                       </td>
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          req.status === "Approved" ? "bg-green-50 text-green-700 border border-green-200" :
-                          req.status === "Declined" ? "bg-red-50 text-red-600 border border-red-200"       :
+                          reviewStatus === "Approved" ? "bg-green-50 text-green-700 border border-green-200" :
+                          reviewStatus === "Declined" ? "bg-red-50 text-red-600 border border-red-200"       :
                                                       "bg-amber-50 text-amber-600 border border-amber-200"
                         }`}>
-                          {req.status}
+                          {reviewStatus}
                         </span>
                       </td>
                     </tr>

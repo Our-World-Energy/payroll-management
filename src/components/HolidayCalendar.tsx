@@ -266,9 +266,12 @@ export function HolidayCalendar() {
     ? holidays
     : holidays.filter(h => h.country === filterCountry);
 
-  const upcoming = [...holidays]
-    .filter(h => h.date >= todayStr)
-    .slice(0, 4);
+  // Widget card shows every holiday in the CURRENT calendar month (not just
+  // upcoming ones), sorted chronologically.
+  const currentMonthPrefix = todayStr.slice(0, 7);
+  const thisMonthHolidays = [...holidays]
+    .filter(h => h.date.startsWith(currentMonthPrefix))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   const calendarModal = (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -594,14 +597,14 @@ export function HolidayCalendar() {
           <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Holidays</h4>
           <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
         </div>
-        <div className="space-y-3 flex-1">
+        <div className="space-y-3 flex-1 max-h-64 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-6">
               <LuLoader size={22} className="text-slate-300 animate-spin" />
             </div>
-          ) : upcoming.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">No upcoming holidays.</p>
-          ) : upcoming.map((h) => {
+          ) : thisMonthHolidays.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">No holidays this month.</p>
+          ) : thisMonthHolidays.map((h) => {
             const [y, mo, d] = h.date.split("-");
             const dateLabel = `${MONTHS[parseInt(mo)-1].slice(0,3)} ${parseInt(d)}, ${y}`;
             return (

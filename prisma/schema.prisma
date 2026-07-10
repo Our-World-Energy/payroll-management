@@ -335,6 +335,12 @@ model AttendanceWeekStatus {
   requestStatus        AttendanceRequestStatus @default(NOT_SET)
   manualAdjustmentTime Int                     @default(0)
   completionMinutes    Int?
+  totalLocalHolidayMinutes Int?                                    // sum of the week's per-day "Local HO Time"
+  totalEvaluatedRegularMinutes Int      @default(0)                // sum of the week's per-day "Evaluated Regular Time"
+  totalUsHoMinutes     Int                     @default(0)         // sum of the week's per-day "US HO Time"
+  totalRegularOtMinutes Int                    @default(0)         // sum of the week's per-day "Regular OT Time"
+  totalRdOtMinutes     Int                     @default(0)         // sum of the week's per-day "RD OT Time"
+  totalHoOtMinutes     Int                     @default(0)         // sum of the week's per-day "HO OT Time"
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())
 
@@ -367,7 +373,13 @@ model AttendanceDayStatus {
   decisionStatus       AttendanceRequestStatus @default(NOT_SET) // "Approval Status"
   evaluatedMinutes     Int                     @default(0)       // "Evaluated Time"
   adjustedMinutes      Int?                                       // "Adjusted Time" (null = no manual override)
-  holidayMinutes       Int                     @default(0)       // "Holiday Time"
+  holidayMinutes       Int                     @default(0)       // "US HO Time"
+  localHoliday         String?                                    // "Local HO" (holiday name for the contractor's own country)
+  localHolidayMinutes  Int?                                       // "Local HO Time"
+  evaluatedRegularMinutes Int                  @default(0)       // "Evaluated Regular Time"
+  regularOtMinutes     Int                     @default(0)       // "Regular OT Time"
+  rdOtMinutes          Int                     @default(0)       // "RD OT Time"
+  hoOtMinutes          Int                     @default(0)       // "HO OT Time"
   timeOffStatus        TimeOffKind             @default(NOT_SET) // "Time Off Status"
   timeOffMinutes       Int                     @default(0)       // "Time Off Time"
   manualAdjustmentTime Int                     @default(0)

@@ -459,7 +459,8 @@ export default function ContractorsPage() {
                     <th key={h}
                       className={`px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap ${
                         i < COLS.slice(2).length - 1 ? "border-r border-white/20" : ""
-                      }`}>
+                      } ${h === "Action" ? "sticky right-0 z-20 border-l border-white/20" : ""}`}
+                      style={h === "Action" ? { background: "#003527" } : undefined}>
                       {h}
                     </th>
                   ))}
@@ -482,7 +483,7 @@ export default function ContractorsPage() {
                           <div className="h-3 bg-slate-100 rounded w-16" />
                         </td>
                       ))}
-                      <td className="px-4 py-3" />
+                      <td className="px-4 py-3 sticky right-0 bg-white border-l border-slate-200" />
                     </tr>
                   ))
                 ) : rows.length === 0 ? (
@@ -551,7 +552,7 @@ export default function ContractorsPage() {
                         ? <span className="text-red-500">{c.dismissalReason}</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
-                    <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <td className="px-4 py-2.5 text-right whitespace-nowrap sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => setEditTarget(c)}

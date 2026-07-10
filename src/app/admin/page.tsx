@@ -6,7 +6,9 @@ import { LuTrendingUp, LuTriangleAlert, LuX, LuClock } from "react-icons/lu";
 import { getDashboardMetrics } from "@/lib/data";
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
+import { BirthdayCalendar } from "@/components/BirthdayCalendar";
 import { fetchAllContractors } from "./contractors/actions";
+import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 
 type AbsentRow = {
   name: string;
@@ -19,8 +21,21 @@ type LateRow = {
   name: string;
   department: string;
   date: string;
-  mins: number;
+  detail: string;
 };
+
+// contractor_profiles.shiftHours is free text like "9:00 AM to 6:00 PM"
+// (or "Flexible" for non-Fixed shifts) — pull the leading start time out of it.
+function parseShiftStart(shiftHours: string): { hour: number; minute: number } | null {
+  const first = shiftHours.split(" to ")[0]?.trim();
+  const m = first?.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let hour = Number(m[1]) % 12;
+  if (m[3].toUpperCase() === "PM") hour += 12;
+  return { hour, minute: Number(m[2]) };
+}
+
+const LATE_GRACE_MINUTES = 10;
 
 export default function AdminPage() {
   const m = getDashboardMetrics();
@@ -43,9 +58,10 @@ export default function AdminPage() {
       ].join("-");
 
       try {
-        const [entriesRes, contractors] = await Promise.all([
+        const [entriesRes, contractors, dailyLogRes] = await Promise.all([
           fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
+          fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
         ]);
 
         const minutesByEmail = new Map<string, number>();
@@ -53,6 +69,13 @@ export default function AdminPage() {
           const email = String(e.email ?? "").trim().toLowerCase();
           if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
         }
+
+        const firstInByEmail = new Map<string, Date>();
+        for (const log of (dailyLogRes.logs ?? [])) {
+          const email = String(log.email ?? "").trim().toLowerCase();
+          if (email && log.firstIn) firstInByEmail.set(email, new Date(log.firstIn));
+        }
+
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
 
         // Absent = no actual Worksnap time logged today at all (matches the same
@@ -64,19 +87,34 @@ export default function AdminPage() {
             .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: "Absent" }))
         );
 
-        setLateRows(
-          activeContractors
-            .filter((c) => {
-              const mins = minutesByEmail.get(c.email!.trim().toLowerCase()) ?? 0;
-              return mins > 0 && mins < 480;
-            })
-            .map((c) => ({
-              name: c.fullName,
-              department: c.department,
-              date: todayLocal,
-              mins: minutesByEmail.get(c.email!.trim().toLowerCase()) ?? 0,
-            }))
-        );
+        // Late Today only applies to Fixed shift contractors — real check:
+        // firstIn (worksnap_daily_log) vs the contractor's own Shift Start
+        // (contractor_profiles.shiftHours), in Arizona time, with a 10-minute
+        // grace period. Flexible shift contractors have no fixed start time
+        // to be late against, so they're excluded from Late Today entirely.
+        const lateRows: LateRow[] = [];
+        for (const c of activeContractors) {
+          const isFixed = (c.shiftType || "").trim().toLowerCase() === "fixed";
+          if (!isFixed) continue;
+
+          const email = c.email!.trim().toLowerCase();
+          const firstIn = firstInByEmail.get(email);
+          const shiftStart = parseShiftStart(c.shiftHours || "");
+          if (!firstIn || !shiftStart) continue; // no clock-in yet today, or no parsable shift start
+
+          // Shift Start (from Contractor Profile) and firstIn are both
+          // compared in Arizona time — the same reference frame the Task
+          // Breakdown modal already displays First In/Last Out in.
+          const shiftStartInstant = utcInstantForLocalTime(todayLocal, shiftStart.hour, shiftStart.minute, ARIZONA_TIME_ZONE);
+          const thresholdInstant = utcInstantForLocalTime(todayLocal, shiftStart.hour, shiftStart.minute + LATE_GRACE_MINUTES, ARIZONA_TIME_ZONE);
+
+          if (firstIn.getTime() > thresholdInstant.getTime()) {
+            const lateByMinutes = Math.round((firstIn.getTime() - shiftStartInstant.getTime()) / 60000);
+            const loginLabel = firstIn.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ARIZONA_TIME_ZONE });
+            lateRows.push({ name: c.fullName, department: c.department, date: todayLocal, detail: `Logged in ${loginLabel} (${lateByMinutes} min late)` });
+          }
+        }
+        setLateRows(lateRows);
       } catch {
         // silently fail — keep empty lists
       }
@@ -87,11 +125,11 @@ export default function AdminPage() {
 
   const METRICS = [
     { label: "Active Total Contractors", value: m.totalActive,   delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
-    { label: "US Region",                value: m.us,            sub: "Headquarters & Field",   href: "/admin/contractors", highlight: false },
     { label: "Philippines",              value: m.philippines,   sub: "Support & Logistics",    href: "/admin/contractors", highlight: false },
     { label: "Mexico",                   value: m.mexico,        sub: "Manufacturing & Solar",  href: "/admin/contractors", highlight: false },
     { label: "India",                    value: m.india,         sub: "Tech & Engineering",     href: "/admin/contractors", highlight: false },
-    { label: "PTO Today",                value: m.ptoToday,      sub: "Approved requests",      href: "/admin/time-off",    highlight: false },
+    { label: "Guatemala",                value: m.guatemala,     sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
+    { label: "PTO Today",                value: m.ptoToday,      sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
   ];
 
   return (
@@ -116,6 +154,17 @@ export default function AdminPage() {
                   <LuTrendingUp size={14} strokeWidth={2} />
                   {card.delta}
                 </div>
+              </Link>
+            );
+          }
+          if (card.accent) {
+            return (
+              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
+                <div>
+                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
+                  <p className="text-3xl font-bold text-blue-700 mt-1">{card.value}</p>
+                </div>
+                <p className="mt-4 text-xs text-blue-400">{card.sub}</p>
               </Link>
             );
           }
@@ -168,6 +217,9 @@ export default function AdminPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">
         {/* Announcement */}
         <AnnouncementBoard />
+
+        {/* Birthdays */}
+        <BirthdayCalendar />
 
         {/* Holidays */}
         <HolidayCalendar />
@@ -236,7 +288,7 @@ export default function AdminPage() {
             <div className="flex items-start justify-between px-6 py-5 bg-amber-600">
               <div>
                 <h3 className="text-lg font-bold text-white">Late Today</h3>
-                <p className="text-sm text-amber-100 mt-0.5">{lateRows.length} contractor{lateRows.length !== 1 ? "s" : ""} with partial time logged</p>
+                <p className="text-sm text-amber-100 mt-0.5">{lateRows.length} contractor{lateRows.length !== 1 ? "s" : ""} flagged today</p>
               </div>
               <button
                 onClick={() => setShowLateModal(false)}
@@ -249,7 +301,7 @@ export default function AdminPage() {
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
-                    {["Name", "Department", "Date", "Mins Logged"].map((h) => (
+                    {["Name", "Department", "Date", "Detail"].map((h) => (
                       <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -266,7 +318,7 @@ export default function AdminPage() {
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
                       <td className="px-5 py-3">
                         <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-amber-100 text-amber-700">
-                          {row.mins} mins
+                          {row.detail}
                         </span>
                       </td>
                     </tr>

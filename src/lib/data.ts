@@ -100,6 +100,7 @@ export function getDashboardMetrics() {
     philippines:  byRegion("Philippines"),
     mexico:       byRegion("Mexico"),
     india:        byRegion("India"),
+    guatemala:    byRegion("Guatemala"),
     ptoToday,
     absentToday,
   };

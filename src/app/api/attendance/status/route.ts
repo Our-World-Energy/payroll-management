@@ -12,6 +12,7 @@ import { requireAdmin } from "@/lib/auth";
  *     worksnapUserId, email?, week: "YYYY-MM-DD",
  *     requestStatus?, completionMinutes?,
  *     days: [ { date, decisionStatus?, evaluatedMinutes?, adjustedMinutes?, holidayMinutes?,
+ *               localHoliday?, localHolidayMinutes?,
  *               timeOffStatus?, timeOffMinutes?, manualAdjustmentTime?, note? } ]
  *   }
  */
@@ -34,6 +35,12 @@ type DayInput = {
   evaluatedMinutes?: unknown;
   adjustedMinutes?: unknown;
   holidayMinutes?: unknown;
+  localHoliday?: unknown;
+  localHolidayMinutes?: unknown;
+  evaluatedRegularMinutes?: unknown;
+  regularOtMinutes?: unknown;
+  rdOtMinutes?: unknown;
+  hoOtMinutes?: unknown;
   timeOffStatus?: unknown;
   timeOffMinutes?: unknown;
   manualAdjustmentTime?: unknown;
@@ -58,12 +65,31 @@ export async function POST(request: Request) {
   const completionMinutes = Number.isFinite(Number(body.completionMinutes)) ? Math.trunc(Number(body.completionMinutes)) : null;
   const days = Array.isArray(body.days) ? (body.days as DayInput[]) : [];
 
+  // Derived from the same per-day values being saved below, so the week totals
+  // can never drift from their own days.
+  const localHolidayMinutesPerDay = days.map((d) => asNullableInt(d.localHolidayMinutes));
+  const totalLocalHolidayMinutes = localHolidayMinutesPerDay.some((v) => v != null)
+    ? localHolidayMinutesPerDay.reduce((sum: number, v) => sum + (v ?? 0), 0)
+    : null;
+  const sumDayField = (field: keyof DayInput) => days.reduce((sum: number, d) => sum + asInt(d[field]), 0);
+  const totalEvaluatedRegularMinutes = sumDayField("evaluatedRegularMinutes");
+  const totalUsHoMinutes = sumDayField("holidayMinutes");
+  const totalRegularOtMinutes = sumDayField("regularOtMinutes");
+  const totalRdOtMinutes = sumDayField("rdOtMinutes");
+  const totalHoOtMinutes = sumDayField("hoOtMinutes");
+
   await prisma.$transaction([
     // week-level request status + saved completion time
     prisma.attendanceWeekStatus.upsert({
       where: { attendance_week_key: { worksnapUserId, weekStart } },
-      create: { worksnapUserId, email, weekStart, requestStatus, completionMinutes },
-      update: { email, requestStatus, completionMinutes },
+      create: {
+        worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
+        totalEvaluatedRegularMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+      },
+      update: {
+        email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
+        totalEvaluatedRegularMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+      },
     }),
     // per-day attendance review snapshot
     ...days
@@ -74,11 +100,21 @@ export async function POST(request: Request) {
         const evaluatedMinutes = asInt(d.evaluatedMinutes);
         const adjustedMinutes = asNullableInt(d.adjustedMinutes);
         const holidayMinutes = asInt(d.holidayMinutes);
+        const localHoliday = typeof d.localHoliday === "string" && d.localHoliday.trim() ? d.localHoliday.trim() : null;
+        const localHolidayMinutes = asNullableInt(d.localHolidayMinutes);
+        const evaluatedRegularMinutes = asInt(d.evaluatedRegularMinutes);
+        const regularOtMinutes = asInt(d.regularOtMinutes);
+        const rdOtMinutes = asInt(d.rdOtMinutes);
+        const hoOtMinutes = asInt(d.hoOtMinutes);
         const timeOffStatus = asTimeOff(d.timeOffStatus);
         const timeOffMinutes = asInt(d.timeOffMinutes);
         const manualAdjustmentTime = asInt(d.manualAdjustmentTime);
         const note = typeof d.note === "string" && d.note.trim() ? d.note.trim() : null;
-        const fields = { email, decisionStatus, evaluatedMinutes, adjustedMinutes, holidayMinutes, timeOffStatus, timeOffMinutes, manualAdjustmentTime, note };
+        const fields = {
+          email, decisionStatus, evaluatedMinutes, adjustedMinutes, holidayMinutes, localHoliday, localHolidayMinutes,
+          evaluatedRegularMinutes, regularOtMinutes, rdOtMinutes, hoOtMinutes,
+          timeOffStatus, timeOffMinutes, manualAdjustmentTime, note,
+        };
         return prisma.attendanceDayStatus.upsert({
           where: { attendance_day_key: { worksnapUserId, date } },
           create: { worksnapUserId, date, ...fields },

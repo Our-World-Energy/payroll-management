@@ -23,7 +23,10 @@ export async function GET(request: Request) {
 
   const rows = await prisma.attendanceWeekStatus.findMany({
     where: { weekStart },
-    select: { worksnapUserId: true, email: true, requestStatus: true, completionMinutes: true },
+    select: {
+      worksnapUserId: true, email: true, requestStatus: true, completionMinutes: true, totalLocalHolidayMinutes: true,
+      totalEvaluatedRegularMinutes: true, totalUsHoMinutes: true, totalRegularOtMinutes: true, totalRdOtMinutes: true, totalHoOtMinutes: true,
+    },
   });
 
   return Response.json({ weekStatuses: rows });
