@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
 
 function getSupabase() {
   return createClient(
@@ -83,7 +84,7 @@ export async function fetchLeaveRequests(email: string): Promise<LeaveRequest[]>
 
 export async function submitLeaveRequest(params: {
   email:       string;
-  type:        "PTO" | "Sick Leave";
+  type:        "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day";
   startDate:   string;
   endDate:     string;
   durationDays: number;
@@ -92,17 +93,21 @@ export async function submitLeaveRequest(params: {
   const sb = getSupabase();
 
   const now = new Date().toISOString();
+  const hours = leaveTypeHours(params.type);
+  const isPto = isPtoLeaveType(params.type);
   const { error } = await sb.from(LEAVE_TABLE).insert({
-    id:           crypto.randomUUID(),
-    email:        params.email,
-    type:         params.type,
-    startDate:    params.startDate,
-    endDate:      params.endDate,
-    durationDays: params.durationDays,
-    reason:       params.reason,
-    status:       "Pending",
-    createdAt:    now,
-    updatedAt:    now,
+    id:                 crypto.randomUUID(),
+    email:              params.email,
+    type:               params.type,
+    startDate:          params.startDate,
+    endDate:            params.endDate,
+    durationDays:       params.durationDays,
+    reason:             params.reason,
+    status:             "Pending",
+    ptoUsedHours:       isPto ? hours : 0,
+    sickLeaveUsedHours: isPto ? 0 : hours,
+    createdAt:          now,
+    updatedAt:          now,
   });
 
   if (error) return { ok: false, error: error.message };

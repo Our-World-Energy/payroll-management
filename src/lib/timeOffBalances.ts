@@ -7,6 +7,26 @@ const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 
 export const HOURS_PER_DAY = 8;
 
+// Fixed deduction per leave request, independent of the date range selected —
+// "PTO"/"Sick Leave" = 1 full day, "* Half Day" = half a day. Not scaled by
+// durationDays. Shared by the contractor submission flow (to stamp a request
+// with its hours at creation time) and the admin approval flow (to deduct
+// those same stored hours from PTO Used / Sick Leave Used).
+export const LEAVE_TYPE_HOURS: Record<string, number> = {
+  "PTO": 8,
+  "PTO Half Day": 4,
+  "Sick Leave": 8,
+  "Sick Leave Half Day": 4,
+};
+
+export function leaveTypeHours(type: string): number {
+  return LEAVE_TYPE_HOURS[type] ?? 8;
+}
+
+export function isPtoLeaveType(type: string): boolean {
+  return type.startsWith("PTO");
+}
+
 export type RequestDecision = "Approved" | "Pending" | "Rejected";
 export type RequestDecisionMap = Record<string, RequestDecision>;
 

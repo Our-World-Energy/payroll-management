@@ -8,6 +8,7 @@ import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabe
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
+import { fetchAllLeaveRequestsAdmin, type AdminLeaveRequest } from "../contractors/actions";
 
 
 function formatDayLabel(date: string) {
@@ -229,6 +230,34 @@ function timeOffTimeFor(timeOffStatus: string) {
   if (timeOffStatus === "Sick Leave Half Day" || timeOffStatus === "PTO Half Day") return "240 mins";
   if (timeOffStatus === "Unpaid Leave") return "0 mins";
   return "-";
+}
+
+// Portal leave request (if any) covering this date — "PTO" | "PTO Half Day" |
+// "Sick Leave" | "Sick Leave Half Day", from contractor_leave_requests.type.
+function timeOffRequestTypeFor(date: string, leaveRequests: AdminLeaveRequest[]) {
+  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
+  return match?.type ?? "-";
+}
+
+// Minutes for that same matched request — PTO types read ptoUsedHours, Sick
+// Leave types read sickLeaveUsedHours, converted hours → minutes.
+function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
+  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
+  if (!match) return "-";
+  const hours = match.type.startsWith("PTO") ? match.ptoUsedHours : match.sickLeaveUsedHours;
+  return `${Math.round(hours * 60)} mins`;
+}
+
+// Week total — sums each DISTINCT request that overlaps the week once (not
+// once per day it covers), since a request's hours are a flat per-request
+// amount, not scaled by how many days it spans.
+function totalTimeOffRequestMinutesFor(weekDates: string[], leaveRequests: AdminLeaveRequest[]) {
+  const weekStart = weekDates[0];
+  const weekEnd = weekDates[weekDates.length - 1];
+  if (!weekStart || !weekEnd) return 0;
+  return leaveRequests
+    .filter((r) => r.startDate <= weekEnd && r.endDate >= weekStart)
+    .reduce((sum, r) => sum + (r.type.startsWith("PTO") ? r.ptoUsedHours : r.sickLeaveUsedHours) * 60, 0);
 }
 
 function completionTimeFor(evaluatedTime: string, adjustedTime: string, timeOffTime: string, holidayTime = "-", rdOtTime = "-") {
@@ -767,6 +796,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const [adjustedTimes, setAdjustedTimes] = useState<Record<string, string>>({});
   const [editingAdjustedDate, setEditingAdjustedDate] = useState<string | null>(null);
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
   const contractor = CONTRACTORS.find((item) => item.id === record.contractorId || item.name === record.name);
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
@@ -829,12 +859,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Regular Time", "Evaluated Regular Time", "Evaluated Time", "Adjusted Time", "US HO Time", "Local HO", "Local HO Time", "Regular OT Time", "RD OT Time", "HO OT Time", "Time Off Status", "Time Off Time", "Completion Time", "Approval Status"]
-    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Time")));
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Regular Time", "Evaluated Regular Time", "Evaluated Time", "Adjusted Time", "US HO Time", "Local HO", "Local HO Time", "Regular OT Time", "RD OT Time", "HO OT Time", "Time Off Status", "Time Off Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
+    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Time" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
     0
   );
+  const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(weekDates, leaveRequests);
   const otTotals = weekDates.reduce(
     (totals, date) => {
       const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -945,6 +976,22 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
 
     return () => { isCancelled = true; };
   }, [record, weekDates]);
+
+  // Leave requests submitted through the contractor portal, matched to this
+  // week's days by date range, so "Time Off Request" can show what type of
+  // leave (if any) was requested for that day.
+  useEffect(() => {
+    const email = record.role.includes("@") ? record.role : "";
+    if (!email) { setLeaveRequests([]); return; }
+    let isCancelled = false;
+    fetchAllLeaveRequestsAdmin()
+      .then((all) => {
+        if (!isCancelled) setLeaveRequests(all.filter((r) => r.email === email));
+      })
+      .catch(() => { if (!isCancelled) setLeaveRequests([]); });
+
+    return () => { isCancelled = true; };
+  }, [record]);
 
   useEffect(() => {
     setAdjustedTimes((current) => weekDates.reduce<Record<string, string>>((times, date) => {
@@ -1266,6 +1313,16 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             {timeOffTime}
                           </td>
                         )}
+                        {!isIndia && (
+                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                            {timeOffRequestTypeFor(date, leaveRequests)}
+                          </td>
+                        )}
+                        {!isIndia && (
+                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                            {timeOffRequestMinutesFor(date, leaveRequests)}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-slate-600">
                           {completionTime}
                         </td>
@@ -1295,11 +1352,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100">
                       {totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(totalEvaluatedRegularMinutes) : "-"}
                     </td>
-                    {!isIndia && (
-                      <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
-                        {formatMinutesAsMins(totalEvaluatedMinutes)}
-                      </td>
-                    )}
+                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
+                      {totalEvaluatedMinutes > 0 ? formatMinutesAsMins(totalEvaluatedMinutes) : "-"}
+                    </td>
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
                     </td>
@@ -1326,9 +1381,21 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
-                      -
-                    </td>
+                    {!isIndia && (
+                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                        -
+                      </td>
+                    )}
+                    {!isIndia && (
+                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                        -
+                      </td>
+                    )}
+                    {!isIndia && (
+                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                        {totalTimeOffRequestMinutes > 0 ? formatMinutesAsMins(totalTimeOffRequestMinutes) : "-"}
+                      </td>
+                    )}
                     <td className="px-4 py-3 font-bold text-slate-900">
                       {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
@@ -1347,6 +1414,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
                           {formatMinutesAsMins(offsetCredit || appliedOffsetCredit)}
                         </td>
@@ -1357,6 +1431,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           Net Time
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
@@ -1833,6 +1914,7 @@ export default function AttendancePage() {
   const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
   const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
   const [allHolidays, setAllHolidays] = useState<HolidayEntry[]>([]);
+  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
 
   // Weekly Time Tracking has a wide table — mirror its horizontal scrollbar
   // at the top too (not just below the table) so it's reachable without
@@ -1879,6 +1961,12 @@ export default function AttendancePage() {
         setUsaHolidays(holidays.filter((h) => h.country === "United States"));
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchAllLeaveRequestsAdmin()
+      .then(setLeaveRequests)
+      .catch(() => setLeaveRequests([]));
   }, []);
 
   // Week selector = recent Sun→Sat weeks in Arizona time, anchored to the
@@ -2141,6 +2229,15 @@ export default function AttendancePage() {
                 </button>
                 {showRangePicker && <WeekJumpDropdown onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
+              <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
+              <select
+                value={week}
+                onChange={(e) => setWeek(e.target.value)}
+                title="Select any week from the last few months, including previous months"
+                className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
+              </select>
             </div>
           </div>
 
@@ -2224,6 +2321,7 @@ export default function AttendancePage() {
                 {[
                   "Contractor", "Department", "Actual Time", "Completion Time", "Total Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time",
+                  "Total Time Off Request Time",
                   "Variance", "Status", "Actions",
                 ].map((h) => (
                   <th
@@ -2250,7 +2348,7 @@ export default function AttendancePage() {
             <tbody>
               {filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={14} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     {attendanceRows.length === 0 ? "No Worksnap entries found for weekly tracking." : "No weekly tracking rows match your search."}
                   </td>
                 </tr>
@@ -2383,6 +2481,21 @@ export default function AttendancePage() {
                       ) : (
                         <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalHoOtMinutes)}</span>
                       )}
+                    </td>
+
+                    {/* Total Time Off Request Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                      {(() => {
+                        const rowEmail = row.role.includes("@") ? row.role : "";
+                        const minutes = rowEmail
+                          ? totalTimeOffRequestMinutesFor(weekDates, leaveRequests.filter((r) => r.email === rowEmail))
+                          : 0;
+                        return isOnLeave || minutes === 0 ? (
+                          <span className="text-sm text-slate-400">—</span>
+                        ) : (
+                          <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(minutes)}</span>
+                        );
+                      })()}
                     </td>
 
                     {/* Variance */}

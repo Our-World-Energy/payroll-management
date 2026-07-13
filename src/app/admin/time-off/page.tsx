@@ -310,24 +310,6 @@ export default function TimeOffPage() {
                 </button>
               </div>
 
-              {/* Balance summary bar */}
-              <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-2 divide-x divide-slate-100"} border-b border-slate-100`}>
-                {!isRowIndia && (
-                  <div className="px-5 py-3">
-                    <p className="text-[10px] font-semibold text-teal-600 uppercase tracking-wider">PTO Accrual Available</p>
-                    <p className="text-2xl font-black text-[#003527] leading-tight">{fmtBalance(selectedRow.ptoAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
-                    <BalanceBar used={selectedRow.ptoUsed} total={selectedRow.ptoBalance} color="bg-teal-500" />
-                    <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.ptoUsed)}h used of {fmtBalance(selectedRow.ptoBalance)}h</p>
-                  </div>
-                )}
-                <div className="px-5 py-3">
-                  <p className="text-[10px] font-semibold text-orange-600 uppercase tracking-wider">Sick Accrual Available</p>
-                  <p className="text-2xl font-black text-orange-600 leading-tight">{fmtBalance(selectedRow.sickLeaveAvailable)}<span className="text-sm font-semibold ml-1 text-slate-400">hrs</span></p>
-                  <BalanceBar used={selectedRow.sickLeaveUsed} total={selectedRow.sickLeaveBalance} color="bg-orange-400" />
-                  <p className="text-[10px] text-slate-400 mt-1">{fmtBalance(selectedRow.sickLeaveUsed)}h used of {fmtBalance(selectedRow.sickLeaveBalance)}h</p>
-                </div>
-              </div>
-
               {/* Tabs */}
               <div className="flex border-b border-slate-100 px-6">
                 {([
@@ -357,7 +339,7 @@ export default function TimeOffPage() {
                       {([
                         ["Hire Date",      fmtDate(selectedRow.hireDate)],
                         ["Status Request", selectedRow.latestRequest?.type ?? "—"],
-                        ["Request Days",   selectedRow.latestRequest ? `${selectedRow.latestRequest.durationDays} day${selectedRow.latestRequest.durationDays !== 1 ? "s" : ""}` : "—"],
+                        ["Request Days",   selectedRow.latestRequest ? (selectedRow.latestRequest.type.endsWith("Half Day") ? "Half day" : `${selectedRow.latestRequest.durationDays} day${selectedRow.latestRequest.durationDays !== 1 ? "s" : ""}`) : "—"],
                         ["Review Status",  reviewStatus === "-" ? "—" : reviewStatus],
                         ["Request Reason", selectedRow.latestRequest?.reason ?? "—"],
                       ] as [string, string][]).map(([label, value]) => (

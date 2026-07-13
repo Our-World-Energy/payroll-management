@@ -3,12 +3,13 @@
 import { useEffect, useState, useTransition } from "react";
 import {
   LuUsers, LuPlus, LuTrash2, LuX, LuLoader, LuShieldCheck, LuUser,
-  LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck,
+  LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuCalculator,
 } from "react-icons/lu";
 import {
   fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword,
   backfillContractorAccounts, type AppUser,
 } from "./actions";
+import { backfillLeaveBalances } from "../contractors/actions";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 
@@ -52,6 +53,8 @@ export default function UserManagementPage() {
   const [isPending,     startTransition]  = useTransition();
   const [syncResult,    setSyncResult]    = useState<{ created: number; skipped: number } | null>(null);
   const [syncing,       setSyncing]       = useState(false);
+  const [recalcResult,  setRecalcResult]  = useState<{ updated: number } | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
 
   // Create form
   const [newEmail,    setNewEmail]    = useState("");
@@ -86,6 +89,18 @@ export default function UserManagementPage() {
       setError(e instanceof Error ? e.message : "Sync failed.");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleRecalculate() {
+    setRecalculating(true); setRecalcResult(null); setError("");
+    try {
+      const result = await backfillLeaveBalances();
+      setRecalcResult(result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Recalculation failed.");
+    } finally {
+      setRecalculating(false);
     }
   }
 
@@ -246,6 +261,16 @@ export default function UserManagementPage() {
           <LuCircleCheck size={15} />
           Sync complete — <strong>{syncResult.created}</strong> account{syncResult.created !== 1 ? "s" : ""} created, <strong>{syncResult.skipped}</strong> already existed.
           <button onClick={() => setSyncResult(null)} className="ml-auto text-teal-500 hover:text-teal-700">
+            <LuX size={14} />
+          </button>
+        </div>
+      )}
+
+      {recalcResult && (
+        <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl flex items-center gap-2">
+          <LuCircleCheck size={15} />
+          Recalculation complete — <strong>{recalcResult.updated}</strong> contractor{recalcResult.updated !== 1 ? "s" : ""} updated.
+          <button onClick={() => setRecalcResult(null)} className="ml-auto text-blue-500 hover:text-blue-700">
             <LuX size={14} />
           </button>
         </div>

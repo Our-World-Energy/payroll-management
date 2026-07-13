@@ -116,6 +116,7 @@ export default function ContractorTimeOffPage() {
   const [tab,       setTab]       = useState<"pto" | "sick">("pto");
   const [startDate, setStartDate] = useState("");
   const [endDate,   setEndDate]   = useState("");
+  const [isHalfDay, setIsHalfDay] = useState(false);
   const [reason,    setReason]    = useState("");
   const [formError, setFormError] = useState("");
   const [success,   setSuccess]   = useState("");
@@ -147,6 +148,7 @@ export default function ContractorTimeOffPage() {
   }, [router, loadRequests]);
 
   const estimatedDays = (() => {
+    if (isHalfDay) return startDate ? 0.5 : null;
     if (!startDate || !endDate) return null;
     const s = new Date(startDate), e = new Date(endDate);
     if (e < s) return null;
@@ -155,16 +157,18 @@ export default function ContractorTimeOffPage() {
 
   function handleSubmit() {
     if (!startDate) { setFormError("Start date is required."); return; }
-    if (!endDate)   { setFormError("End date is required."); return; }
-    if (new Date(endDate) < new Date(startDate)) { setFormError("End date must be on or after start date."); return; }
+    if (!isHalfDay && !endDate) { setFormError("End date is required."); return; }
+    if (!isHalfDay && new Date(endDate) < new Date(startDate)) { setFormError("End date must be on or after start date."); return; }
     setFormError(""); setSuccess("");
+
+    const baseType = tab === "pto" ? "PTO" : "Sick Leave";
 
     startTransition(async () => {
       const result = await submitLeaveRequest({
         email,
-        type:         tab === "pto" ? "PTO" : "Sick Leave",
+        type:         isHalfDay ? `${baseType} Half Day` : baseType,
         startDate,
-        endDate,
+        endDate:      isHalfDay ? startDate : endDate,
         durationDays: estimatedDays ?? 1,
         reason,
       });
@@ -173,7 +177,7 @@ export default function ContractorTimeOffPage() {
         return;
       }
       setSuccess("Request submitted successfully!");
-      setStartDate(""); setEndDate(""); setReason("");
+      setStartDate(""); setEndDate(""); setIsHalfDay(false); setReason("");
       await loadRequests(email);
     });
   }
@@ -326,13 +330,24 @@ export default function ContractorTimeOffPage() {
                   <LuCalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" strokeWidth={1.75} />
                   <input
                     type="date"
-                    value={endDate}
+                    value={isHalfDay ? startDate : endDate}
                     onChange={e => setEndDate(e.target.value)}
-                    className={INPUT + " pl-9"}
+                    disabled={isHalfDay}
+                    className={INPUT + " pl-9 disabled:bg-slate-50 disabled:text-slate-400"}
                   />
                 </div>
               </div>
             </div>
+
+            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 select-none">
+              <input
+                type="checkbox"
+                checked={isHalfDay}
+                onChange={e => setIsHalfDay(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 accent-emerald-700 cursor-pointer"
+              />
+              Half day request (4 hours)
+            </label>
 
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700 block">Reason for request</label>
@@ -350,7 +365,7 @@ export default function ContractorTimeOffPage() {
                 <LuInfo size={14} strokeWidth={1.75} />
                 Estimated duration:{" "}
                 <span className="font-bold text-slate-700">
-                  {estimatedDays !== null ? `${estimatedDays} day${estimatedDays !== 1 ? "s" : ""}` : "-- days"}
+                  {estimatedDays === null ? "-- days" : isHalfDay ? "Half day" : `${estimatedDays} day${estimatedDays !== 1 ? "s" : ""}`}
                 </span>
               </div>
               <button
@@ -439,7 +454,7 @@ export default function ContractorTimeOffPage() {
                   </tr>
                 ) : (
                   requests.map((row) => {
-                    const isPto = row.type === "PTO";
+                    const isPto = row.type.startsWith("PTO");
                     return (
                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors group">
                         <td className="px-6 py-4">
@@ -457,7 +472,7 @@ export default function ContractorTimeOffPage() {
                           {fmtDateRange(row.startDate, row.endDate)}
                         </td>
                         <td className="px-6 py-4 text-sm font-semibold text-slate-800 whitespace-nowrap">
-                          {row.durationDays} day{row.durationDays !== 1 ? "s" : ""}
+                          {row.type.endsWith("Half Day") ? "Half day" : `${row.durationDays} day${row.durationDays !== 1 ? "s" : ""}`}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-400 italic max-w-[180px] truncate">
                           {row.reason || "—"}
@@ -533,7 +548,7 @@ export default function ContractorTimeOffPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {allRequests.map((row, i) => {
-                      const isPto = row.type === "PTO";
+                      const isPto = row.type.startsWith("PTO");
                       const submittedOn = new Date(row.createdAt).toLocaleDateString("en-US", {
                         month: "short", day: "numeric", year: "numeric",
                       });
@@ -558,7 +573,7 @@ export default function ContractorTimeOffPage() {
                             {new Date(row.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </td>
                           <td className="px-5 py-4 text-sm font-semibold text-slate-800 whitespace-nowrap">
-                            {row.durationDays} day{row.durationDays !== 1 ? "s" : ""}
+                            {row.type.endsWith("Half Day") ? "Half day" : `${row.durationDays} day${row.durationDays !== 1 ? "s" : ""}`}
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-400 italic max-w-[200px]">
                             <span className="block truncate" title={row.reason}>{row.reason || "—"}</span>

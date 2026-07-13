@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot } from "react-icons/lu";
+import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot, LuCircleAlert, LuX } from "react-icons/lu";
 import {
   fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus,
   type AdminLeaveRequest,
@@ -12,6 +12,10 @@ import { fmtBalance } from "@/lib/timeOffBalances";
 
 function roundBalance(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function fmtMinutes(hours: number) {
+  return Math.round(hours * 60).toLocaleString();
 }
 
 function fmtDate(date: string) {
@@ -39,31 +43,33 @@ export default function ContractorTimeOffPage() {
   const [contractor,   setContractor]   = useState<Contractor | null>(null);
   const [allRequests,  setAllRequests]  = useState<AdminLeaveRequest[]>([]);
   const [loading,      setLoading]      = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
   const [, startTransition] = useTransition();
+
+  const loadData = useCallback(async () => {
+    const [all, requests] = await Promise.all([
+      fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
+      fetchAllLeaveRequestsAdmin(),
+    ]);
+    const found = all.find((c) => c.uid === id) ?? null;
+    setContractor(found);
+    // filter to only this contractor's requests
+    if (found) {
+      setAllRequests(requests.filter((r) => r.email === found.email));
+    }
+  }, [id]);
 
   useEffect(() => {
     let active = true;
-    async function load() {
+    (async () => {
       try {
-        const [all, requests] = await Promise.all([
-          fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
-          fetchAllLeaveRequestsAdmin(),
-        ]);
-        if (active) {
-          const found = all.find((c) => c.uid === id) ?? null;
-          setContractor(found);
-          // filter to only this contractor's requests
-          if (found) {
-            setAllRequests(requests.filter((r) => r.email === found.email));
-          }
-        }
+        await loadData();
       } finally {
         if (active) setLoading(false);
       }
-    }
-    load();
+    })();
     return () => { active = false; };
-  }, [id]);
+  }, [loadData]);
 
   const fullName = contractor
     ? contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ")
@@ -79,12 +85,16 @@ export default function ContractorTimeOffPage() {
   async function decide(reqId: string, decision: "Approved" | "Rejected") {
     // Optimistic update
     setAllRequests((prev) => prev.map((r) => r.id === reqId ? { ...r, status: decision } : r));
-    try {
-      await updateLeaveRequestStatus(reqId, decision);
-    } catch {
-      // revert on error
+    const result = await updateLeaveRequestStatus(reqId, decision);
+    if (!result.ok) {
+      // revert on error (e.g. insufficient balance) and surface the reason
       setAllRequests((prev) => prev.map((r) => r.id === reqId ? { ...r, status: "Pending" } : r));
+      setErrorMessage(result.error ?? "Failed to update request.");
+      return;
     }
+    // Refresh contractor balances + request list from the server so the score
+    // cards (PTO/Sick Used & Available) and both tables reflect the change.
+    await loadData();
   }
 
   const ptoBalance       = contractor?.ptoBalance        ?? 0;
@@ -93,19 +103,10 @@ export default function ContractorTimeOffPage() {
   const sickBalance      = contractor?.sickLeaveBalance  ?? 0;
   const sickUsed         = contractor?.sickLeaveUsed     ?? 0;
   const sickAvailable    = roundBalance(Math.max(sickBalance - sickUsed, 0));
+  const ptoAvailableLow  = ptoAvailable < 8;
+  const sickAvailableLow = sickAvailable < 8;
 
-  if (loading) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-50">
-        <div className="flex flex-col items-center gap-4">
-          <div className="size-12 rounded-full border-4 border-slate-200 border-t-[#003527] animate-spin" />
-          <p className="text-sm font-medium text-slate-500">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!contractor) {
+  if (!loading && !contractor) {
     return (
       <div className="p-8">
         <button onClick={() => router.back()} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-[#003527] mb-6">
@@ -138,27 +139,33 @@ export default function ContractorTimeOffPage() {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
             <p className="text-2xl font-black text-[#003527]">{fmtBalance(ptoBalance)}h</p>
+            <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(ptoBalance)} min</p>
           </div>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
             <p className="text-2xl font-black text-slate-700">{fmtBalance(ptoUsed)}h</p>
+            <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(ptoUsed)} min</p>
           </div>
-          <div className="bg-emerald-50 rounded-2xl border border-emerald-200 shadow-sm px-5 py-4">
-            <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-1">PTO Available</p>
-            <p className="text-2xl font-black text-emerald-700">{fmtBalance(ptoAvailable)}h</p>
+          <div className={`rounded-2xl border shadow-sm px-5 py-4 ${ptoAvailableLow ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200"}`}>
+            <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${ptoAvailableLow ? "text-red-600" : "text-emerald-600"}`}>PTO Available</p>
+            <p className={`text-2xl font-black ${ptoAvailableLow ? "text-red-700" : "text-emerald-700"}`}>{fmtBalance(ptoAvailable)}h</p>
+            <p className={`text-[11px] font-medium mt-0.5 ${ptoAvailableLow ? "text-red-400" : "text-emerald-400"}`}>{fmtMinutes(ptoAvailable)} min</p>
           </div>
         </>}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
           <p className="text-2xl font-black text-[#003527]">{fmtBalance(sickBalance)}h</p>
+          <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(sickBalance)} min</p>
         </div>
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Used</p>
           <p className="text-2xl font-black text-slate-700">{fmtBalance(sickUsed)}h</p>
+          <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(sickUsed)} min</p>
         </div>
-        <div className="bg-amber-50 rounded-2xl border border-amber-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider mb-1">Sick Leave Available</p>
-          <p className="text-2xl font-black text-amber-700">{fmtBalance(sickAvailable)}h</p>
+        <div className={`rounded-2xl border shadow-sm px-5 py-4 ${sickAvailableLow ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"}`}>
+          <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${sickAvailableLow ? "text-red-600" : "text-amber-600"}`}>Sick Leave Available</p>
+          <p className={`text-2xl font-black ${sickAvailableLow ? "text-red-700" : "text-amber-700"}`}>{fmtBalance(sickAvailable)}h</p>
+          <p className={`text-[11px] font-medium mt-0.5 ${sickAvailableLow ? "text-red-400" : "text-amber-400"}`}>{fmtMinutes(sickAvailable)} min</p>
         </div>
       </div>
 
@@ -168,7 +175,9 @@ export default function ContractorTimeOffPage() {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date", "Duration", "Reason",
+                {["Name", "Start Date", "End Date",
+                  ...(!isIndia ? ["PTO Used"] : []),
+                  "Sick Leave Used", "Reason",
                   ...(!isIndia ? ["PTO Available"] : []),
                   "Sick Leave Available", "Type", "Action Status", "Action"
                 ].map((h) => (
@@ -181,19 +190,26 @@ export default function ContractorTimeOffPage() {
             <tbody className="divide-y divide-slate-100">
               {currentRequests.length === 0 ? (
                 <tr>
-                  <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={isIndia ? 9 : 11} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     No pending time-off requests.
                   </td>
                 </tr>
               ) : currentRequests.map((req) => {
-                const isSick = req.type === "Sick Leave";
+                const isSick = !req.type.startsWith("PTO");
                 return (
                   <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
                     <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
                     <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{req.durationDays} day{req.durationDays !== 1 ? "s" : ""}</td>
+                    {!isIndia && (
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                        {req.ptoUsedHours > 0 ? `${fmtBalance(req.ptoUsedHours)}h` : "-"}
+                      </td>
+                    )}
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                      {req.sickLeaveUsedHours > 0 ? `${fmtBalance(req.sickLeaveUsedHours)}h` : "-"}
+                    </td>
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
@@ -257,7 +273,10 @@ export default function ContractorTimeOffPage() {
             <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  {["Name", "Start Date", "End Date", "Duration", "Reason", "Submitted", "Type", "Review"].map((h) => (
+                  {["Name", "Start Date", "End Date",
+                    ...(!isIndia ? ["PTO Used"] : []),
+                    "Sick Leave Used", "Reason", "Submitted", "Type", "Review"
+                  ].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                       {h}
                     </th>
@@ -267,20 +286,27 @@ export default function ContractorTimeOffPage() {
               <tbody className="divide-y divide-slate-100">
                 {historicalRequests.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-5 py-16 text-center text-sm text-slate-400">
+                    <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
                       <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                       No historical requests found.
                     </td>
                   </tr>
                 ) : historicalRequests.map((req) => {
-                  const isSick = req.type === "Sick Leave";
+                  const isSick = !req.type.startsWith("PTO");
                   const isApproved = req.status === "Approved";
                   return (
                     <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
                       <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
                       <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{req.durationDays} day{req.durationDays !== 1 ? "s" : ""}</td>
+                      {!isIndia && (
+                        <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                          {req.ptoUsedHours > 0 ? `${fmtBalance(req.ptoUsedHours)}h` : "-"}
+                        </td>
+                      )}
+                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
+                        {req.sickLeaveUsedHours > 0 ? `${fmtBalance(req.sickLeaveUsedHours)}h` : "-"}
+                      </td>
                       <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                         <span className="line-clamp-2">{req.reason || "-"}</span>
                       </td>
@@ -312,6 +338,36 @@ export default function ContractorTimeOffPage() {
           </div>
         </div>
       </div>
+
+      {/* Insufficient-balance / error message box */}
+      {errorMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setErrorMessage("")} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={() => setErrorMessage("")}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <LuCircleAlert size={20} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Unable to Approve Request</h3>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{errorMessage}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setErrorMessage("")}
+              className="mt-6 w-full py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

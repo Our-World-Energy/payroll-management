@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
 
 const TABLE = "contractor_profiles";
 
@@ -308,87 +308,109 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
 const LEAVE_TABLE = "contractor_leave_requests";
 
 export type AdminLeaveRequest = {
-  id:           string;
-  email:        string;
-  type:         string;
-  startDate:    string;
-  endDate:      string;
-  durationDays: number;
-  reason:       string;
-  status:       string;
-  createdAt:    string;
+  id:                 string;
+  email:              string;
+  type:               string;
+  startDate:          string;
+  endDate:            string;
+  durationDays:       number;
+  reason:             string;
+  status:             string;
+  ptoUsedHours:       number;
+  sickLeaveUsedHours: number;
+  createdAt:          string;
 };
 
 export async function fetchAllLeaveRequestsAdmin(): Promise<AdminLeaveRequest[]> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from(LEAVE_TABLE)
-    .select("id, email, type, startDate, endDate, durationDays, reason, status, createdAt")
+    .select("id, email, type, startDate, endDate, durationDays, reason, status, ptoUsedHours, sickLeaveUsedHours, createdAt")
     .order("createdAt", { ascending: false });
 
   if (error || !data) return [];
   return data.map((r) => ({
-    id:           String(r.id),
-    email:        String(r.email),
-    type:         String(r.type),
-    startDate:    String(r.startDate),
-    endDate:      String(r.endDate),
-    durationDays: Number(r.durationDays),
-    reason:       String(r.reason ?? ""),
-    status:       String(r.status ?? "Pending"),
-    createdAt:    String(r.createdAt),
+    id:                 String(r.id),
+    email:              String(r.email),
+    type:               String(r.type),
+    startDate:          String(r.startDate),
+    endDate:            String(r.endDate),
+    durationDays:       Number(r.durationDays),
+    reason:             String(r.reason ?? ""),
+    status:             String(r.status ?? "Pending"),
+    ptoUsedHours:       Number(r.ptoUsedHours ?? 0),
+    sickLeaveUsedHours: Number(r.sickLeaveUsedHours ?? 0),
+    createdAt:          String(r.createdAt),
   }));
 }
 
 export async function updateLeaveRequestStatus(
   id: string,
   status: "Approved" | "Rejected"
-): Promise<void> {
+): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
 
-  // Fetch the request so we know email, type, durationDays, and prior status
+  // Fetch the request so we know email, type, its stored hours, and prior status
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, durationDays, status")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours")
     .eq("id", id)
     .single();
-  if (fetchErr || !req) throw new Error(fetchErr?.message ?? "Request not found");
+  if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
 
-  const prevStatus   = String(req.status);
-  const email        = String(req.email);
-  const type         = String(req.type);           // "PTO" | "Sick Leave"
-  const hours        = Number(req.durationDays) * 8;
-  const isPto        = type === "PTO";
-  const usedField    = isPto ? "ptoUsed" : "sickLeaveUsed";
+  const prevStatus    = String(req.status);
+  const email         = String(req.email);
+  const type          = String(req.type);           // "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day"
+  const isPto         = isPtoLeaveType(type);
+  // Use the hours stamped on the request itself (set at submission time) so
+  // this stays consistent with what's shown in the admin tables, and so a
+  // future change to LEAVE_TYPE_HOURS never rewrites already-submitted requests.
+  const hours         = Number(isPto ? req.ptoUsedHours : req.sickLeaveUsedHours) || leaveTypeHours(type);
+  const usedField     = isPto ? "ptoUsed" : "sickLeaveUsed";
+  const balanceField  = isPto ? "ptoBalance" : "sickLeaveBalance";
+  const leaveLabel    = isPto ? "PTO" : "Sick Leave";
 
-  // Fetch current contractor balances
+  // Fetch current contractor leave balance
   const { data: profile, error: profileErr } = await sb
     .from(TABLE)
     .select("ptoUsed, sickLeaveUsed, ptoBalance, sickLeaveBalance")
     .eq("email", email)
     .single();
-  if (profileErr || !profile) throw new Error(profileErr?.message ?? "Contractor not found");
+  if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
 
   const currentUsed = Number(profile[usedField] ?? 0);
-  const balance     = Number(isPto ? profile.ptoBalance : profile.sickLeaveBalance);
+  const balance     = Number(profile[balanceField] ?? 0);
+  const available   = balance - currentUsed;
 
   let newUsed = currentUsed;
 
   if (status === "Approved" && prevStatus !== "Approved") {
-    // Add hours used (cap at balance so it doesn't go negative available)
-    newUsed = Math.min(currentUsed + hours, balance);
-  } else if (status === "Rejected" && prevStatus === "Approved") {
-    // Reverse the previously-deducted hours
+    // Block approval outright if the employee doesn't have enough available
+    // balance for this request's leave type — no partial/overdrawn approvals.
+    if (available < hours) {
+      return {
+        ok: false,
+        error: `This contractor does not have enough available ${leaveLabel} balance to approve this request. Available: ${available}h, Required: ${hours}h.`,
+      };
+    }
+    // Only Approved requests count toward Used — add this request's fixed hours.
+    newUsed = currentUsed + hours;
+  } else if (status !== "Approved" && prevStatus === "Approved") {
+    // Un-approving (Declined/Rejected) reverses the previously-deducted hours.
     newUsed = Math.max(currentUsed - hours, 0);
   }
   // If status unchanged or no balance impact, newUsed stays the same
 
-  // Update both tables
+  // Update both tables — also re-stamp the request's own hours field so it
+  // never diverges from what was actually deducted (e.g. a stale 0 from a
+  // request submitted before this column existed self-heals here).
   const [{ error: reqErr }, { error: profileUpdateErr }] = await Promise.all([
-    sb.from(LEAVE_TABLE).update({ status, updatedAt: new Date().toISOString() }).eq("id", id),
+    sb.from(LEAVE_TABLE).update({ status, [`${usedField}Hours`]: hours, updatedAt: new Date().toISOString() }).eq("id", id),
     sb.from(TABLE).update({ [usedField]: newUsed }).eq("email", email),
   ]);
 
-  if (reqErr)           throw new Error(reqErr.message);
-  if (profileUpdateErr) throw new Error(profileUpdateErr.message);
+  if (reqErr)           return { ok: false, error: reqErr.message };
+  if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+
+  return { ok: true };
 }

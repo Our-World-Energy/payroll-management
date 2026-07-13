@@ -364,16 +364,18 @@ model Holiday {
 
 /// Time-off requests submitted through the contractor portal
 model ContractorLeaveRequest {
-  id          String   @id @default(uuid()) @db.Uuid
-  email       String
-  type        String   // "PTO" | "Sick Leave"
-  startDate   String
-  endDate     String
-  durationDays Int
-  reason      String   @default("")
-  status      String   @default("Pending") // "Pending" | "Approved" | "Rejected"
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                 String   @id @default(uuid()) @db.Uuid
+  email              String
+  type               String   // "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day"
+  startDate          String
+  endDate            String
+  durationDays       Int
+  reason             String   @default("")
+  status             String   @default("Pending") // "Pending" | "Approved" | "Rejected"
+  ptoUsedHours       Float    @default(0) // hours this request deducts from PTO Used if approved
+  sickLeaveUsedHours Float    @default(0) // hours this request deducts from Sick Leave Used if approved
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@index([email, createdAt])
   @@map("contractor_leave_requests")
