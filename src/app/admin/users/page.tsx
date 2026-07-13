@@ -186,6 +186,15 @@ export default function UserManagementPage() {
             {syncing ? "Syncing…" : "Sync Contractors"}
           </button>
           <button
+            onClick={handleRecalculate}
+            disabled={recalculating}
+            title="Recalculate PTO & Sick Leave balances for all existing contractors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60"
+          >
+            {recalculating ? <LuLoader size={15} className="animate-spin" /> : <LuCalculator size={15} strokeWidth={2} />}
+            {recalculating ? "Recalculating…" : "Recalculate Balances"}
+          </button>
+          <button
             onClick={() => setModal({ type: "create" })}
             className="inline-flex items-center gap-2 px-4 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
           >
