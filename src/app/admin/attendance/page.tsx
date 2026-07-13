@@ -2219,7 +2219,7 @@ export default function AttendancePage() {
         {/* Table */}
         <div ref={tableScrollRef} onScroll={syncScrollFromTable} className="overflow-x-auto">
           <table ref={trackingTableRef} className="w-full text-left" style={{ minWidth: "720px", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead className="bg-[#003527] border-b border-white/20">
+            <thead className="bg-[#003527]">
               <tr>
                 {[
                   "Contractor", "Department", "Actual Time", "Completion Time", "Total Local HO Time",
@@ -2228,10 +2228,10 @@ export default function AttendancePage() {
                 ].map((h) => (
                   <th
                     key={h}
-                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-white whitespace-nowrap overflow-hidden ${
+                    className={`px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold uppercase tracking-widest text-white whitespace-nowrap overflow-hidden border-r border-b border-white/20 last:border-r-0 ${
                       h === "Status" || h === "Actions" ? "text-center" : ""
                     } ${
-                      h === "Contractor" ? "sticky left-0 z-20 border-r border-white/20" : ""
+                      h === "Contractor" ? "sticky left-0 z-20" : ""
                     } ${h === "Status" ? "sticky right-[175px] z-20 border-l border-white/20" : ""} ${
                       h === "Actions" ? "sticky right-0 z-20 border-l border-white/20" : ""
                     }`}
@@ -2247,7 +2247,7 @@ export default function AttendancePage() {
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody>
               {filteredAttendanceRows.length === 0 && (
                 <tr>
                   <td colSpan={13} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
@@ -2279,7 +2279,7 @@ export default function AttendancePage() {
                 return (
                   <tr key={row.contractorId} className="hover:bg-slate-50/80 transition-colors group">
                     {/* Contractor */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200 overflow-hidden" style={{ minWidth: 280, width: 280, maxWidth: 280 }}>
+                    <td className="px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-b border-slate-200 overflow-hidden" style={{ minWidth: 280, width: 280, maxWidth: 280 }}>
                       <div className="flex items-center gap-2 md:gap-3">
                         <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs md:text-sm font-bold shrink-0">
                           {row.avatar}
@@ -2298,12 +2298,12 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Department */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-sm font-medium text-slate-600 whitespace-nowrap">
+                    <td className="px-4 md:px-6 py-3 md:py-4 text-sm font-medium text-slate-600 whitespace-nowrap border-r border-b border-slate-100">
                       {departmentForAttendanceRow(row)}
                     </td>
 
                     {/* Actual */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2314,7 +2314,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Completion Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2332,7 +2332,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total Local HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalLocalHolidayMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2341,7 +2341,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total Evaluated Regular Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalEvaluatedRegularMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2350,7 +2350,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total US HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalUsHoMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2359,7 +2359,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total Regular OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalRegularOtMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2368,7 +2368,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total RD OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalRdOtMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2377,7 +2377,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Total HO OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalHoOtMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
@@ -2386,7 +2386,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Variance */}
-                    <td className="px-4 md:px-6 py-3 md:py-4">
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || isStandard || isReviewed ? (
                         <span className="text-sm text-slate-400">--</span>
                       ) : (
@@ -2397,7 +2397,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden" style={{ minWidth: 170, width: 170, maxWidth: 170 }}>
+                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 170, width: 170, maxWidth: 170 }}>
                       {isAppliedTimeCredit ? (
                         <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
                           Applied Time Credit
@@ -2430,7 +2430,7 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Actions */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden" style={{ minWidth: 175, width: 175, maxWidth: 175 }}>
+                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 175, width: 175, maxWidth: 175 }}>
                       {(isStandard || isReviewed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
