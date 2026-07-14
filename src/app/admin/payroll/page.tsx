@@ -342,29 +342,6 @@ export default function PayrollPage() {
     return result;
   }
 
-  // Sum per currency — mixing currencies (USD/MXN/PHP, etc.) into one number would be wrong.
-  const totalsByCurrency = new Map<string, { gross: number; deductions: number; net: number }>();
-  filteredRows.forEach((r) => {
-    if (r.gross == null || r.deductions == null || r.net == null) return;
-    const t = totalsByCurrency.get(r.currency) ?? { gross: 0, deductions: 0, net: 0 };
-    t.gross += r.gross;
-    t.deductions += r.deductions;
-    t.net += r.net;
-    totalsByCurrency.set(r.currency, t);
-  });
-  const currencyTotals = Array.from(totalsByCurrency.entries());
-
-  function summaryCard(pick: (t: { gross: number; deductions: number; net: number }) => number) {
-    if (currencyTotals.length === 0) return <span className="text-3xl font-black mt-1">—</span>;
-    return (
-      <div className="mt-1 space-y-0.5">
-        {currencyTotals.map(([currency, t]) => (
-          <p key={currency} className="text-xl md:text-2xl font-black leading-tight">{fmtMoney(pick(t), currency)}</p>
-        ))}
-      </div>
-    );
-  }
-
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 md:mb-8">
@@ -378,22 +355,6 @@ export default function PayrollPage() {
           <LuDownload size={16} strokeWidth={2} />
           Export CSV
         </button>
-      </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6 md:mb-8">
-        <div className="bg-[#003527] text-white rounded-xl p-5 shadow-md">
-          <p className="text-xs font-semibold uppercase tracking-wider opacity-75">Total Gross</p>
-          {summaryCard((t) => t.gross)}
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Deductions</p>
-          {summaryCard((t) => t.deductions)}
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Net Pay</p>
-          {summaryCard((t) => t.net)}
-        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -499,15 +460,25 @@ export default function PayrollPage() {
         <div ref={tableScrollRef} onScroll={syncScrollFromTable} className="overflow-x-auto">
           <table ref={trackingTableRef} className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
-              <tr className="border-b border-slate-100 bg-slate-50">
+              <tr className="bg-[#003527]">
                 {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
                   "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
-                    className={`text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-r border-slate-100 last:border-r-0 ${
-                      i === 0 ? "sticky left-0 z-20 bg-slate-50 w-[180px] min-w-[180px] shadow-[1px_0_0_0_#e2e8f0]" : ""
+                    className={`text-left px-4 md:px-5 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
+                      h === "Status" || h === "Action" ? "text-center" : ""
+                    } ${
+                      i === 0 ? "sticky left-0 z-20 w-[180px] min-w-[180px] shadow-[1px_0_0_0_#e2e8f0]" : ""
+                    } ${h === "Status" ? "sticky right-[90px] z-20 border-l border-white/20" : ""} ${
+                      h === "Action" ? "sticky right-0 z-20 border-l border-white/20" : ""
                     }`}
+                    style={
+                      i === 0 ? { background: "#003527" }
+                      : h === "Status" ? { minWidth: 150, width: 150, maxWidth: 150, background: "#003527" }
+                      : h === "Action" ? { minWidth: 90, width: 90, maxWidth: 90, background: "#003527" }
+                      : undefined
+                    }
                   >
                     {h}
                   </th>
@@ -522,8 +493,8 @@ export default function PayrollPage() {
                   </td>
                 </tr>
               ) : filteredRows.map((r) => (
-                <tr key={r.email} className="hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white px-4 md:px-5 py-3.5 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{r.name}</td>
+                <tr key={r.email} className="group hover:bg-slate-50 transition-colors">
+                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-5 py-3.5 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{r.name}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.country}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
@@ -542,13 +513,19 @@ export default function PayrollPage() {
                   <td className="px-4 md:px-5 py-3.5 text-slate-700 font-medium tabular-nums whitespace-nowrap border-r border-slate-100">{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-red-500 tabular-nums whitespace-nowrap border-r border-slate-100">{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-teal-700 font-semibold tabular-nums whitespace-nowrap border-r border-slate-100">{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5">
+                  <td
+                    className="text-center sticky right-[90px] z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-5 py-3.5"
+                    style={{ minWidth: 150, width: 150, maxWidth: 150 }}
+                  >
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATUS_STYLES[r.status]}`}>
                       {STATUS_ICONS[r.status]}
                       {r.status}
                     </span>
                   </td>
-                  <td className="px-4 md:px-5 py-3.5">
+                  <td
+                    className="text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-5 py-3.5"
+                    style={{ minWidth: 90, width: 90, maxWidth: 90 }}
+                  >
                     <div className="flex items-center justify-center gap-3">
                       <button
                         onClick={() => setVoucherTarget(r)}
