@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot, LuCircleAlert, LuX } from "react-icons/lu";
+import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot, LuCircleAlert, LuX, LuTrash2 } from "react-icons/lu";
 import {
-  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus,
+  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin,
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
@@ -44,6 +44,8 @@ export default function ContractorTimeOffPage() {
   const [allRequests,  setAllRequests]  = useState<AdminLeaveRequest[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<AdminLeaveRequest | null>(null);
+  const [deleting,     setDeleting]     = useState(false);
   const [, startTransition] = useTransition();
 
   const loadData = useCallback(async () => {
@@ -94,6 +96,21 @@ export default function ContractorTimeOffPage() {
     }
     // Refresh contractor balances + request list from the server so the score
     // cards (PTO/Sick Used & Available) and both tables reflect the change.
+    await loadData();
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const result = await deleteLeaveRequestAdmin(deleteTarget.id);
+    setDeleting(false);
+    if (!result.ok) {
+      setErrorMessage(result.error ?? "Failed to delete request.");
+      setDeleteTarget(null);
+      return;
+    }
+    setDeleteTarget(null);
+    // Refresh so the score cards reflect any reversed balance from a deleted Approved request.
     await loadData();
   }
 
@@ -275,7 +292,7 @@ export default function ContractorTimeOffPage() {
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {["Name", "Start Date", "End Date",
                     ...(!isIndia ? ["PTO Used"] : []),
-                    "Sick Leave Used", "Reason", "Submitted", "Type", "Review"
+                    "Sick Leave Used", "Reason", "Submitted", "Type", "Review", "Delete"
                   ].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                       {h}
@@ -286,7 +303,7 @@ export default function ContractorTimeOffPage() {
               <tbody className="divide-y divide-slate-100">
                 {historicalRequests.length === 0 ? (
                   <tr>
-                    <td colSpan={isIndia ? 8 : 9} className="px-5 py-16 text-center text-sm text-slate-400">
+                    <td colSpan={isIndia ? 9 : 10} className="px-5 py-16 text-center text-sm text-slate-400">
                       <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                       No historical requests found.
                     </td>
@@ -330,6 +347,15 @@ export default function ContractorTimeOffPage() {
                           {req.status}
                         </span>
                       </td>
+                      <td className="px-5 py-4 whitespace-nowrap">
+                        <button
+                          onClick={() => setDeleteTarget(req)}
+                          title="Delete request"
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <LuTrash2 size={15} strokeWidth={1.75} />
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -365,6 +391,51 @@ export default function ContractorTimeOffPage() {
             >
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !deleting && setDeleteTarget(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <LuTrash2 size={18} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Delete Leave Request</h3>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                  This will permanently delete the {deleteTarget.type} request for {fmtDate(deleteTarget.startDate)} – {fmtDate(deleteTarget.endDate)}.
+                  {deleteTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
+                  {" "}This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
           </div>
         </div>
       )}

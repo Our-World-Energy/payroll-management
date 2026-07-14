@@ -5,12 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuCalendarPlus, LuUmbrella, LuStethoscope,
+  LuSlidersHorizontal, LuCircleAlert,
 } from "react-icons/lu";
 import {
   fetchAllContractors, updateTimeOffUsage,
-  fetchAllLeaveRequestsAdmin, type AdminLeaveRequest,
+  fetchAllLeaveRequestsAdmin, createLeaveOverride, type AdminLeaveRequest,
 } from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
+import { leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -159,13 +161,23 @@ export default function TimeOffPage() {
   const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
 
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [modalTab,      setModalTab]      = useState<"details" | "info">("info");
+  const [modalTab,      setModalTab]      = useState<"details" | "info" | "override">("info");
 
   const [editLeaveType, setEditLeaveType] = useState<"Advance Sick Leave" | "Advance PTO/Birthday Leave">("Advance Sick Leave");
   const [editHours,     setEditHours]     = useState("");
   const [editReason,    setEditReason]    = useState("");
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
+
+  const OVERRIDE_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Sick Leave"] as const;
+  const [overrideType,       setOverrideType]       = useState<typeof OVERRIDE_TYPES[number]>("PTO");
+  const [overrideStartDate,  setOverrideStartDate]  = useState("");
+  const [overrideEndDate,    setOverrideEndDate]    = useState("");
+  const [overrideReason,     setOverrideReason]     = useState("");
+  const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+  const [overrideError,      setOverrideError]      = useState("");
+  const [overrideSuccess,    setOverrideSuccess]    = useState("");
+  const [overrideBlocked,    setOverrideBlocked]    = useState("");
 
   useEffect(() => {
     let active = true;
@@ -313,8 +325,9 @@ export default function TimeOffPage() {
               {/* Tabs */}
               <div className="flex border-b border-slate-100 px-6">
                 {([
-                  { key: "info",    label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
-                  { key: "details", label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
+                  { key: "info",     label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
+                  { key: "details",  label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
+                  { key: "override", label: "Leave Override",             icon: <LuSlidersHorizontal size={13} /> },
                 ] as const).map(({ key, label, icon }) => (
                   <button
                     key={key}
@@ -521,6 +534,123 @@ export default function TimeOffPage() {
                       )}
                     </div>
                   </>);
+                })() : modalTab === "override" ? (() => {
+                  async function handleOverrideSubmit() {
+                    if (!selectedRow) return;
+                    if (!overrideStartDate || !overrideEndDate) {
+                      setOverrideError("Start Date and End Date are required.");
+                      return;
+                    }
+                    if (new Date(overrideEndDate) < new Date(overrideStartDate)) {
+                      setOverrideError("End Date must be on or after Start Date.");
+                      return;
+                    }
+                    const requiredHours = leaveTypeHours(overrideType);
+                    const isPtoType = isPtoLeaveType(overrideType);
+                    const availableHours = isPtoType ? selectedRow.ptoAvailable : selectedRow.sickLeaveAvailable;
+                    if (requiredHours > 0 && availableHours < requiredHours) {
+                      const leaveLabel = isPtoType ? "PTO" : "Sick Leave";
+                      setOverrideBlocked(
+                        `${leaveLabel} Accrual Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
+                      );
+                      return;
+                    }
+                    setOverrideError(""); setOverrideSuccess("");
+                    setOverrideSubmitting(true);
+                    const result = await createLeaveOverride({
+                      email: selectedRow.email,
+                      type: overrideType,
+                      startDate: overrideStartDate,
+                      endDate: overrideEndDate,
+                      reason: overrideReason,
+                    });
+                    setOverrideSubmitting(false);
+                    if (!result.ok || !result.request) {
+                      setOverrideError(result.error ?? "Failed to create override.");
+                      return;
+                    }
+                    const req = result.request;
+                    setContractors((prev) => prev.map((c) =>
+                      c.uid === selectedRow.id
+                        ? { ...c, ptoUsed: c.ptoUsed + req.ptoUsedHours, sickLeaveUsed: c.sickLeaveUsed + req.sickLeaveUsedHours }
+                        : c
+                    ));
+                    setLeaveRequests((prev) => [req, ...prev]);
+                    setOverrideSuccess("Leave override created and applied.");
+                    setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason("");
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      {!isRowIndia && (
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {([
+                              ["PTO Accrual",           `${fmtBalance(selectedRow.ptoBalance)}h`],
+                              ["PTO Used",              `${fmtBalance(selectedRow.ptoUsed)}h`],
+                              ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`],
+                            ] as [string, string][]).map(([label, value]) => (
+                              <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
+                                <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
+                                <p className="text-lg font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {([
+                            ["Sick Leave Accrual",     `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
+                            ["Sick Leave Used",        `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
+                            ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
+                          ] as [string, string][]).map(([label, value]) => (
+                            <div key={label} className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wider">{label}</p>
+                              <p className="text-lg font-bold text-orange-700 mt-0.5 tabular-nums">{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Type</p>
+                        <select
+                          value={overrideType}
+                          onChange={(e) => setOverrideType(e.target.value as typeof OVERRIDE_TYPES[number])}
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                        >
+                          {OVERRIDE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
+                          <input type="date" value={overrideStartDate} onChange={(e) => setOverrideStartDate(e.target.value)}
+                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                        </div>
+                        <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">End Date</p>
+                          <input type="date" value={overrideEndDate} onChange={(e) => setOverrideEndDate(e.target.value)}
+                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason for Request</p>
+                        <textarea value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Enter reason for this leave override..." rows={2}
+                          className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
+                      </div>
+                      {overrideError && <p className="text-xs font-medium text-red-600">{overrideError}</p>}
+                      {overrideSuccess && <p className="text-xs font-medium text-emerald-600">{overrideSuccess}</p>}
+                      <button onClick={handleOverrideSubmit} disabled={overrideSubmitting || !overrideStartDate || !overrideEndDate}
+                        className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                        <LuCircleCheck size={15} strokeWidth={2} /> {overrideSubmitting ? "Applying…" : "Apply Leave Override"}
+                      </button>
+                    </div>
+                  );
                 })() : null}
               </div>
 
@@ -534,6 +664,36 @@ export default function TimeOffPage() {
           </div>
         );
       })()}
+
+      {/* Insufficient-balance message box for Leave Override */}
+      {overrideBlocked && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOverrideBlocked("")} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={() => setOverrideBlocked("")}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <LuCircleAlert size={20} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Insufficient Balance</h3>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{overrideBlocked}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setOverrideBlocked("")}
+              className="mt-6 w-full py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Page header ── */}
       <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">

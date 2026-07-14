@@ -260,16 +260,14 @@ function totalTimeOffRequestMinutesFor(weekDates: string[], leaveRequests: Admin
     .reduce((sum, r) => sum + (r.type.startsWith("PTO") ? r.ptoUsedHours : r.sickLeaveUsedHours) * 60, 0);
 }
 
-function completionTimeFor(evaluatedTime: string, adjustedTime: string, timeOffTime: string, holidayTime = "-", rdOtTime = "-") {
+function completionTimeFor(evaluatedTime: string, timeOffTime: string, holidayTime = "-", rdOtTime = "-") {
   const evaluatedMinutes = timeValueToMinutes(evaluatedTime);
   const timeOffMinutes = timeValueToMinutes(timeOffTime);
   const holidayMinutes = timeValueToMinutes(holidayTime);
   const rdOtMinutes = timeValueToMinutes(rdOtTime);
-  const adjustedMinutes = timeValueToMinutes(adjustedTime);
-  // Only treat adjustedTime as a manual override when it resolves to a positive value.
-  // A value of "" or "-" means no override has been set (the latter is the auto-populated
-  // default for days with no Worksnap time), so the formula is used in those cases.
-  if (adjustedMinutes > 0) return formatMinutesAsMins(adjustedMinutes);
+  // Adjusted Time is no longer special-cased here — when present, it already
+  // replaced Worksnap Time upstream (see effectiveDailyMinutes) and flows into
+  // evaluatedTime like any other source, so the same formula applies either way.
   // Evaluated Time is always blank on rest days (that work is tracked separately as
   // RD OT Time), so rest-day worked minutes are folded back in here explicitly.
   return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes + holidayMinutes + rdOtMinutes);
@@ -504,7 +502,7 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[])
     }
 
     const timeOffTime = timeOffTimeFor(timeOffStatus);
-    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, "", timeOffTime));
+    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime));
   }, 0);
 }
 
@@ -539,7 +537,7 @@ function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[
     }
 
     const timeOffTime = timeOffTimeFor(timeOffStatus);
-    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, "", timeOffTime, "-", rdOtTime));
+    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, "-", rdOtTime));
   }, 0);
 }
 
@@ -800,6 +798,16 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const contractor = CONTRACTORS.find((item) => item.id === record.contractorId || item.name === record.name);
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
+  // Adjusted Time is the secondary time source: once a valid value is entered
+  // for a date, it overrides Worksnap Time entirely for every calculation
+  // (evaluated time, regular/OT allocation, holiday eligibility, completion
+  // time, totals). Worksnap Time itself is left untouched and still shown for
+  // reference in its own column — only this derived map feeds calculations.
+  const effectiveDailyMinutes = weekDates.reduce<Record<string, number>>((acc, d) => {
+    const adjustedMinutes = timeValueToMinutes(adjustedTimes[d] ?? "");
+    acc[d] = adjustedMinutes > 0 ? adjustedMinutes : (dailyWorksnapMinutes[d] ?? 0);
+    return acc;
+  }, {});
   const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
   const isIndia = isFixedContractor((record as AttendanceRow).payCategory);
   const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
@@ -808,50 +816,50 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const worksnapTotalMinutes = worksnapTotalMinutesFor(weekDates, dailyWorksnapMinutes);
-  const indiaTotalMinutes = Math.min(worksnapTotalMinutes, 2400);
+  const effectiveTotalMinutes = worksnapTotalMinutesFor(weekDates, effectiveDailyMinutes);
+  const indiaTotalMinutes = Math.min(effectiveTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
 const totalHolidayMins = weekDates.reduce(
-    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates)),
+    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates)),
     0
   );
   // Displayed US HO Time total — unlike totalHolidayMins (used for Completion
   // Time), this includes the rest-day-holiday RD OT Time boost so the footer
   // matches what each day's US HO Time cell actually shows.
   const totalDisplayedUsHoMinutes = weekDates.reduce((sum, date) => {
-    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+    const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
-    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
     const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
     const { rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved");
     return sum + boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
   }, 0);
   const totalEvaluatedMinutes = weekDates.reduce((sum, date) => {
-    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+    const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType);
     return sum + timeValueToMinutes(evaluatedTime);
   }, 0);
   const totalRegularMinutes = weekDates.reduce(
-    (sum, date) => sum + regularTimeMinutesFor(timeValueToMinutes(worksnapTimeForDate(dailyWorksnapMinutes, date)), isRestDayDate(date, restDaysStr)),
+    (sum, date) => sum + regularTimeMinutesFor(timeValueToMinutes(worksnapTimeForDate(effectiveDailyMinutes, date)), isRestDayDate(date, restDaysStr)),
     0
   );
 const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCategory)
     ? indiaNetCompletionMinutes + totalHolidayMins
     : weekDates.reduce((total, date) => {
-        const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+        const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
         const isRestDay = isRestDayDate(date, restDaysStr);
         const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
-        const adjustedTime = adjustedTimes[date] ?? "";
         const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
         const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-        const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+        const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
         const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
         const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
         const { rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved");
-        return total + timeValueToMinutes(completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime, formatMinutesAsMins(rdOtMinutes)));
+        return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(rdOtMinutes)));
       }, 0);
   const details = [
     ["Shift Type", shiftType],
@@ -859,7 +867,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Regular Time", "Evaluated Regular Time", "Evaluated Time", "Adjusted Time", "US HO Time", "Local HO", "Local HO Time", "Regular OT Time", "RD OT Time", "HO OT Time", "Time Off Status", "Time Off Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Status", "Time Off Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
     .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Time" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
@@ -868,8 +876,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(weekDates, leaveRequests);
   const otTotals = weekDates.reduce(
     (totals, date) => {
-      const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-      const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+      const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
+      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const isRestDay = isRestDayDate(date, restDaysStr);
@@ -894,11 +902,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const isRestDayByDate: Record<string, boolean> = {};
 
     weekDates.forEach((date) => {
-      const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+      const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
       const isRestDay = isRestDayDate(date, restDaysStr);
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
-      const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved");
@@ -993,13 +1001,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     return () => { isCancelled = true; };
   }, [record]);
 
-  useEffect(() => {
-    setAdjustedTimes((current) => weekDates.reduce<Record<string, string>>((times, date) => {
-      times[date] = current[date] ?? evaluatedTimeFor(worksnapTimeForDate(dailyWorksnapMinutes, date), dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType);
-      return times;
-    }, {}));
-  }, [weekDates, dailyDecisionStatuses, dailyWorksnapMinutes, evaluationShiftType]);
-
   function finishAdjustedEdit(date: string, fallbackValue: string) {
     setAdjustedTimes((current) => ({
       ...current,
@@ -1017,7 +1018,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
 
   function approveAllDays() {
     const applicableDates = weekDates.filter((date) =>
-      showDailyDecisionActions(worksnapTimeForDate(dailyWorksnapMinutes, date))
+      showDailyDecisionActions(worksnapTimeForDate(effectiveDailyMinutes, date))
     );
     const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
     setDailyDecisionStatuses((current) => {
@@ -1041,14 +1042,14 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       setSaveError("");
       try {
         const days = weekDates.map((date) => {
-          const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+          const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
           const isRestDay = isRestDayDate(date, restDaysStr);
           const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
           const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
           const adjustedTime = adjustedTimes[date] ?? "";
           const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
           const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
-          const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+          const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
           const adjustedMinutesParsed = timeValueToMinutes(adjustedTime);
           const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
           const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -1170,12 +1171,16 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                   {weekDates.map((date) => {
                     const hasRecord = record.date === date;
                     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-                    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+                    // Raw Worksnap Time — reference display only, never fed into calculations.
+                    const rawWorksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
+                    // Effective time — Adjusted Time when present, else Worksnap Time. Every
+                    // calculation below reads this instead of the raw value.
+                    const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
                     const isRestDay = isRestDayDate(date, restDaysStr);
                     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType);
                     const adjustedTime = adjustedTimes[date] ?? "";
-                    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+                    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
                     const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
                     const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
                     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
@@ -1183,7 +1188,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const isEditingAdjustedTime = editingAdjustedDate === date;
                     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
                     const { rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved");
-                    const completionTime = completionTimeFor(evaluatedTime, adjustedTime, timeOffTime, holidayTime, formatMinutesAsMins(rdOtMinutes));
+                    const completionTime = completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(rdOtMinutes));
                     const displayedUsHoMinutes = boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
                     const regularAllocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
 
@@ -1220,17 +1225,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             )}
                           </td>
                         )}
-                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-3 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(worksnapTime)}`}>
-                          {worksnapTime}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
-                          {regularTimeMinutes > 0 ? formatMinutesAsMins(regularTimeMinutes) : "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
-                          {regularAllocation.evaluatedRegularTime > 0 ? formatMinutesAsMins(regularAllocation.evaluatedRegularTime) : "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
-                          {evaluatedTime}
+                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-3 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(rawWorksnapTime)}`}>
+                          {rawWorksnapTime}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
                           {isIndia ? "-" : isEditingAdjustedTime ? (
@@ -1273,14 +1269,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
-                          {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
+                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
+                          {regularTimeMinutes > 0 ? formatMinutesAsMins(regularTimeMinutes) : "-"}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
-                          {localHoliday}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                          {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
+                          {regularAllocation.evaluatedRegularTime > 0 ? formatMinutesAsMins(regularAllocation.evaluatedRegularTime) : "-"}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
                           {regularAllocation.regularOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.regularOtMinutes) : "-"}
@@ -1288,8 +1281,20 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {regularAllocation.rdOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.rdOtMinutes) : "-"}
                         </td>
+                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
+                          {evaluatedTime}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                          {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
+                        </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {hoOtMinutes > 0 ? formatMinutesAsMins(hoOtMinutes) : "-"}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                          {localHoliday}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                          {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
                         <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
                           <select
@@ -1346,37 +1351,37 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       {formatMinutesAsMins(worksnapTotalMinutes)}
                     </td>
+                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                      -
+                    </td>
                     <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
                       {formatMinutesAsMins(totalRegularMinutes)}
                     </td>
                     <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100">
                       {totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(totalEvaluatedRegularMinutes) : "-"}
                     </td>
+                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100">
+                      {totalRegularOtMinutes > 0 ? formatMinutesAsMins(totalRegularOtMinutes) : "-"}
+                    </td>
+                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesAsMins(totalAdjustedRdOtMinutes) : "-"}
+                    </td>
                     <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
                       {totalEvaluatedMinutes > 0 ? formatMinutesAsMins(totalEvaluatedMinutes) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
-                      -
                     </td>
                     <td className="px-4 py-3 border-r border-slate-100">
                       {totalDisplayedUsHoMinutes > 0
                         ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesAsMins(totalDisplayedUsHoMinutes)}</span>
                         : <span className="text-slate-500">-</span>}
                     </td>
+                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                      {otTotals.ho > 0 ? formatMinutesAsMins(otTotals.ho) : "-"}
+                    </td>
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -
                     </td>
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {totalLocalHolidayMinutes > 0 ? formatMinutesAsMins(totalLocalHolidayMinutes) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
-                      {totalRegularOtMinutes > 0 ? formatMinutesAsMins(totalRegularOtMinutes) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesAsMins(totalAdjustedRdOtMinutes) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {otTotals.ho > 0 ? formatMinutesAsMins(otTotals.ho) : "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
                       -

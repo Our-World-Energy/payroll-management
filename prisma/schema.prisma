@@ -381,6 +381,23 @@ model ContractorLeaveRequest {
   @@map("contractor_leave_requests")
 }
 
+/// Manual per-employee per-WEEK payroll adjustments (Bonus, MISC, Retro Pay,
+/// Reimbursement) entered by an admin from the Payroll Voucher's "Review"
+/// action — these have no other data source anywhere in the system.
+model PayrollAdjustment {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String
+  weekStart String   // "YYYY-MM-DD" (Sunday) — same week-key convention used across Attendance/Payroll
+  bonus     Float    @default(0)
+  misc      Float    @default(0)
+  retroPay  Float    @default(0)
+  reim      Float    @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([email, weekStart], name: "payroll_adjustment_key")
+  @@map("payroll_adjustments")
+}
+
 /// Per-employee per-DAY attendance review snapshot (admin picks the date) —
 /// mirrors every column of the Attendance Review modal's daily table so a
 /// reopened review always matches exactly what was last saved.

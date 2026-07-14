@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { LuDownload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw } from "react-icons/lu";
-import { fetchAllContractors } from "../contractors/actions";
+import { useState, useEffect, useRef } from "react";
+import { LuDownload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil } from "react-icons/lu";
+import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
-import { addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
+import { fetchPayrollAdjustments, savePayrollAdjustment } from "./actions";
+import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween } from "@/lib/weekUtils";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
+import { Logo } from "@/components/Logo";
 
 // No real deductions/tax data exists anywhere yet — kept as the same flat
 // placeholder ratio the old mock page used, not a real tax calculation.
@@ -15,14 +17,25 @@ const DEDUCTION_RATE = 0.15;
 type PayrollRow = {
   email: string;
   name: string;
+  role: string;
+  restDay: string;
   country: string;
   localHoliday: string;
   localHolidayMinutes: number | null;
+  totalEvaluatedRegularMinutes: number | null;
+  totalRegularOtMinutes: number | null;
+  totalRdOtMinutes: number | null;
+  totalUsHoMinutes: number | null;
+  totalHoOtMinutes: number | null;
+  totalTimeOffRequestMinutes: number;
+  ptoHours: number;
   department: string;
   payCategory: string;
   shiftType: string;
   currency: string;
   hourlyRate: number;
+  monthlyRate: number;
+  weeklyRate: number;
   actualMinutes: number;
   completionMinutes: number | null;
   hours: number | null;
@@ -30,7 +43,41 @@ type PayrollRow = {
   deductions: number | null;
   net: number | null;
   status: "Reviewed" | "For Review" | "No Activity";
+  dailyMinutes: Record<string, number>;
+  bonus: number;
+  misc: number;
+  retroPay: number;
+  reim: number;
 };
+
+// A leave request's hours are a flat per-request amount (not scaled by date
+// range), so the week total sums each request overlapping the week once —
+// matching the same logic Attendance Review uses for this same total.
+function totalTimeOffRequestMinutesFor(
+  rangeFrom: string,
+  rangeTo: string,
+  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number; sickLeaveUsedHours: number }>
+) {
+  return requests
+    .filter((r) => r.startDate <= rangeTo && r.endDate >= rangeFrom)
+    .reduce((sum, r) => sum + (r.type.startsWith("PTO") ? r.ptoUsedHours : r.sickLeaveUsedHours) * 60, 0);
+}
+
+// PTO-only hours (excludes Sick Leave requests) for the voucher's PTO HRS line.
+function totalPtoHoursFor(
+  rangeFrom: string,
+  rangeTo: string,
+  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number }>
+) {
+  return requests
+    .filter((r) => r.type.startsWith("PTO") && r.startDate <= rangeTo && r.endDate >= rangeFrom)
+    .reduce((sum, r) => sum + r.ptoUsedHours, 0);
+}
+
+function fmtVoucherDate(iso: string) {
+  const [y, m, d] = iso.split("-");
+  return y && m && d ? `${m}.${d}.${y.slice(2)}` : iso;
+}
 
 const STATUS_STYLES: Record<string, string> = {
   Reviewed:      "bg-emerald-50 text-emerald-700",
@@ -81,6 +128,8 @@ export default function PayrollPage() {
   const [countryFilter, setCountryFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
+  const [voucherTarget, setVoucherTarget] = useState<PayrollRow | null>(null);
+  const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
 
   // Same recent-Sun→Sat-weeks list Attendance Management uses, anchored to
   // the current Arizona week.
@@ -89,6 +138,38 @@ export default function PayrollPage() {
     setWeeks(list);
     setWeek((current) => current || list[0]);
   }, []);
+
+  // Payroll's table is wide — mirror its horizontal scrollbar at the top too
+  // (not just below the table), same pattern as Attendance's Weekly Time
+  // Tracking table, so it's reachable without scrolling down past the table first.
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const trackingTableRef = useRef<HTMLTableElement>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const isSyncingScroll = useRef(false);
+
+  useEffect(() => {
+    const tableEl = trackingTableRef.current;
+    if (!tableEl) return;
+    const update = () => setTableScrollWidth(tableEl.offsetWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(tableEl);
+    return () => ro.disconnect();
+  }, [rows]);
+
+  function syncScrollFromTop() {
+    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
+    isSyncingScroll.current = true;
+    tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+    isSyncingScroll.current = false;
+  }
+  function syncScrollFromTable() {
+    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
+    isSyncingScroll.current = true;
+    topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    isSyncingScroll.current = false;
+  }
 
   const rangeFrom = week;
   const rangeTo = week ? addDaysIso(week, 6) : "";
@@ -102,28 +183,55 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult, holidays] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, holidays, leaveRequests, adjustments] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
           fetchHolidays().catch(() => [] as Holiday[]),
+          fetchAllLeaveRequestsAdmin().catch(() => []),
+          fetchPayrollAdjustments(rangeFrom).catch(() => []),
         ]);
 
         if (!isMounted) return;
 
         const minutesByEmail = new Map<string, number>();
+        const dailyMinutesByEmail = new Map<string, Record<string, number>>();
         for (const e of (entriesResult.entries ?? [])) {
           const email = String(e.email ?? "").trim().toLowerCase();
-          if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
+          const durationMins = (e as { durationMins?: number }).durationMins ?? 0;
+          if (!email) continue;
+          minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + durationMins);
+          const entryDate = String((e as { entryDate?: string }).entryDate ?? "").slice(0, 10);
+          if (entryDate) {
+            const days = dailyMinutesByEmail.get(email) ?? {};
+            days[entryDate] = (days[entryDate] ?? 0) + durationMins;
+            dailyMinutesByEmail.set(email, days);
+          }
         }
 
-        const weekStatusByEmail = new Map<string, { requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null }>(
+        type SavedWeekStatus = {
+          requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null;
+          totalEvaluatedRegularMinutes: number | null; totalUsHoMinutes: number | null;
+          totalRegularOtMinutes: number | null; totalRdOtMinutes: number | null; totalHoOtMinutes: number | null;
+        };
+        const weekStatusByEmail = new Map<string, SavedWeekStatus>(
           (weekStatusResult.weekStatuses ?? [])
             .filter((s: { email?: string }) => s.email)
-            .map((s: { email: string; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null }) => [s.email.trim().toLowerCase(), s])
+            .map((s: { email: string } & SavedWeekStatus) => [s.email.trim().toLowerCase(), s])
         );
 
+        const leaveRequestsByEmail = new Map<string, typeof leaveRequests>();
+        for (const r of leaveRequests) {
+          if (r.status !== "Approved") continue;
+          const email = r.email.trim().toLowerCase();
+          const list = leaveRequestsByEmail.get(email) ?? [];
+          list.push(r);
+          leaveRequestsByEmail.set(email, list);
+        }
+
         const holidaysInWeek = holidays.filter((h) => h.date.slice(0, 10) >= rangeFrom && h.date.slice(0, 10) <= rangeTo);
+
+        const adjustmentByEmail = new Map(adjustments.map((a) => [a.email.trim().toLowerCase(), a]));
 
         const nextRows: PayrollRow[] = contractors
           .filter((c) => c.email)
@@ -139,18 +247,32 @@ export default function PayrollPage() {
             const net = gross != null && deductions != null ? gross - deductions : null;
             const country = countryFromLocation(c.location || "");
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
+            const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
+            const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(rangeFrom, rangeTo, contractorRequests);
+            const ptoHours = totalPtoHoursFor(rangeFrom, rangeTo, contractorRequests);
 
             return {
               email,
               name: c.fullName || email,
+              role: c.role || "-",
+              restDay: c.restDay || "",
               country,
               localHoliday,
               localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
+              totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
+              totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
+              totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
+              totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
+              totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
+              totalTimeOffRequestMinutes,
+              ptoHours,
               department: c.department || "-",
               payCategory: c.payCategory || "-",
               shiftType: c.shiftType || "-",
               currency: c.currency || "USD",
               hourlyRate,
+              monthlyRate: parseFloat(c.monthlyRate) || 0,
+              weeklyRate: parseFloat(c.weeklyRate) || 0,
               actualMinutes,
               completionMinutes: isReviewed ? (saved!.completionMinutes as number) : null,
               hours,
@@ -158,6 +280,11 @@ export default function PayrollPage() {
               deductions,
               net,
               status: isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
+              dailyMinutes: dailyMinutesByEmail.get(email) ?? {},
+              bonus: adjustmentByEmail.get(email)?.bonus ?? 0,
+              misc: adjustmentByEmail.get(email)?.misc ?? 0,
+              retroPay: adjustmentByEmail.get(email)?.retroPay ?? 0,
+              reim: adjustmentByEmail.get(email)?.reim ?? 0,
             };
           });
 
@@ -204,6 +331,15 @@ export default function PayrollPage() {
     setCountryFilter("All");
     setShiftTypeFilter("All");
     setDepartmentFilter("All");
+  }
+
+  async function handleSaveAdjustment(values: { bonus: number; misc: number; retroPay: number; reim: number }) {
+    if (!reviewTarget) return { ok: false, error: "No contractor selected." };
+    const result = await savePayrollAdjustment({ email: reviewTarget.email, weekStart: rangeFrom, ...values });
+    if (result.ok) {
+      setRows((prev) => prev.map((r) => r.email === reviewTarget.email ? { ...r, ...values } : r));
+    }
+    return result;
   }
 
   // Sum per currency — mixing currencies (USD/MXN/PHP, etc.) into one number would be wrong.
@@ -349,12 +485,24 @@ export default function PayrollPage() {
           </div>
         </div>
 
+        {/* Top scrollbar — mirrors the table's own horizontal scrollbar */}
+        <div
+          ref={topScrollRef}
+          onScroll={syncScrollFromTop}
+          className="overflow-x-auto overflow-y-hidden"
+          style={{ height: 14 }}
+        >
+          <div style={{ width: tableScrollWidth, height: 1 }} />
+        </div>
+
         {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
+        <div ref={tableScrollRef} onScroll={syncScrollFromTable} className="overflow-x-auto">
+          <table ref={trackingTableRef} className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
-                {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time", "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status"].map((h, i) => (
+                {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
+                  "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap border-r border-slate-100 last:border-r-0 ${
@@ -369,7 +517,7 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={21} className="px-5 py-10 text-center text-sm text-slate-400">
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
@@ -382,6 +530,12 @@ export default function PayrollPage() {
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.shiftType}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.localHoliday}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.currency} {r.hourlyRate.toFixed(2)}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.hourlyRate.toFixed(2)}</td>
@@ -394,6 +548,24 @@ export default function PayrollPage() {
                       {r.status}
                     </span>
                   </td>
+                  <td className="px-4 md:px-5 py-3.5">
+                    <div className="flex items-center justify-center gap-3">
+                      <button
+                        onClick={() => setVoucherTarget(r)}
+                        title="View payroll voucher"
+                        className="text-slate-400 hover:text-[#003527] transition-colors"
+                      >
+                        <LuEye size={18} strokeWidth={1.75} />
+                      </button>
+                      <button
+                        onClick={() => setReviewTarget(r)}
+                        title="Review — add Bonus, MISC, Retro Pay, REIM"
+                        className="text-slate-400 hover:text-[#003527] transition-colors"
+                      >
+                        <LuPencil size={16} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -402,6 +574,291 @@ export default function PayrollPage() {
         <div className="px-4 md:px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
           {filteredRows.length} of {rows.length} contractors · Week of {week ? weekLabel(week) : "—"}
         </div>
+      </div>
+
+      {voucherTarget && (
+        <PayrollVoucherModal
+          row={voucherTarget}
+          rangeFrom={rangeFrom}
+          rangeTo={rangeTo}
+          onClose={() => setVoucherTarget(null)}
+        />
+      )}
+
+      {reviewTarget && (
+        <PayrollAdjustmentModal
+          row={reviewTarget}
+          onSave={handleSaveAdjustment}
+          onClose={() => setReviewTarget(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THUR", "FRI", "SAT"];
+const REST_DAY_TO_LABEL: Record<string, string> = {
+  Sunday: "SUN", Monday: "MON", Tuesday: "TUE", Wednesday: "WED",
+  Thursday: "THUR", Friday: "FRI", Saturday: "SAT",
+};
+
+function PayrollVoucherModal({
+  row, rangeFrom, rangeTo, onClose,
+}: {
+  row: PayrollRow;
+  rangeFrom: string;
+  rangeTo: string;
+  onClose: () => void;
+}) {
+  const weekDates = rangeFrom && rangeTo ? datesBetween(rangeFrom, rangeTo) : [];
+  const restDayLabels = new Set(
+    row.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
+  );
+
+  const regHours = (row.totalEvaluatedRegularMinutes ?? 0) / 60;
+  const ptoHours = row.ptoHours;
+  const hoHours = ((row.totalUsHoMinutes ?? 0) + (row.localHolidayMinutes ?? 0)) / 60;
+  const regOtHours = (row.totalRegularOtMinutes ?? 0) / 60;
+  const rdOtHours = (row.totalRdOtMinutes ?? 0) / 60;
+  const hoOtHours = (row.totalHoOtMinutes ?? 0) / 60;
+
+  const regPay = regHours * row.hourlyRate;
+  const regOtPay = regOtHours * row.hourlyRate;
+  const rdOtPay = rdOtHours * row.hourlyRate;
+  const holidayPay = hoHours * row.hourlyRate;
+  const hoOtPay = hoOtHours * row.hourlyRate;
+  const ptoPay = ptoHours * row.hourlyRate;
+  // Bonus/MISC/Retro Pay/REIM come from the manual Review adjustment (if any);
+  // Cash Advance has no data source anywhere yet, so it stays a placeholder.
+  const cashAdvance = 0;
+  const { bonus, misc, retroPay, reim } = row;
+  const grossPay = regPay + regOtPay + rdOtPay + holidayPay + hoOtPay + ptoPay + cashAdvance + bonus + misc + retroPay + reim;
+  const totalDeductions = 0; // No per-line deduction data (HMO/CA) exists yet.
+  const netPay = grossPay - totalDeductions;
+
+  const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors z-10"
+        >
+          <LuX size={18} strokeWidth={2} />
+        </button>
+
+        <div className="p-6 md:p-8 text-sm text-slate-800">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4 pb-4 border-b-2 border-[#003527]">
+            <div className="flex items-start gap-3">
+              <Logo className="h-10 w-10 shrink-0" />
+              <div>
+                <p className="font-bold text-slate-800">Our World Energy</p>
+                <p className="text-xs text-slate-500">2501 W Phelps Rd, Phoenix, AZ 85023</p>
+                <p className="text-xs text-teal-600">offshorepayroll@ourworldenergy.com</p>
+              </div>
+            </div>
+            <div className="text-right text-xs">
+              <p><span className="text-slate-500">Pay Period:</span> <span className="font-semibold">{fmtVoucherDate(rangeFrom)} to {fmtVoucherDate(rangeTo)}</span></p>
+              <p className="mt-1"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">—</span></p>
+            </div>
+          </div>
+
+          <h3 className="text-center font-bold text-slate-700 tracking-wide mt-3 mb-4">Payroll Voucher</h3>
+
+          {/* Contractor info */}
+          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs mb-5">
+            <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{row.name}</span></p>
+            <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(row.monthlyRate)}</span></p>
+            <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{row.role}</span></p>
+            <p><span className="text-slate-500">Weekly Rate</span> <span className="font-semibold ml-2">{money(row.weeklyRate)}</span></p>
+          </div>
+
+          {/* Gross Pay */}
+          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-t-md">Gross Pay</div>
+          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <table className="w-full text-xs mb-4">
+                <thead>
+                  <tr>
+                    {DAY_LABELS.map((d) => (
+                      <th key={d} className="border border-slate-200 bg-slate-50 px-1 py-1 font-semibold text-slate-500">{d}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    {weekDates.map((date, i) => {
+                      const label = DAY_LABELS[i];
+                      const isOff = restDayLabels.has(label);
+                      const hours = (row.dailyMinutes[date] ?? 0) / 60;
+                      return (
+                        <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
+                          {isOff ? "OFF" : hours.toFixed(2)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                </tbody>
+              </table>
+
+              <div className="space-y-2 text-xs">
+                {[
+                  ["REG Hours", regHours],
+                  ["PTO HRS", ptoHours],
+                  ["HO HRS", hoHours],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                    <span className="text-slate-500">{label}</span>
+                    <span className="font-semibold tabular-nums">{(value as number).toFixed(2)}</span>
+                  </div>
+                ))}
+                {[
+                  ["REG OT HRS", regOtHours],
+                  ["RD OT HRS", rdOtHours],
+                  ["HO OT HRS", hoOtHours],
+                ].map(([label, value]) => (
+                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                    <span className="text-slate-500">{label}</span>
+                    <span className="font-semibold tabular-nums">{(value as number).toFixed(2)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              {[
+                ["REG HRS Pay", regPay],
+                ["REG OT", regOtPay],
+                ["RD OT", rdOtPay],
+                ["HOLIDAY PAY", holidayPay],
+                ["HO OT", hoOtPay],
+                ["PTO", ptoPay],
+                ["Cash Advance", cashAdvance],
+                ["Bonus", bonus],
+                ["MISC", misc],
+                ["Retro Pay", retroPay],
+                ["REIM", reim],
+              ].map(([label, value]) => (
+                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                  <span className="text-slate-500">{label}</span>
+                  <span className={`tabular-nums ${(value as number) > 0 ? "font-semibold" : "text-slate-300"}`}>{money(value as number)}</span>
+                </div>
+              ))}
+              <div className="flex items-center justify-between border-2 border-[#003527] rounded-md px-2 py-1.5 mt-3">
+                <span className="font-bold uppercase text-[10px] tracking-wider text-slate-500">Gross Pay</span>
+                <span className="font-bold tabular-nums">{money(grossPay)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Deductions */}
+          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-t-md mt-5">Deduction</div>
+          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-4 flex items-end justify-between gap-6">
+            <div className="space-y-2 text-xs">
+              <p className="text-slate-400">HMO Premium ___________________</p>
+              <p className="text-slate-400">CA Payment ___________________</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="font-bold uppercase text-[10px] tracking-wider text-slate-500 whitespace-nowrap">Total Deductions</span>
+              <span className="font-bold tabular-nums border-2 border-slate-300 rounded-md px-3 py-1.5">{money(totalDeductions)}</span>
+            </div>
+          </div>
+
+          {/* Net Pay */}
+          <div className="mt-5 flex items-center justify-between bg-[#003527] text-white rounded-md px-4 py-3">
+            <span className="font-bold uppercase text-xs tracking-wider">Net Pay</span>
+            <span className="font-bold text-lg tabular-nums">{row.currency} {money(netPay)}</span>
+          </div>
+
+          <p className="text-[10px] text-slate-400 mt-3">
+            Cash Advance, HMO Premium, CA Payment, and Check Date are not yet tracked in the system and are shown blank pending manual entry.
+            Bonus, MISC, Retro Pay, and REIM can be entered via the Review action on the payroll table.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PayrollAdjustmentModal({
+  row, onSave, onClose,
+}: {
+  row: PayrollRow;
+  onSave: (values: { bonus: number; misc: number; retroPay: number; reim: number }) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+}) {
+  const [bonus,    setBonus]    = useState(row.bonus ? row.bonus.toString() : "");
+  const [misc,     setMisc]     = useState(row.misc ? row.misc.toString() : "");
+  const [retroPay, setRetroPay] = useState(row.retroPay ? row.retroPay.toString() : "");
+  const [reim,     setReim]     = useState(row.reim ? row.reim.toString() : "");
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState("");
+
+  async function handleSave() {
+    setError("");
+    setSaving(true);
+    const result = await onSave({
+      bonus: parseFloat(bonus) || 0,
+      misc: parseFloat(misc) || 0,
+      retroPay: parseFloat(retroPay) || 0,
+      reim: parseFloat(reim) || 0,
+    });
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error ?? "Failed to save adjustment.");
+      return;
+    }
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !saving && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <button
+          onClick={onClose}
+          disabled={saving}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40"
+        >
+          <LuX size={18} strokeWidth={2} />
+        </button>
+
+        <h3 className="text-base font-bold text-[#003527]">Review — Manual Payroll Adjustments</h3>
+        <p className="text-xs text-slate-400 mt-1 mb-5">{row.name}</p>
+
+        <div className="space-y-3">
+          {([
+            ["Bonus",     bonus,    setBonus],
+            ["MISC",      misc,     setMisc],
+            ["Retro Pay", retroPay, setRetroPay],
+            ["REIM",      reim,     setReim],
+          ] as [string, string, (v: string) => void][]).map(([label, value, setValue]) => (
+            <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+              <input
+                type="number"
+                step="0.01"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="0.00"
+                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+          ))}
+        </div>
+
+        {error && <p className="text-xs font-medium text-red-600 mt-3">{error}</p>}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full mt-5 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          <LuCircleCheck size={15} strokeWidth={2} /> {saving ? "Saving…" : "Save Adjustments"}
+        </button>
       </div>
     </div>
   );

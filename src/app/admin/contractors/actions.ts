@@ -414,3 +414,124 @@ export async function updateLeaveRequestStatus(
 
   return { ok: true };
 }
+
+// Admin-driven override — creates a leave request already Approved and
+// applies its balance deduction immediately, bypassing the normal
+// Pending -> Approve/Decline flow and the insufficient-balance check
+// (an override is an explicit admin action, not a contractor-submitted
+// request awaiting review).
+export async function createLeaveOverride(params: {
+  email: string;
+  type: "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Sick Leave";
+  startDate: string;
+  endDate: string;
+  reason: string;
+}): Promise<{ ok: boolean; error?: string; request?: AdminLeaveRequest }> {
+  const sb = getSupabase();
+
+  const hours = leaveTypeHours(params.type);
+  const isPto = isPtoLeaveType(params.type);
+  const ptoUsedHours = isPto ? hours : 0;
+  const sickLeaveUsedHours = isPto ? 0 : hours;
+  const usedField = isPto ? "ptoUsed" : "sickLeaveUsed";
+
+  const durationDays = Math.max(
+    1,
+    Math.round((new Date(params.endDate).getTime() - new Date(params.startDate).getTime()) / 86400000) + 1
+  );
+
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  const { error: insertErr } = await sb.from(LEAVE_TABLE).insert({
+    id,
+    email: params.email,
+    type: params.type,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    durationDays,
+    reason: params.reason,
+    status: "Approved",
+    ptoUsedHours,
+    sickLeaveUsedHours,
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (insertErr) return { ok: false, error: insertErr.message };
+
+  const hoursToAdd = isPto ? ptoUsedHours : sickLeaveUsedHours;
+  if (hoursToAdd > 0) {
+    const { data: profile, error: profileErr } = await sb
+      .from(TABLE)
+      .select("ptoUsed, sickLeaveUsed")
+      .eq("email", params.email)
+      .single();
+    if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+
+    const currentUsed = Number(profile[usedField] ?? 0);
+    const { error: profileUpdateErr } = await sb
+      .from(TABLE)
+      .update({ [usedField]: currentUsed + hoursToAdd })
+      .eq("email", params.email);
+    if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+  }
+
+  return {
+    ok: true,
+    request: {
+      id,
+      email: params.email,
+      type: params.type,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      durationDays,
+      reason: params.reason,
+      status: "Approved",
+      ptoUsedHours,
+      sickLeaveUsedHours,
+      createdAt: now,
+    },
+  };
+}
+
+// Deletes a leave request outright (used from Historical Request Data). If
+// the request was Approved, its balance deduction is reversed first so
+// deleting it never leaves ptoUsed/sickLeaveUsed permanently inflated with
+// no record left to explain the number.
+export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+
+  const { data: req, error: fetchErr } = await sb
+    .from(LEAVE_TABLE)
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours")
+    .eq("id", id)
+    .single();
+  if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
+
+  if (String(req.status) === "Approved") {
+    const isPto = isPtoLeaveType(String(req.type));
+    const usedField = isPto ? "ptoUsed" : "sickLeaveUsed";
+    const hours = Number(isPto ? req.ptoUsedHours : req.sickLeaveUsedHours) || 0;
+
+    if (hours > 0) {
+      const { data: profile, error: profileErr } = await sb
+        .from(TABLE)
+        .select("ptoUsed, sickLeaveUsed")
+        .eq("email", String(req.email))
+        .single();
+      if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+
+      const currentUsed = Number(profile[usedField] ?? 0);
+      const { error: profileUpdateErr } = await sb
+        .from(TABLE)
+        .update({ [usedField]: Math.max(currentUsed - hours, 0) })
+        .eq("email", String(req.email));
+      if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+    }
+  }
+
+  const { error: deleteErr } = await sb.from(LEAVE_TABLE).delete().eq("id", id);
+  if (deleteErr) return { ok: false, error: deleteErr.message };
+
+  return { ok: true };
+}

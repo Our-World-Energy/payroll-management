@@ -17,6 +17,7 @@ export const LEAVE_TYPE_HOURS: Record<string, number> = {
   "PTO Half Day": 4,
   "Sick Leave": 8,
   "Sick Leave Half Day": 4,
+  "Unpaid Sick Leave": 0,
 };
 
 export function leaveTypeHours(type: string): number {
