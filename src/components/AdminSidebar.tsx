@@ -16,9 +16,9 @@ type NavItem = { href: string; label: string; Icon: IconType };
 const NAV_ITEMS: NavItem[] = [
   { href: "/admin",              label: "Dashboard",          Icon: LuLayoutDashboard },
   { href: "/admin/contractors",  label: "Contractor Details", Icon: LuHardHat         },
+  { href: "/admin/time-off",     label: "Time-Off Management",Icon: LuCalendarX       },
   { href: "/admin/attendance",   label: "Attendance",         Icon: LuFingerprint     },
   { href: "/admin/payroll",      label: "Payroll",            Icon: LuWallet          },
-  { href: "/admin/time-off",     label: "Time-Off Management",Icon: LuCalendarX       },
   { href: "/admin/reports",      label: "Reports",            Icon: LuChartBar        },
   { href: "/admin/users",        label: "User Management",    Icon: LuUsers           },
   { href: "/admin/settings",     label: "Settings",           Icon: LuSettings        },
