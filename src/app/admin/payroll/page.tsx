@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { LuDownload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
@@ -48,6 +48,9 @@ type PayrollRow = {
   misc: number;
   retroPay: number;
   reim: number;
+  cashAdvance: number;
+  hmo: number;
+  tax: number;
 };
 
 // A leave request's hours are a flat per-request amount (not scaled by date
@@ -138,38 +141,6 @@ export default function PayrollPage() {
     setWeeks(list);
     setWeek((current) => current || list[0]);
   }, []);
-
-  // Payroll's table is wide — mirror its horizontal scrollbar at the top too
-  // (not just below the table), same pattern as Attendance's Weekly Time
-  // Tracking table, so it's reachable without scrolling down past the table first.
-  const topScrollRef = useRef<HTMLDivElement>(null);
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-  const trackingTableRef = useRef<HTMLTableElement>(null);
-  const [tableScrollWidth, setTableScrollWidth] = useState(0);
-  const isSyncingScroll = useRef(false);
-
-  useEffect(() => {
-    const tableEl = trackingTableRef.current;
-    if (!tableEl) return;
-    const update = () => setTableScrollWidth(tableEl.offsetWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(tableEl);
-    return () => ro.disconnect();
-  }, [rows]);
-
-  function syncScrollFromTop() {
-    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
-    isSyncingScroll.current = true;
-    tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-    isSyncingScroll.current = false;
-  }
-  function syncScrollFromTable() {
-    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
-    isSyncingScroll.current = true;
-    topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    isSyncingScroll.current = false;
-  }
 
   const rangeFrom = week;
   const rangeTo = week ? addDaysIso(week, 6) : "";
@@ -285,6 +256,9 @@ export default function PayrollPage() {
               misc: adjustmentByEmail.get(email)?.misc ?? 0,
               retroPay: adjustmentByEmail.get(email)?.retroPay ?? 0,
               reim: adjustmentByEmail.get(email)?.reim ?? 0,
+              cashAdvance: adjustmentByEmail.get(email)?.cashAdvance ?? 0,
+              hmo: adjustmentByEmail.get(email)?.hmo ?? 0,
+              tax: adjustmentByEmail.get(email)?.tax ?? 0,
             };
           });
 
@@ -333,7 +307,10 @@ export default function PayrollPage() {
     setDepartmentFilter("All");
   }
 
-  async function handleSaveAdjustment(values: { bonus: number; misc: number; retroPay: number; reim: number }) {
+  async function handleSaveAdjustment(values: {
+    bonus: number; misc: number; retroPay: number; reim: number;
+    cashAdvance: number; hmo: number; tax: number;
+  }) {
     if (!reviewTarget) return { ok: false, error: "No contractor selected." };
     const result = await savePayrollAdjustment({ email: reviewTarget.email, weekStart: rangeFrom, ...values });
     if (result.ok) {
@@ -446,20 +423,10 @@ export default function PayrollPage() {
           </div>
         </div>
 
-        {/* Top scrollbar — mirrors the table's own horizontal scrollbar */}
-        <div
-          ref={topScrollRef}
-          onScroll={syncScrollFromTop}
-          className="overflow-x-auto overflow-y-hidden"
-          style={{ height: 14 }}
-        >
-          <div style={{ width: tableScrollWidth, height: 1 }} />
-        </div>
-
         {/* Table */}
-        <div ref={tableScrollRef} onScroll={syncScrollFromTable} className="overflow-x-auto">
-          <table ref={trackingTableRef} className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead>
+        <div className="overflow-auto" style={{ maxHeight: "60vh" }}>
+          <table className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
@@ -605,12 +572,11 @@ function PayrollVoucherModal({
   const holidayPay = hoHours * row.hourlyRate;
   const hoOtPay = hoOtHours * row.hourlyRate;
   const ptoPay = ptoHours * row.hourlyRate;
-  // Bonus/MISC/Retro Pay/REIM come from the manual Review adjustment (if any);
-  // Cash Advance has no data source anywhere yet, so it stays a placeholder.
-  const cashAdvance = 0;
-  const { bonus, misc, retroPay, reim } = row;
-  const grossPay = regPay + regOtPay + rdOtPay + holidayPay + hoOtPay + ptoPay + cashAdvance + bonus + misc + retroPay + reim;
-  const totalDeductions = 0; // No per-line deduction data (HMO/CA) exists yet.
+  // Bonus/MISC/Retro Pay/REIM (earnings) and Cash Advance/HMO/Tax (deductions)
+  // all come from the manual Review adjustment (if any).
+  const { bonus, misc, retroPay, reim, cashAdvance, hmo, tax } = row;
+  const grossPay = regPay + regOtPay + rdOtPay + holidayPay + hoOtPay + ptoPay + bonus + misc + retroPay + reim;
+  const totalDeductions = cashAdvance + hmo + tax;
   const netPay = grossPay - totalDeductions;
 
   const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -713,7 +679,6 @@ function PayrollVoucherModal({
                 ["HOLIDAY PAY", holidayPay],
                 ["HO OT", hoOtPay],
                 ["PTO", ptoPay],
-                ["Cash Advance", cashAdvance],
                 ["Bonus", bonus],
                 ["MISC", misc],
                 ["Retro Pay", retroPay],
@@ -734,9 +699,17 @@ function PayrollVoucherModal({
           {/* Deductions */}
           <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-t-md mt-5">Deduction</div>
           <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-4 flex items-end justify-between gap-6">
-            <div className="space-y-2 text-xs">
-              <p className="text-slate-400">HMO Premium ___________________</p>
-              <p className="text-slate-400">CA Payment ___________________</p>
+            <div className="space-y-2 text-xs flex-1">
+              {[
+                ["Cash Advance", cashAdvance],
+                ["HMO Premium", hmo],
+                ["Tax", tax],
+              ].map(([label, value]) => (
+                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                  <span className="text-slate-500">{label}</span>
+                  <span className={`tabular-nums ${(value as number) > 0 ? "font-semibold" : "text-slate-300"}`}>{money(value as number)}</span>
+                </div>
+              ))}
             </div>
             <div className="flex items-center gap-3">
               <span className="font-bold uppercase text-[10px] tracking-wider text-slate-500 whitespace-nowrap">Total Deductions</span>
@@ -751,8 +724,8 @@ function PayrollVoucherModal({
           </div>
 
           <p className="text-[10px] text-slate-400 mt-3">
-            Cash Advance, HMO Premium, CA Payment, and Check Date are not yet tracked in the system and are shown blank pending manual entry.
-            Bonus, MISC, Retro Pay, and REIM can be entered via the Review action on the payroll table.
+            Check Date is not yet tracked in the system and is shown blank pending manual entry.
+            Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
         </div>
       </div>
@@ -760,19 +733,43 @@ function PayrollVoucherModal({
   );
 }
 
+type AdjustmentValues = {
+  bonus: number; misc: number; retroPay: number; reim: number;
+  cashAdvance: number; hmo: number; tax: number;
+};
+
+const EARNINGS_TAB = "earnings" as const;
+const DEDUCTION_TAB = "deduction" as const;
+
 function PayrollAdjustmentModal({
   row, onSave, onClose,
 }: {
   row: PayrollRow;
-  onSave: (values: { bonus: number; misc: number; retroPay: number; reim: number }) => Promise<{ ok: boolean; error?: string }>;
+  onSave: (values: AdjustmentValues) => Promise<{ ok: boolean; error?: string }>;
   onClose: () => void;
 }) {
-  const [bonus,    setBonus]    = useState(row.bonus ? row.bonus.toString() : "");
-  const [misc,     setMisc]     = useState(row.misc ? row.misc.toString() : "");
-  const [retroPay, setRetroPay] = useState(row.retroPay ? row.retroPay.toString() : "");
-  const [reim,     setReim]     = useState(row.reim ? row.reim.toString() : "");
-  const [saving,   setSaving]   = useState(false);
-  const [error,    setError]    = useState("");
+  const [tab, setTab] = useState<typeof EARNINGS_TAB | typeof DEDUCTION_TAB>(EARNINGS_TAB);
+  const [bonus,       setBonus]       = useState(row.bonus ? row.bonus.toString() : "");
+  const [misc,        setMisc]        = useState(row.misc ? row.misc.toString() : "");
+  const [retroPay,    setRetroPay]    = useState(row.retroPay ? row.retroPay.toString() : "");
+  const [reim,        setReim]        = useState(row.reim ? row.reim.toString() : "");
+  const [cashAdvance, setCashAdvance] = useState(row.cashAdvance ? row.cashAdvance.toString() : "");
+  const [hmo,         setHmo]         = useState(row.hmo ? row.hmo.toString() : "");
+  const [tax,         setTax]         = useState(row.tax ? row.tax.toString() : "");
+  const [saving,      setSaving]      = useState(false);
+  const [error,       setError]       = useState("");
+
+  const earningsFields: [string, string, (v: string) => void][] = [
+    ["Bonus",     bonus,    setBonus],
+    ["MISC",      misc,     setMisc],
+    ["Retro Pay", retroPay, setRetroPay],
+    ["REIM",      reim,     setReim],
+  ];
+  const deductionFields: [string, string, (v: string) => void][] = [
+    ["Cash Advance", cashAdvance, setCashAdvance],
+    ["HMO",          hmo,         setHmo],
+    ["Tax",          tax,         setTax],
+  ];
 
   async function handleSave() {
     setError("");
@@ -782,6 +779,9 @@ function PayrollAdjustmentModal({
       misc: parseFloat(misc) || 0,
       retroPay: parseFloat(retroPay) || 0,
       reim: parseFloat(reim) || 0,
+      cashAdvance: parseFloat(cashAdvance) || 0,
+      hmo: parseFloat(hmo) || 0,
+      tax: parseFloat(tax) || 0,
     });
     setSaving(false);
     if (!result.ok) {
@@ -806,13 +806,26 @@ function PayrollAdjustmentModal({
         <h3 className="text-base font-bold text-[#003527]">Review — Manual Payroll Adjustments</h3>
         <p className="text-xs text-slate-400 mt-1 mb-5">{row.name}</p>
 
-        <div className="space-y-3">
+        <div className="flex gap-1 bg-slate-100 rounded-lg p-1 mb-4">
           {([
-            ["Bonus",     bonus,    setBonus],
-            ["MISC",      misc,     setMisc],
-            ["Retro Pay", retroPay, setRetroPay],
-            ["REIM",      reim,     setReim],
-          ] as [string, string, (v: string) => void][]).map(([label, value, setValue]) => (
+            [EARNINGS_TAB, "Earnings"],
+            [DEDUCTION_TAB, "Deduction"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                tab === key ? "bg-white text-[#003527] shadow-sm" : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3">
+          {(tab === EARNINGS_TAB ? earningsFields : deductionFields).map(([label, value, setValue]) => (
             <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
               <input

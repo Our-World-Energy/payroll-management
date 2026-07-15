@@ -37,12 +37,56 @@ function parseShiftStart(shiftHours: string): { hour: number; minute: number } |
 
 const LATE_GRACE_MINUTES = 10;
 
+// contractor_profiles.location is stored as "City, Country" — same parsing
+// convention used on the Contractors/Payroll pages for country filtering.
+function countryFromLocation(location: string) {
+  const parts = location.split(",");
+  return parts[parts.length - 1]?.trim() || "";
+}
+
+type CountryCounts = {
+  totalActive: number;
+  philippines: number;
+  mexico: number;
+  india: number;
+  guatemala: number;
+  colombia: number;
+};
+
+const EMPTY_COUNTRY_COUNTS: CountryCounts = {
+  totalActive: 0, philippines: 0, mexico: 0, india: 0, guatemala: 0, colombia: 0,
+};
+
 export default function AdminPage() {
   const m = getDashboardMetrics();
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [showLateModal, setShowLateModal] = useState(false);
   const [absentRows, setAbsentRows] = useState<AbsentRow[]>([]);
   const [lateRows, setLateRows] = useState<LateRow[]>([]);
+  const [countryCounts, setCountryCounts] = useState<CountryCounts>(EMPTY_COUNTRY_COUNTS);
+
+  // Live per-country Active headcounts (independent of the absent/late gate
+  // below, which only runs after 7:30am) — these tiles should always be current.
+  useEffect(() => {
+    let isMounted = true;
+    fetchAllContractors({ country: "All Countries", status: "Active", rules: [] })
+      .then((contractors) => {
+        if (!isMounted) return;
+        const counts = { ...EMPTY_COUNTRY_COUNTS };
+        for (const c of contractors) {
+          counts.totalActive++;
+          const country = countryFromLocation(c.location || "");
+          if (country === "Philippines") counts.philippines++;
+          else if (country === "Mexico") counts.mexico++;
+          else if (country === "India") counts.india++;
+          else if (country === "Guatemala") counts.guatemala++;
+          else if (country === "Colombia") counts.colombia++;
+        }
+        setCountryCounts(counts);
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   useEffect(() => {
     async function loadAbsent() {
@@ -124,12 +168,13 @@ export default function AdminPage() {
   }, []);
 
   const METRICS = [
-    { label: "Active Total Contractors", value: m.totalActive,   delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
-    { label: "Philippines",              value: m.philippines,   sub: "Support & Logistics",    href: "/admin/contractors", highlight: false },
-    { label: "Mexico",                   value: m.mexico,        sub: "Manufacturing & Solar",  href: "/admin/contractors", highlight: false },
-    { label: "India",                    value: m.india,         sub: "Tech & Engineering",     href: "/admin/contractors", highlight: false },
-    { label: "Guatemala",                value: m.guatemala,     sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
-    { label: "PTO Today",                value: m.ptoToday,      sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
+    { label: "Active Total Contractors", value: countryCounts.totalActive, delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
+    { label: "Philippines",              value: countryCounts.philippines, sub: "Support & Logistics",    href: "/admin/contractors", highlight: false },
+    { label: "Mexico",                   value: countryCounts.mexico,      sub: "Manufacturing & Solar",  href: "/admin/contractors", highlight: false },
+    { label: "India",                    value: countryCounts.india,       sub: "Tech & Engineering",     href: "/admin/contractors", highlight: false },
+    { label: "Guatemala",                value: countryCounts.guatemala,   sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
+    { label: "Colombia",                 value: countryCounts.colombia,    sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
+    { label: "PTO Today",                value: m.ptoToday,                sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
   ];
 
   return (
@@ -141,7 +186,7 @@ export default function AdminPage() {
       </div>
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 md:gap-4 mb-6 md:mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3 md:gap-4 mb-6 md:mb-8">
         {METRICS.map((card) => {
           if (card.highlight) {
             return (

@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
 import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
@@ -652,10 +652,11 @@ function rowWeeklyTotals(
       totalEvaluatedRegularMinutes: totals.totalEvaluatedRegularMinutes + d.evaluatedRegularMinutes,
       totalRegularOtMinutes: totals.totalRegularOtMinutes + d.regularOtMinutes,
       totalRdOtMinutes: totals.totalRdOtMinutes + d.rdOtMinutes,
+      totalEvaluatedMinutes: totals.totalEvaluatedMinutes + d.evaluatedMinutes,
       totalUsHoMinutes: totals.totalUsHoMinutes + d.holidayMinutes,
       totalHoOtMinutes: totals.totalHoOtMinutes + d.hoOtMinutes,
     }),
-    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0 }
+    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalEvaluatedMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0 }
   );
 }
 
@@ -702,6 +703,7 @@ type AttendanceRow = AttendanceRecord & {
   completionMinutes?: number;
   totalLocalHolidayMinutes?: number | null;
   totalEvaluatedRegularMinutes?: number | null;
+  totalEvaluatedMinutes?: number | null;
   totalUsHoMinutes?: number | null;
   totalRegularOtMinutes?: number | null;
   totalRdOtMinutes?: number | null;
@@ -836,6 +838,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const [editingAdjustedDate, setEditingAdjustedDate] = useState<string | null>(null);
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+
   const contractor = CONTRACTORS.find((item) => item.id === record.contractorId || item.name === record.name);
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
@@ -1152,35 +1155,37 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 px-5 py-4 sm:px-6 sm:py-5 border-b border-[#003527] bg-[#003527]">
+        <div className="flex items-start justify-between gap-4 px-4 py-2 sm:px-5 sm:py-2.5 border-b border-[#003527] bg-[#003527]">
           <div>
-            <h3 className="text-lg font-bold text-white">Attendance Review</h3>
-            <p className="mt-1 text-xl font-bold text-white">{name}</p>
-            <p className="text-sm text-green-200">{role}</p>
-            <p className="text-sm text-green-200">{location}{(record as AttendanceRow).payCategory ? ` / ${(record as AttendanceRow).payCategory}` : ""}</p>
+            <h3 className="text-xs font-bold text-white">Attendance Review</h3>
+            <p className="mt-0.5 text-base font-bold text-white">{name}</p>
+            <p className="text-xs text-green-200">{role}</p>
+            <p className="text-xs text-green-200">{location}{(record as AttendanceRow).payCategory ? ` / ${(record as AttendanceRow).payCategory}` : ""}</p>
           </div>
           <button
             onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
             aria-label="Close attendance review"
             title="Close"
           >
-            <LuX size={18} strokeWidth={2} />
+            <LuX size={15} strokeWidth={2} />
           </button>
         </div>
         <div className="min-h-0 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {details.map(([label, value]) => (
-              <div key={label} className="rounded-xl border border-slate-200 p-3 bg-slate-50">
-                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
-                <p className={`text-sm font-medium mt-1 break-words ${detailValueClassName(label, value)}`}>{value}</p>
-              </div>
-            ))}
-          </div>
-          <div className="mt-5">
-            <div className="flex items-center mb-2">
+          <div className="sticky top-0 z-40 bg-white">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {details.map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-slate-200 p-2 bg-slate-50">
+                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
+                  <p className={`text-xs font-medium mt-0.5 break-words ${detailValueClassName(label, value)}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center mt-3 pb-1.5">
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Weekly Days</p>
             </div>
+          </div>
+          <div>
             <div className="overflow-x-scroll rounded-xl border border-slate-200">
               <table className="w-full text-left text-sm" style={{ minWidth: "1580px", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead className="bg-slate-50 sticky top-0 z-30">
@@ -1772,8 +1777,9 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                 </th>
                 <th className="sticky left-[52px] z-20 bg-slate-50 px-4 py-3 w-[220px] min-w-[220px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Contractor</th>
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
-                {["Actual Time", "Completion Time", "Local HO Time",
-                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
+                {["Actual Time",
+                  "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
+                  "Local HO Time", "Total Time Off Request Time", "Completion Time",
                   "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
@@ -1781,9 +1787,9 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={13} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={13} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const rowHolidayBonusMins = rowHolidayBonus(row);
@@ -1808,6 +1814,30 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                   </td>
                   <td className="sticky left-[272px] z-10 bg-white px-4 py-3 w-[160px] min-w-[160px] text-sm text-slate-600 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{departmentForAttendanceRow(row)}</td>
                   <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalRegularOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRegularOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalRdOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRdOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalEvaluatedMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalUsHoMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalUsHoMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalHoOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalHoOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {localHolidayMins > 0 ? formatMinutesAsMins(localHolidayMins) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {timeOffRequestMins > 0 ? formatMinutesAsMins(timeOffRequestMins) : "—"}
+                  </td>
                   <td className={`px-4 py-3 text-sm font-semibold border-r border-slate-100 ${isProcessed ? "text-emerald-700 bg-emerald-50" : "text-slate-900"}`}>
                     <span className="flex items-center gap-1.5">
                       <span>{completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}</span>
@@ -1817,27 +1847,6 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                         </span>
                       )}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {localHolidayMins > 0 ? formatMinutesAsMins(localHolidayMins) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalUsHoMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalUsHoMinutes) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalRegularOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRegularOtMinutes) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalRdOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRdOtMinutes) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalHoOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalHoOtMinutes) : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {timeOffRequestMins > 0 ? formatMinutesAsMins(timeOffRequestMins) : "—"}
                   </td>
                   <td className="px-4 py-3">
                     {row.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}
@@ -2013,38 +2022,6 @@ export default function AttendancePage() {
   const [allHolidays, setAllHolidays] = useState<HolidayEntry[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
 
-  // Weekly Time Tracking has a wide table — mirror its horizontal scrollbar
-  // at the top too (not just below the table) so it's reachable without
-  // scrolling the whole page down first, keeping both scroll positions in sync.
-  const topScrollRef = useRef<HTMLDivElement>(null);
-  const tableScrollRef = useRef<HTMLDivElement>(null);
-  const trackingTableRef = useRef<HTMLTableElement>(null);
-  const [tableScrollWidth, setTableScrollWidth] = useState(0);
-  const isSyncingScroll = useRef(false);
-
-  useEffect(() => {
-    const tableEl = trackingTableRef.current;
-    if (!tableEl) return;
-    const update = () => setTableScrollWidth(tableEl.offsetWidth);
-    update();
-    const ro = new ResizeObserver(update);
-    ro.observe(tableEl);
-    return () => ro.disconnect();
-  }, [worksnapRows]);
-
-  function syncScrollFromTop() {
-    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
-    isSyncingScroll.current = true;
-    tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
-    isSyncingScroll.current = false;
-  }
-  function syncScrollFromTable() {
-    if (isSyncingScroll.current || !tableScrollRef.current || !topScrollRef.current) return;
-    isSyncingScroll.current = true;
-    topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    isSyncingScroll.current = false;
-  }
-
   const rangeFrom = week;                 // Sunday (week start)
   const rangeTo = addDaysIso(week, 6);    // Saturday (week end)
   const weekDates = datesBetween(rangeFrom, rangeTo);
@@ -2099,7 +2076,7 @@ export default function AttendancePage() {
         const weekStatusResult = weekStatusResponse.ok ? await weekStatusResponse.json() : { weekStatuses: [] };
         type SavedWeekStatus = {
           worksnapUserId: number; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null;
-          totalEvaluatedRegularMinutes: number | null; totalUsHoMinutes: number | null;
+          totalEvaluatedRegularMinutes: number | null; totalEvaluatedMinutes: number | null; totalUsHoMinutes: number | null;
           totalRegularOtMinutes: number | null; totalRdOtMinutes: number | null; totalHoOtMinutes: number | null;
         };
         const savedByUserId = new Map<number, SavedWeekStatus>(
@@ -2113,6 +2090,7 @@ export default function AttendancePage() {
             completionMinutes: saved.completionMinutes ?? row.completionMinutes,
             totalLocalHolidayMinutes: saved.totalLocalHolidayMinutes,
             totalEvaluatedRegularMinutes: saved.totalEvaluatedRegularMinutes,
+            totalEvaluatedMinutes: saved.totalEvaluatedMinutes,
             totalUsHoMinutes: saved.totalUsHoMinutes,
             totalRegularOtMinutes: saved.totalRegularOtMinutes,
             totalRdOtMinutes: saved.totalRdOtMinutes,
@@ -2277,9 +2255,9 @@ export default function AttendancePage() {
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className="bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-3 md:gap-4">
-            <div className={`w-11 h-11 md:w-12 md:h-12 rounded-xl ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={20} strokeWidth={1.75} /></div>
-            <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-2xl md:text-3xl font-bold mt-0.5 tabular-nums ${color}`}>{value}</p></div>
+          <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
+            <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
+            <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${color}`}>{value}</p></div>
           </div>
         ))}
       </div>
@@ -2399,26 +2377,15 @@ export default function AttendancePage() {
           </div>
         </div>
 
-        {/* Top scrollbar — mirrors the table's own horizontal scrollbar so it's
-            reachable without scrolling down past the whole table first. */}
-        <div
-          ref={topScrollRef}
-          onScroll={syncScrollFromTop}
-          className="overflow-x-auto overflow-y-hidden"
-          style={{ height: 14 }}
-        >
-          <div style={{ width: tableScrollWidth, height: 1 }} />
-        </div>
-
         {/* Table */}
-        <div ref={tableScrollRef} onScroll={syncScrollFromTable} className="overflow-x-auto">
-          <table ref={trackingTableRef} className="w-full text-left" style={{ minWidth: "720px", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead className="bg-[#003527]">
+        <div className="overflow-auto" style={{ maxHeight: "60vh" }}>
+          <table className="w-full text-left" style={{ minWidth: "720px", borderCollapse: "separate", borderSpacing: 0 }}>
+            <thead className="sticky top-0 z-30" style={{ background: "#003527" }}>
               <tr>
                 {[
-                  "Contractor", "Department", "Actual Time", "Completion Time", "Total Local HO Time",
-                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time",
-                  "Total Time Off Request Time",
+                  "Contractor", "Department", "Actual Time",
+                  "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
+                  "Total Local HO Time", "Total Time Off Request Time", "Completion Time",
                   "Variance", "Status", "Actions",
                 ].map((h) => (
                   <th
@@ -2445,7 +2412,7 @@ export default function AttendancePage() {
             <tbody>
               {filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     {attendanceRows.length === 0 ? "No Worksnap entries found for weekly tracking." : "No weekly tracking rows match your search."}
                   </td>
                 </tr>
@@ -2508,48 +2475,12 @@ export default function AttendancePage() {
                       )}
                     </td>
 
-                    {/* Completion Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
-                      {isOnLeave ? (
-                        <span className="text-sm text-slate-400">—</span>
-                      ) : (
-                        <span className="flex items-center gap-1.5">
-                          <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
-                            {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
-                          </span>
-                          {holidayBonusMins > 0 && (
-                            <span title="Includes US holiday time" className="inline-flex items-center justify-center rounded-full bg-blue-100 p-0.5">
-                              <LuCalendar size={11} strokeWidth={2} className="text-blue-500" />
-                            </span>
-                          )}
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Total Local HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
-                      {isOnLeave || !row.totalLocalHolidayMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
-                      ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalLocalHolidayMinutes)}</span>
-                      )}
-                    </td>
-
                     {/* Total Evaluated Regular Time */}
                     <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalEvaluatedRegularMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
                         <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalEvaluatedRegularMinutes)}</span>
-                      )}
-                    </td>
-
-                    {/* Total US HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
-                      {isOnLeave || !row.totalUsHoMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
-                      ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalUsHoMinutes)}</span>
                       )}
                     </td>
 
@@ -2571,12 +2502,39 @@ export default function AttendancePage() {
                       )}
                     </td>
 
+                    {/* Total Evaluated Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                      {isOnLeave || !row.totalEvaluatedMinutes ? (
+                        <span className="text-sm text-slate-400">—</span>
+                      ) : (
+                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalEvaluatedMinutes)}</span>
+                      )}
+                    </td>
+
+                    {/* Total US HO Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                      {isOnLeave || !row.totalUsHoMinutes ? (
+                        <span className="text-sm text-slate-400">—</span>
+                      ) : (
+                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalUsHoMinutes)}</span>
+                      )}
+                    </td>
+
                     {/* Total HO OT Time */}
                     <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave || !row.totalHoOtMinutes ? (
                         <span className="text-sm text-slate-400">—</span>
                       ) : (
                         <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalHoOtMinutes)}</span>
+                      )}
+                    </td>
+
+                    {/* Total Local HO Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                      {isOnLeave || !row.totalLocalHolidayMinutes ? (
+                        <span className="text-sm text-slate-400">—</span>
+                      ) : (
+                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalLocalHolidayMinutes)}</span>
                       )}
                     </td>
 
@@ -2593,6 +2551,24 @@ export default function AttendancePage() {
                           <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(minutes)}</span>
                         );
                       })()}
+                    </td>
+
+                    {/* Completion Time */}
+                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                      {isOnLeave ? (
+                        <span className="text-sm text-slate-400">—</span>
+                      ) : (
+                        <span className="flex items-center gap-1.5">
+                          <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
+                            {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
+                          </span>
+                          {holidayBonusMins > 0 && (
+                            <span title="Includes US holiday time" className="inline-flex items-center justify-center rounded-full bg-blue-100 p-0.5">
+                              <LuCalendar size={11} strokeWidth={2} className="text-blue-500" />
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </td>
 
                     {/* Variance */}

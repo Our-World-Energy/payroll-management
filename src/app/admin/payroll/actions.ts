@@ -17,13 +17,16 @@ export type PayrollAdjustment = {
   misc: number;
   retroPay: number;
   reim: number;
+  cashAdvance: number;
+  hmo: number;
+  tax: number;
 };
 
 export async function fetchPayrollAdjustments(weekStart: string): Promise<PayrollAdjustment[]> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from(TABLE)
-    .select("email, weekStart, bonus, misc, retroPay, reim")
+    .select("email, weekStart, bonus, misc, retroPay, reim, cashAdvance, hmo, tax")
     .eq("weekStart", weekStart);
 
   if (error || !data) return [];
@@ -34,6 +37,9 @@ export async function fetchPayrollAdjustments(weekStart: string): Promise<Payrol
     misc: Number(r.misc ?? 0),
     retroPay: Number(r.retroPay ?? 0),
     reim: Number(r.reim ?? 0),
+    cashAdvance: Number(r.cashAdvance ?? 0),
+    hmo: Number(r.hmo ?? 0),
+    tax: Number(r.tax ?? 0),
   }));
 }
 
@@ -44,6 +50,9 @@ export async function savePayrollAdjustment(params: {
   misc: number;
   retroPay: number;
   reim: number;
+  cashAdvance: number;
+  hmo: number;
+  tax: number;
 }): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
   const email = params.email.trim().toLowerCase();
@@ -63,6 +72,9 @@ export async function savePayrollAdjustment(params: {
     misc: params.misc,
     retroPay: params.retroPay,
     reim: params.reim,
+    cashAdvance: params.cashAdvance,
+    hmo: params.hmo,
+    tax: params.tax,
     updatedAt: new Date().toISOString(),
   };
 
