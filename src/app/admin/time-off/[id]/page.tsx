@@ -122,6 +122,8 @@ export default function ContractorTimeOffPage() {
   const sickAvailable    = roundBalance(Math.max(sickBalance - sickUsed, 0));
   const ptoAvailableLow  = ptoAvailable < 8;
   const sickAvailableLow = sickAvailable < 8;
+  const advancePto       = contractor?.birthdayLeave     ?? 0;
+  const advanceSickLeave = contractor?.advanceSickLeave  ?? 0;
 
   if (!loading && !contractor) {
     return (
@@ -151,7 +153,7 @@ export default function ContractorTimeOffPage() {
       </div>
 
       {/* Score Cards */}
-      <div className={`grid grid-cols-2 ${isIndia ? "md:grid-cols-3" : "md:grid-cols-3 lg:grid-cols-6"} gap-4 mb-8`}>
+      <div className={`grid grid-cols-2 ${isIndia ? "md:grid-cols-4" : "md:grid-cols-4 lg:grid-cols-8"} gap-4 mb-8`}>
         {!isIndia && <>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
@@ -168,6 +170,11 @@ export default function ContractorTimeOffPage() {
             <p className={`text-2xl font-black ${ptoAvailableLow ? "text-red-700" : "text-emerald-700"}`}>{fmtBalance(ptoAvailable)}h</p>
             <p className={`text-[11px] font-medium mt-0.5 ${ptoAvailableLow ? "text-red-400" : "text-emerald-400"}`}>{fmtMinutes(ptoAvailable)} min</p>
           </div>
+          <div className="bg-pink-50 rounded-2xl border border-pink-200 shadow-sm px-5 py-4">
+            <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1">Advance PTO</p>
+            <p className="text-2xl font-black text-pink-700">{fmtBalance(advancePto)}h</p>
+            <p className="text-[11px] font-medium text-pink-400 mt-0.5">{fmtMinutes(advancePto)} min</p>
+          </div>
         </>}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
@@ -183,6 +190,11 @@ export default function ContractorTimeOffPage() {
           <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${sickAvailableLow ? "text-red-600" : "text-amber-600"}`}>Sick Leave Available</p>
           <p className={`text-2xl font-black ${sickAvailableLow ? "text-red-700" : "text-amber-700"}`}>{fmtBalance(sickAvailable)}h</p>
           <p className={`text-[11px] font-medium mt-0.5 ${sickAvailableLow ? "text-red-400" : "text-amber-400"}`}>{fmtMinutes(sickAvailable)} min</p>
+        </div>
+        <div className="bg-blue-50 rounded-2xl border border-blue-200 shadow-sm px-5 py-4">
+          <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1">Advance Sick Leave</p>
+          <p className="text-2xl font-black text-blue-700">{fmtBalance(advanceSickLeave)}h</p>
+          <p className="text-[11px] font-medium text-blue-400 mt-0.5">{fmtMinutes(advanceSickLeave)} min</p>
         </div>
       </div>
 

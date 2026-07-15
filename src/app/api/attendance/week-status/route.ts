@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     where: { weekStart },
     select: {
       worksnapUserId: true, email: true, requestStatus: true, completionMinutes: true, totalLocalHolidayMinutes: true,
-      totalEvaluatedRegularMinutes: true, totalUsHoMinutes: true, totalRegularOtMinutes: true, totalRdOtMinutes: true, totalHoOtMinutes: true,
+      totalEvaluatedRegularMinutes: true, totalEvaluatedMinutes: true, totalUsHoMinutes: true, totalRegularOtMinutes: true, totalRdOtMinutes: true, totalHoOtMinutes: true,
     },
   });
 

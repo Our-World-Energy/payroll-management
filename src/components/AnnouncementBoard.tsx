@@ -17,13 +17,26 @@ type Announcement = {
   title: string;
   body: string;
   location: string;
-  date: string;
+  date: string; // "YYYY-MM-DD" — the date this announcement is posted for
 };
 
 const INITIAL: Announcement[] = [];
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer appearance-none";
+
+function todayIso() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function formatAnnouncementDate(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 
 export function AnnouncementBoard() {
   const [announcements, setAnnouncements] = useState<Announcement[]>(INITIAL);
@@ -32,20 +45,20 @@ export function AnnouncementBoard() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [location, setLocation] = useState(LOCATIONS[1]);
+  const [date, setDate] = useState(todayIso());
 
   function handleAdd() {
     const t = title.trim();
     const b = body.trim();
-    if (!t || !b) return;
-    const now = new Date();
-    const date = now.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    setAnnouncements((prev) => [
-      { id: Date.now(), title: t, body: b, location, date },
-      ...prev,
-    ]);
+    if (!t || !b || !date) return;
+    setAnnouncements((prev) =>
+      [{ id: Date.now(), title: t, body: b, location, date }, ...prev]
+        .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
+    );
     setTitle("");
     setBody("");
     setLocation(LOCATIONS[1]);
+    setDate(todayIso());
     setShowForm(false);
   }
 
@@ -116,13 +129,19 @@ export function AnnouncementBoard() {
                   onChange={(e) => setBody(e.target.value)}
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</label>
-                <div className="relative">
-                  <select className={SELECT} value={location} onChange={(e) => setLocation(e.target.value)}>
-                    {LOCATIONS.slice(1).map((l) => <option key={l}>{l}</option>)}
-                  </select>
-                  <LuChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</label>
+                  <div className="relative">
+                    <select className={SELECT} value={location} onChange={(e) => setLocation(e.target.value)}>
+                      {LOCATIONS.slice(1).map((l) => <option key={l}>{l}</option>)}
+                    </select>
+                    <LuChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</label>
+                  <input type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
               </div>
             </div>
@@ -180,7 +199,7 @@ export function AnnouncementBoard() {
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 leading-relaxed">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{a.date}</p>
+                <p className="text-xs text-slate-400 mt-1">{formatAnnouncementDate(a.date)}</p>
               </div>
               <button
                 onClick={() => handleRemove(a.id)}

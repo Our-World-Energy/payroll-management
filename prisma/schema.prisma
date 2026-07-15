@@ -337,6 +337,7 @@ model AttendanceWeekStatus {
   completionMinutes    Int?
   totalLocalHolidayMinutes Int?                                    // sum of the week's per-day "Local HO Time"
   totalEvaluatedRegularMinutes Int      @default(0)                // sum of the week's per-day "Evaluated Regular Time"
+  totalEvaluatedMinutes Int             @default(0)                // sum of the week's per-day "Evaluated Time"
   totalUsHoMinutes     Int                     @default(0)         // sum of the week's per-day "US HO Time"
   totalRegularOtMinutes Int                    @default(0)         // sum of the week's per-day "Regular OT Time"
   totalRdOtMinutes     Int                     @default(0)         // sum of the week's per-day "RD OT Time"
@@ -381,18 +382,22 @@ model ContractorLeaveRequest {
   @@map("contractor_leave_requests")
 }
 
-/// Manual per-employee per-WEEK payroll adjustments (Bonus, MISC, Retro Pay,
-/// Reimbursement) entered by an admin from the Payroll Voucher's "Review"
-/// action — these have no other data source anywhere in the system.
+/// Manual per-employee per-WEEK payroll adjustments entered by an admin from
+/// the Payroll Voucher's "Review" action — these have no other data source
+/// anywhere in the system. Earnings: Bonus, MISC, Retro Pay, Reimbursement.
+/// Deductions: Cash Advance, HMO Premium, Tax.
 model PayrollAdjustment {
-  id        String   @id @default(uuid()) @db.Uuid
-  email     String
-  weekStart String   // "YYYY-MM-DD" (Sunday) — same week-key convention used across Attendance/Payroll
-  bonus     Float    @default(0)
-  misc      Float    @default(0)
-  retroPay  Float    @default(0)
-  reim      Float    @default(0)
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid()) @db.Uuid
+  email       String
+  weekStart   String   // "YYYY-MM-DD" (Sunday) — same week-key convention used across Attendance/Payroll
+  bonus       Float    @default(0)
+  misc        Float    @default(0)
+  retroPay    Float    @default(0)
+  reim        Float    @default(0)
+  cashAdvance Float    @default(0)
+  hmo         Float    @default(0)
+  tax         Float    @default(0)
+  updatedAt   DateTime @updatedAt
 
   @@unique([email, weekStart], name: "payroll_adjustment_key")
   @@map("payroll_adjustments")

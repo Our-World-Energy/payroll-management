@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight,
   LuPencil, LuChevronRight as LuBreadcrumb,
@@ -122,13 +123,13 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
 const COLS = [
   "Full Name","Date of Birth","Gender",
   "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
-  "PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
   "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
   "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Equipment Provided",
   "Created On","Dismissal Date","Dismissal Reason","Action",
 ];
 
 export default function ContractorsPage() {
+  const searchParams = useSearchParams();
   const [rows, setRows]           = useState<Contractor[]>(pageCache?.rows ?? []);
   const [total, setTotal]         = useState(pageCache?.total ?? 0);
   const [loading, setLoading]     = useState(pageCache === null);
@@ -137,7 +138,11 @@ export default function ContractorsPage() {
 
   const [page, setPage]           = useState(1);
   const [pageSize, setPageSize]   = useState(25);
-  const [country, setCountry]     = useState("All Countries");
+  // Dashboard country tiles (e.g. Philippines, Guatemala) link here with
+  // ?country=<Name> — seed it directly so the very first fetch is already
+  // filtered correctly, instead of fetching "All Countries" first and
+  // re-fetching a second time once the param is applied.
+  const [country, setCountry]     = useState(() => searchParams.get("country") || "All Countries");
   const [status, setStatus]       = useState("All Statuses");
   const [activeRules, setActiveRules] = useState<FilterRule[]>([]);
 
@@ -363,7 +368,7 @@ export default function ContractorsPage() {
 
         {/* Filter Bar */}
         <div className="mb-4">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center sticky top-16 z-20">
             <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
 
             <select
@@ -376,6 +381,8 @@ export default function ContractorsPage() {
               <option>Mexico</option>
               <option>India</option>
               <option>USA</option>
+              <option>Guatemala</option>
+              <option>Colombia</option>
             </select>
 
             <select
@@ -437,12 +444,12 @@ export default function ContractorsPage() {
         {/* Table card */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
 
-          <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
+          <div className="overflow-auto" style={{ scrollbarWidth: "thin", maxHeight: "60vh" }}>
             <table
               className="w-full text-left"
               style={{ minWidth: "3120px", borderCollapse: "separate", borderSpacing: 0 }}
             >
-              <thead>
+              <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
                 <tr style={{ background: "#003527" }}>
                   <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
                     style={{ minWidth: 200, background: "#003527" }}>
@@ -489,8 +496,6 @@ export default function ContractorsPage() {
                     </td>
                   </tr>
                 ) : rows.map((c) => {
-                  const timeOff = getContractorTimeOff(c);
-
                   return (
                   <tr key={c.uid} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-4 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 200 }}>
@@ -514,10 +519,6 @@ export default function ContractorsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{fmtDate(c.hireDate)}</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.ptoBalance)}h</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.ptoUsed)}h</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.sickLeaveBalance)}h</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{fmtBalance(timeOff.sickLeaveUsed)}h</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.officeLocation}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.currency}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.monthlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>

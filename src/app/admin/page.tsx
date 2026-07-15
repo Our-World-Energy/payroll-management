@@ -37,12 +37,56 @@ function parseShiftStart(shiftHours: string): { hour: number; minute: number } |
 
 const LATE_GRACE_MINUTES = 10;
 
+// contractor_profiles.location is stored as "City, Country" — same parsing
+// convention used on the Contractors/Payroll pages for country filtering.
+function countryFromLocation(location: string) {
+  const parts = location.split(",");
+  return parts[parts.length - 1]?.trim() || "";
+}
+
+type CountryCounts = {
+  totalActive: number;
+  philippines: number;
+  mexico: number;
+  india: number;
+  guatemala: number;
+  colombia: number;
+};
+
+const EMPTY_COUNTRY_COUNTS: CountryCounts = {
+  totalActive: 0, philippines: 0, mexico: 0, india: 0, guatemala: 0, colombia: 0,
+};
+
 export default function AdminPage() {
   const m = getDashboardMetrics();
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [showLateModal, setShowLateModal] = useState(false);
   const [absentRows, setAbsentRows] = useState<AbsentRow[]>([]);
   const [lateRows, setLateRows] = useState<LateRow[]>([]);
+  const [countryCounts, setCountryCounts] = useState<CountryCounts>(EMPTY_COUNTRY_COUNTS);
+
+  // Live per-country Active headcounts (independent of the absent/late gate
+  // below, which only runs after 7:30am) — these tiles should always be current.
+  useEffect(() => {
+    let isMounted = true;
+    fetchAllContractors({ country: "All Countries", status: "Active", rules: [] })
+      .then((contractors) => {
+        if (!isMounted) return;
+        const counts = { ...EMPTY_COUNTRY_COUNTS };
+        for (const c of contractors) {
+          counts.totalActive++;
+          const country = countryFromLocation(c.location || "");
+          if (country === "Philippines") counts.philippines++;
+          else if (country === "Mexico") counts.mexico++;
+          else if (country === "India") counts.india++;
+          else if (country === "Guatemala") counts.guatemala++;
+          else if (country === "Colombia") counts.colombia++;
+        }
+        setCountryCounts(counts);
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
 
   useEffect(() => {
     async function loadAbsent() {
@@ -124,12 +168,13 @@ export default function AdminPage() {
   }, []);
 
   const METRICS = [
-    { label: "Active Total Contractors", value: m.totalActive,   delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
-    { label: "Philippines",              value: m.philippines,   sub: "Support & Logistics",    href: "/admin/contractors", highlight: false },
-    { label: "Mexico",                   value: m.mexico,        sub: "Manufacturing & Solar",  href: "/admin/contractors", highlight: false },
-    { label: "India",                    value: m.india,         sub: "Tech & Engineering",     href: "/admin/contractors", highlight: false },
-    { label: "Guatemala",                value: m.guatemala,     sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
-    { label: "PTO Today",                value: m.ptoToday,      sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
+    { label: "Active Total Contractors", value: countryCounts.totalActive, delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
+    { label: "Philippines",              value: countryCounts.philippines, sub: "Support & Logistics",    href: "/admin/contractors?country=Philippines", highlight: false },
+    { label: "Mexico",                   value: countryCounts.mexico,      sub: "Manufacturing & Solar",  href: "/admin/contractors?country=Mexico",      highlight: false },
+    { label: "India",                    value: countryCounts.india,       sub: "Tech & Engineering",     href: "/admin/contractors?country=India",       highlight: false },
+    { label: "Guatemala",                value: countryCounts.guatemala,   sub: "Regional Operations",    href: "/admin/contractors?country=Guatemala",   highlight: false },
+    { label: "Colombia",                 value: countryCounts.colombia,    sub: "Regional Operations",    href: "/admin/contractors?country=Colombia",    highlight: false },
+    { label: "PTO Today",                value: m.ptoToday,                sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
   ];
 
   return (
@@ -141,17 +186,17 @@ export default function AdminPage() {
       </div>
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 md:gap-4 mb-6 md:mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3 md:gap-4 mb-6 md:mb-8">
         {METRICS.map((card) => {
           if (card.highlight) {
             return (
-              <Link key={card.label} href={card.href} className="col-span-2 sm:col-span-1 bg-[#003527] hover:bg-[#064e3b] text-white p-4 rounded-xl shadow-md flex flex-col justify-between transition-colors cursor-pointer">
+              <Link key={card.label} href={card.href} className="col-span-2 sm:col-span-1 bg-[#003527] hover:bg-[#064e3b] text-white p-2 rounded-xl shadow-md flex flex-col justify-between transition-colors cursor-pointer">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider opacity-80">{card.label}</p>
-                  <p className="text-4xl font-black mt-1">{card.value}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{card.label}</p>
+                  <p className="text-xl font-black mt-0.5">{card.value}</p>
                 </div>
-                <div className="mt-4 flex items-center gap-1 text-xs text-emerald-300">
-                  <LuTrendingUp size={14} strokeWidth={2} />
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-300">
+                  <LuTrendingUp size={10} strokeWidth={2} />
                   {card.delta}
                 </div>
               </Link>
@@ -159,39 +204,39 @@ export default function AdminPage() {
           }
           if (card.accent) {
             return (
-              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
+              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-2 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
                 <div>
-                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
-                  <p className="text-3xl font-bold text-blue-700 mt-1">{card.value}</p>
+                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
+                  <p className="text-xl font-bold text-blue-700 mt-0.5">{card.value}</p>
                 </div>
-                <p className="mt-4 text-xs text-blue-400">{card.sub}</p>
+                <p className="mt-1 text-[10px] text-blue-400">{card.sub}</p>
               </Link>
             );
           }
           return (
-            <Link key={card.label} href={card.href} className="bg-white hover:bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
+            <Link key={card.label} href={card.href} className="bg-white hover:bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{card.label}</p>
-                <p className="text-3xl font-bold text-[#003527] mt-1">{card.value}</p>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{card.label}</p>
+                <p className="text-xl font-bold text-[#003527] mt-0.5">{card.value}</p>
               </div>
-              <p className="mt-4 text-xs text-slate-400">{card.sub}</p>
+              <p className="mt-1 text-[10px] text-slate-400">{card.sub}</p>
             </Link>
           );
         })}
 
         {/* Absent Today + Late Today — stacked in one grid cell */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           {/* Absent Today */}
           <button
             onClick={() => setShowAbsentModal(true)}
-            className="text-left bg-red-100 hover:bg-red-200 text-red-800 px-4 py-3 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            className="text-left bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
           >
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider">Absent Today</p>
-              <p className="text-2xl font-black mt-0.5 text-red-600">{absentRows.length}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider">Absent Today</p>
+              <p className="text-base font-black mt-0 text-red-600">{absentRows.length}</p>
             </div>
-            <div className="mt-2 flex items-center gap-1 text-xs">
-              <LuTriangleAlert size={12} strokeWidth={2} />
+            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
+              <LuTriangleAlert size={10} strokeWidth={2} />
               No time logged
             </div>
           </button>
@@ -199,14 +244,14 @@ export default function AdminPage() {
           {/* Late Today */}
           <button
             onClick={() => setShowLateModal(true)}
-            className="text-left bg-amber-50 hover:bg-amber-100 text-amber-800 px-4 py-3 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            className="text-left bg-amber-50 hover:bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
           >
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider">Late Today</p>
-              <p className="text-2xl font-black mt-0.5 text-amber-600">{lateRows.length}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider">Late Today</p>
+              <p className="text-base font-black mt-0 text-amber-600">{lateRows.length}</p>
             </div>
-            <div className="mt-2 flex items-center gap-1 text-xs">
-              <LuClock size={12} strokeWidth={2} />
+            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
+              <LuClock size={10} strokeWidth={2} />
               Partial time logged
             </div>
           </button>

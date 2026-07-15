@@ -73,6 +73,7 @@ export async function POST(request: Request) {
     : null;
   const sumDayField = (field: keyof DayInput) => days.reduce((sum: number, d) => sum + asInt(d[field]), 0);
   const totalEvaluatedRegularMinutes = sumDayField("evaluatedRegularMinutes");
+  const totalEvaluatedMinutes = sumDayField("evaluatedMinutes");
   const totalUsHoMinutes = sumDayField("holidayMinutes");
   const totalRegularOtMinutes = sumDayField("regularOtMinutes");
   const totalRdOtMinutes = sumDayField("rdOtMinutes");
@@ -84,11 +85,11 @@ export async function POST(request: Request) {
       where: { attendance_week_key: { worksnapUserId, weekStart } },
       create: {
         worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
-        totalEvaluatedRegularMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
       },
       update: {
         email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
-        totalEvaluatedRegularMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
       },
     }),
     // per-day attendance review snapshot

@@ -712,34 +712,31 @@ export default function TimeOffPage() {
 
       {/* ── Stat cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
-        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-4 flex items-start justify-between">
+        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-2.5 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
-            <p className="text-3xl font-black text-amber-600 mt-1">{pendingCount}</p>
-            <p className="text-xs text-amber-400 mt-1">Awaiting review</p>
+            <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
+            <p className="text-xl font-black text-amber-600 leading-tight">{pendingCount}</p>
           </div>
-          <div className="size-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-            <LuClock size={18} className="text-amber-600" />
+          <div className="size-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
+            <LuClock size={14} className="text-amber-600" />
           </div>
         </div>
-        <div className="bg-emerald-50 rounded-xl border border-emerald-200 shadow-sm p-4 flex items-start justify-between">
+        <div className="bg-emerald-50 rounded-xl border border-emerald-200 shadow-sm p-2.5 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">Approved</p>
-            <p className="text-3xl font-black text-emerald-700 mt-1">{approvedCount}</p>
-            <p className="text-xs text-emerald-400 mt-1">Requests approved</p>
+            <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider">Approved</p>
+            <p className="text-xl font-black text-emerald-700 leading-tight">{approvedCount}</p>
           </div>
-          <div className="size-9 rounded-xl bg-emerald-100 flex items-center justify-center shrink-0">
-            <LuCircleCheck size={18} className="text-emerald-600" />
+          <div className="size-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
+            <LuCircleCheck size={14} className="text-emerald-600" />
           </div>
         </div>
-        <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-4 flex items-start justify-between">
+        <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-2.5 flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Declined</p>
-            <p className="text-3xl font-black text-red-600 mt-1">{rejectedCount}</p>
-            <p className="text-xs text-red-300 mt-1">Requests declined</p>
+            <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wider">Declined</p>
+            <p className="text-xl font-black text-red-600 leading-tight">{rejectedCount}</p>
           </div>
-          <div className="size-9 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
-            <LuCircleX size={18} className="text-red-500" />
+          <div className="size-7 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
+            <LuCircleX size={14} className="text-red-500" />
           </div>
         </div>
       </div>
@@ -784,9 +781,9 @@ export default function TimeOffPage() {
 
       {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto" style={{ scrollbarWidth: "thin" }}>
+        <div className="overflow-auto" style={{ scrollbarWidth: "thin", maxHeight: "60vh" }}>
           <table className="w-full text-left" style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead>
+            <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
                   style={{ minWidth: 210, background: "#003527" }}>Employee</th>
