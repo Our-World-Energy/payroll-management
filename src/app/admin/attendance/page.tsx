@@ -476,8 +476,22 @@ function worksnapTotalMinutesFor(weekDates: string[], dailyWorksnapMinutes: Reco
   return weekDates.reduce((total, date) => total + timeValueToMinutes(worksnapTimeForDate(dailyWorksnapMinutes, date)), 0);
 }
 
-function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
-  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+// Adjusted Time overrides Worksnap Time for that date when a caller (Bulk
+// Approve) has it available — same effective-minutes rule Attendance Review
+// applies. Callers with no adjusted data (e.g. the main table's live
+// fallback) omit the override and behave exactly as before.
+function effectiveDailyMinutesFor(row: AttendanceRow, adjustedDaily?: Record<string, number>) {
+  const raw = row.dailyWorksnapMinutes ?? {};
+  if (!adjustedDaily || Object.keys(adjustedDaily).length === 0) return raw;
+  const merged: Record<string, number> = { ...raw };
+  for (const [date, minutes] of Object.entries(adjustedDaily)) {
+    if (minutes > 0) merged[date] = minutes;
+  }
+  return merged;
+}
+
+function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>) {
+  const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
 
   if (isFixedContractor(row.payCategory)) {
     const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
@@ -506,8 +520,8 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[])
   }, 0);
 }
 
-function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[]) {
-  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>) {
+  const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
 
   if (isFixedContractor(row.payCategory)) {
     const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
@@ -544,14 +558,17 @@ function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[
 // Per-day attendance_day_status snapshot for a Bulk Approve save: every logged
 // day is Approved (no per-day reject/override in this flow), time off comes
 // from the row's default status, mirroring what the Review modal would save.
+// Adjusted Time (adjustedDaily, keyed by date) overrides Worksnap Time for
+// every calculation below, same as an individual Attendance Review save.
 function buildBulkApproveDaySnapshots(
   row: AttendanceRow,
   weekDates: string[],
   usaHolidays: HolidayEntry[],
   dailyLogs: DailyLogEntry[],
-  allHolidays: HolidayEntry[]
+  allHolidays: HolidayEntry[],
+  adjustedDaily?: Record<string, number>
 ) {
-  const dailyWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
+  const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
   const shiftType = shiftTypeForAttendanceRow(row);
   const timeOffStatusUi = defaultTimeOffStatusFor(row);
@@ -604,7 +621,7 @@ function buildBulkApproveDaySnapshots(
       date,
       decisionStatus: decisionStatusToApi(dailyDecisionStatus),
       evaluatedMinutes: timeValueToMinutes(evaluatedTime),
-      adjustedMinutes: null as number | null,
+      adjustedMinutes: adjustedDaily?.[date] ?? null,
       holidayMinutes: boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rawRdOtMinutes),
       localHoliday: localHoliday || null,
       localHolidayMinutes,
@@ -616,6 +633,30 @@ function buildBulkApproveDaySnapshots(
       timeOffMinutes,
     };
   });
+}
+
+// Week totals for Bulk Approve's summary table — derived from the exact same
+// per-day snapshots the save uses, so what's displayed always matches what
+// gets persisted (same fields Attendance Review shows/saves per contractor).
+function rowWeeklyTotals(
+  row: AttendanceRow,
+  weekDates: string[],
+  usaHolidays: HolidayEntry[],
+  dailyLogs: DailyLogEntry[],
+  allHolidays: HolidayEntry[],
+  adjustedDaily?: Record<string, number>
+) {
+  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily);
+  return days.reduce(
+    (totals, d) => ({
+      totalEvaluatedRegularMinutes: totals.totalEvaluatedRegularMinutes + d.evaluatedRegularMinutes,
+      totalRegularOtMinutes: totals.totalRegularOtMinutes + d.regularOtMinutes,
+      totalRdOtMinutes: totals.totalRdOtMinutes + d.rdOtMinutes,
+      totalUsHoMinutes: totals.totalUsHoMinutes + d.holidayMinutes,
+      totalHoOtMinutes: totals.totalHoOtMinutes + d.hoOtMinutes,
+    }),
+    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0 }
+  );
 }
 
 function approvalStatusClassName(status: string) {
@@ -1532,6 +1573,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [bulkSaveError, setBulkSaveError] = useState("");
+  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+  const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
 
   // Same recent-Sun→Sat-weeks list the main page uses, anchored to the current
   // Arizona week, so the latest week is always selectable here too.
@@ -1557,13 +1600,14 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
       fetch(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
       fetch(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
       fetch(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+      fetchAllLeaveRequestsAdmin().catch(() => []),
     ])
-      .then(([entriesResult, weekStatusResult, dailyLogResult]) => {
+      .then(async ([entriesResult, weekStatusResult, dailyLogResult, leaveRequestsResult]) => {
         const rows = worksnapEntriesToAttendanceRecords((entriesResult.entries ?? []) as WorksnapEntry[], dates);
         const savedByUserId = new Map<number, { requestStatus: string; completionMinutes: number | null }>(
           (weekStatusResult.weekStatuses ?? []).map((s: { worksnapUserId: number; requestStatus: string; completionMinutes: number | null }) => [s.worksnapUserId, s])
         );
-        setModalRows(rows.map((row) => {
+        const mergedRows = rows.map((row) => {
           const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
           if (!saved) return row;
           return {
@@ -1571,8 +1615,28 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
             completionMinutes: saved.completionMinutes ?? row.completionMinutes,
             weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
           };
-        }));
+        });
+        setModalRows(mergedRows);
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
+        setLeaveRequests(leaveRequestsResult.filter((r) => r.status === "Approved"));
+
+        // Adjusted Time overrides Worksnap Time the same way an individual
+        // Attendance Review does — fetch any already-saved per-day adjustment
+        // for the contractors this bulk pass could actually approve.
+        const candidateRows = mergedRows.filter((r) =>
+          r.weeklyStatus === "For Review" && !isFixedContractor(r.payCategory) && r.worksnapUserId != null
+        );
+        const adjustedEntries = await Promise.all(candidateRows.map((r) =>
+          fetch(`/api/attendance/day-status?userId=${r.worksnapUserId}&week=${from}`)
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data: { days?: Array<{ date: string; adjustedMinutes: number | null }> } | null) => {
+              const map: Record<string, number> = {};
+              (data?.days ?? []).forEach((d) => { if (d.adjustedMinutes != null && d.adjustedMinutes > 0) map[d.date] = d.adjustedMinutes; });
+              return [r.contractorId, map] as [string, Record<string, number>];
+            })
+            .catch(() => [r.contractorId, {}] as [string, Record<string, number>])
+        ));
+        setAdjustedByContractor(new Map(adjustedEntries));
       })
       .finally(() => setIsLoading(false));
   }, [modalWeek]);
@@ -1598,7 +1662,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
   }
 
   function rowHolidayBonus(r: AttendanceRow) {
-    const rowDailyMins = r.dailyWorksnapMinutes ?? {};
+    const rowDailyMins = effectiveDailyMinutesFor(r, adjustedByContractor.get(r.contractorId));
     const rowRestDays = restDaysForAttendanceRow(r);
     return modalWeekDates.reduce(
       (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates)),
@@ -1614,10 +1678,16 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
     );
   }
 
+  function rowTimeOffRequestMinutes(r: AttendanceRow) {
+    const email = r.role.includes("@") ? r.role : "";
+    if (!email) return 0;
+    return totalTimeOffRequestMinutesFor(modalWeekDates, leaveRequests.filter((req) => req.email === email));
+  }
+
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + rowHolidayBonus(r));
+      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r));
     });
     setProcessedApprovals(map);
   }
@@ -1627,7 +1697,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates) + rowHolidayBonus(r)])
+          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r)])
         );
 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
@@ -1643,7 +1713,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
           week: modalWeekDates[0],
           requestStatus: "APPROVED",
           completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
-          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays),
+          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId)),
         }),
       }).then((res) => res.ok).catch(() => false)
     ));
@@ -1694,7 +1764,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
         </div>
         {/* Table */}
         <div className="min-h-0 overflow-x-auto overflow-y-auto">
-          <table className="w-full text-left text-sm" style={{ minWidth: "860px", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left text-sm" style={{ minWidth: "1560px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="bg-slate-50 sticky top-0 z-30 border-b border-slate-200">
               <tr>
                 <th className="sticky left-0 z-20 bg-slate-50 px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
@@ -1702,22 +1772,26 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                 </th>
                 <th className="sticky left-[52px] z-20 bg-slate-50 px-4 py-3 w-[220px] min-w-[220px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Contractor</th>
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
-                {["Actual Time", "Completion Time", "Local HO Time", "Status"].map((h) => (
+                {["Actual Time", "Completion Time", "Local HO Time",
+                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
+                  "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
+                <tr><td colSpan={13} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={7} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
+                <tr><td colSpan={13} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const rowHolidayBonusMins = rowHolidayBonus(row);
-                const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates) + rowHolidayBonusMins);
+                const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates, adjustedByContractor.get(row.contractorId)) + rowHolidayBonusMins);
                 const isProcessed = processedMins !== undefined;
                 const localHolidayMins = rowLocalHolidayMinutes(row);
+                const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId));
+                const timeOffRequestMins = rowTimeOffRequestMinutes(row);
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
                   <td className="sticky left-0 z-10 bg-white px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
@@ -1746,6 +1820,24 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
                     {localHolidayMins > 0 ? formatMinutesAsMins(localHolidayMins) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalUsHoMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalUsHoMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalRegularOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRegularOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalRdOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRdOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {weeklyTotals.totalHoOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalHoOtMinutes) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
+                    {timeOffRequestMins > 0 ? formatMinutesAsMins(timeOffRequestMins) : "—"}
                   </td>
                   <td className="px-4 py-3">
                     {row.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}

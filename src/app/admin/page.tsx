@@ -145,13 +145,13 @@ export default function AdminPage() {
         {METRICS.map((card) => {
           if (card.highlight) {
             return (
-              <Link key={card.label} href={card.href} className="col-span-2 sm:col-span-1 bg-[#003527] hover:bg-[#064e3b] text-white p-4 rounded-xl shadow-md flex flex-col justify-between transition-colors cursor-pointer">
+              <Link key={card.label} href={card.href} className="col-span-2 sm:col-span-1 bg-[#003527] hover:bg-[#064e3b] text-white p-2 rounded-xl shadow-md flex flex-col justify-between transition-colors cursor-pointer">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-wider opacity-80">{card.label}</p>
-                  <p className="text-4xl font-black mt-1">{card.value}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider opacity-80">{card.label}</p>
+                  <p className="text-xl font-black mt-0.5">{card.value}</p>
                 </div>
-                <div className="mt-4 flex items-center gap-1 text-xs text-emerald-300">
-                  <LuTrendingUp size={14} strokeWidth={2} />
+                <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-300">
+                  <LuTrendingUp size={10} strokeWidth={2} />
                   {card.delta}
                 </div>
               </Link>
@@ -159,39 +159,39 @@ export default function AdminPage() {
           }
           if (card.accent) {
             return (
-              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-4 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
+              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-2 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
                 <div>
-                  <p className="text-xs font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
-                  <p className="text-3xl font-bold text-blue-700 mt-1">{card.value}</p>
+                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
+                  <p className="text-xl font-bold text-blue-700 mt-0.5">{card.value}</p>
                 </div>
-                <p className="mt-4 text-xs text-blue-400">{card.sub}</p>
+                <p className="mt-1 text-[10px] text-blue-400">{card.sub}</p>
               </Link>
             );
           }
           return (
-            <Link key={card.label} href={card.href} className="bg-white hover:bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
+            <Link key={card.label} href={card.href} className="bg-white hover:bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{card.label}</p>
-                <p className="text-3xl font-bold text-[#003527] mt-1">{card.value}</p>
+                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{card.label}</p>
+                <p className="text-xl font-bold text-[#003527] mt-0.5">{card.value}</p>
               </div>
-              <p className="mt-4 text-xs text-slate-400">{card.sub}</p>
+              <p className="mt-1 text-[10px] text-slate-400">{card.sub}</p>
             </Link>
           );
         })}
 
         {/* Absent Today + Late Today — stacked in one grid cell */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           {/* Absent Today */}
           <button
             onClick={() => setShowAbsentModal(true)}
-            className="text-left bg-red-100 hover:bg-red-200 text-red-800 px-4 py-3 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            className="text-left bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
           >
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider">Absent Today</p>
-              <p className="text-2xl font-black mt-0.5 text-red-600">{absentRows.length}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider">Absent Today</p>
+              <p className="text-base font-black mt-0 text-red-600">{absentRows.length}</p>
             </div>
-            <div className="mt-2 flex items-center gap-1 text-xs">
-              <LuTriangleAlert size={12} strokeWidth={2} />
+            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
+              <LuTriangleAlert size={10} strokeWidth={2} />
               No time logged
             </div>
           </button>
@@ -199,14 +199,14 @@ export default function AdminPage() {
           {/* Late Today */}
           <button
             onClick={() => setShowLateModal(true)}
-            className="text-left bg-amber-50 hover:bg-amber-100 text-amber-800 px-4 py-3 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            className="text-left bg-amber-50 hover:bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
           >
             <div>
-              <p className="text-xs font-bold uppercase tracking-wider">Late Today</p>
-              <p className="text-2xl font-black mt-0.5 text-amber-600">{lateRows.length}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider">Late Today</p>
+              <p className="text-base font-black mt-0 text-amber-600">{lateRows.length}</p>
             </div>
-            <div className="mt-2 flex items-center gap-1 text-xs">
-              <LuClock size={12} strokeWidth={2} />
+            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
+              <LuClock size={10} strokeWidth={2} />
               Partial time logged
             </div>
           </button>
