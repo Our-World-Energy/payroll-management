@@ -623,7 +623,7 @@ export default function TimeOffPage() {
                           onChange={(e) => setOverrideType(e.target.value as typeof OVERRIDE_TYPES[number])}
                           className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                         >
-                          {OVERRIDE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                          {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) : true).map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
@@ -824,8 +824,16 @@ export default function TimeOffPage() {
                   <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
                     <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 210 }}>
                       <div className="flex items-center gap-3">
-                        <div className={`size-8 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
-                          {avatarInitials(row.fullName)}
+                        <div className="relative shrink-0">
+                          <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
+                            {avatarInitials(row.fullName)}
+                          </div>
+                          {latest?.status === "Pending" && (
+                            <span className="absolute -top-0.5 -right-0.5 flex size-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
+                            </span>
+                          )}
                         </div>
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-[#003527] truncate">{row.fullName}</p>
@@ -891,7 +899,7 @@ export default function TimeOffPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
                       <button
-                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); setEditFrom(""); setEditTo(""); setEditReason(""); }}
+                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); setEditFrom(""); setEditTo(""); setEditReason(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); setOverrideSuccess(""); }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
                       >
                         <LuEye size={14} strokeWidth={1.75} /> View

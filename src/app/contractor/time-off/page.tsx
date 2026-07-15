@@ -113,10 +113,12 @@ export default function ContractorTimeOffPage() {
   const [allRequests,    setAllRequests]    = useState<LeaveRequest[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
 
-  const [tab,       setTab]       = useState<"pto" | "sick">("pto");
+  const ALL_LEAVE_TYPES    = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day"] as const;
+  const INDIA_LEAVE_TYPES  = ["Sick Leave", "Sick Leave Half Day"] as const;
+
+  const [leaveType, setLeaveType] = useState<typeof ALL_LEAVE_TYPES[number]>("PTO");
   const [startDate, setStartDate] = useState("");
   const [endDate,   setEndDate]   = useState("");
-  const [isHalfDay, setIsHalfDay] = useState(false);
   const [reason,    setReason]    = useState("");
   const [formError, setFormError] = useState("");
   const [success,   setSuccess]   = useState("");
@@ -142,10 +144,12 @@ export default function ContractorTimeOffPage() {
       setData(profile);
       // India contractors don't have PTO — default to sick leave tab
       const profileCountry = profile.location?.split(",").pop()?.trim().toLowerCase() ?? "";
-      if (profileCountry === "india") setTab("sick");
+      if (profileCountry === "india") setLeaveType("Sick Leave");
       setLoading(false);
     })();
   }, [router, loadRequests]);
+
+  const isHalfDay = leaveType.endsWith("Half Day");
 
   const estimatedDays = (() => {
     if (isHalfDay) return startDate ? 0.5 : null;
@@ -155,21 +159,22 @@ export default function ContractorTimeOffPage() {
     return Math.round((e.getTime() - s.getTime()) / 86400000) + 1;
   })();
 
+  // DB durationDays is Int — half day is stored as 1; the type field ("* Half Day") already encodes it
+  const durationDaysForDB = isHalfDay ? 1 : (estimatedDays ?? 1);
+
   function handleSubmit() {
     if (!startDate) { setFormError("Start date is required."); return; }
     if (!isHalfDay && !endDate) { setFormError("End date is required."); return; }
     if (!isHalfDay && new Date(endDate) < new Date(startDate)) { setFormError("End date must be on or after start date."); return; }
     setFormError(""); setSuccess("");
 
-    const baseType = tab === "pto" ? "PTO" : "Sick Leave";
-
     startTransition(async () => {
       const result = await submitLeaveRequest({
         email,
-        type:         isHalfDay ? `${baseType} Half Day` : baseType,
+        type:         leaveType,
         startDate,
         endDate:      isHalfDay ? startDate : endDate,
-        durationDays: estimatedDays ?? 1,
+        durationDays: durationDaysForDB,
         reason,
       });
       if (!result.ok) {
@@ -177,7 +182,7 @@ export default function ContractorTimeOffPage() {
         return;
       }
       setSuccess("Request submitted successfully!");
-      setStartDate(""); setEndDate(""); setIsHalfDay(false); setReason("");
+      setStartDate(""); setEndDate(""); setReason("");
       await loadRequests(email);
     });
   }
@@ -274,27 +279,12 @@ export default function ContractorTimeOffPage() {
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Form */}
         <div className="xl:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
-          {/* Tabs */}
-          <div className="border-b border-slate-100">
-            <nav className="flex px-6">
-              {(["pto", "sick"] as const).filter(t => !(t === "pto" && isPtoHidden)).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => { setTab(t); setFormError(""); setSuccess(""); }}
-                  className={[
-                    "px-6 py-4 text-sm font-semibold border-b-2 transition-colors",
-                    tab === t
-                      ? "border-emerald-700 text-emerald-900"
-                      : "border-transparent text-slate-400 hover:text-emerald-700",
-                  ].join(" ")}
-                >
-                  {t === "pto" ? "Request PTO" : "Request Sick Leave"}
-                </button>
-              ))}
-            </nav>
+          {/* Header */}
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h3 className="text-sm font-semibold text-slate-700">Apply for Leave</h3>
           </div>
 
-          <div className="p-6 space-y-6">
+          <div className="p-6 space-y-4">
             {/* Success banner */}
             {success && (
               <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700 font-medium">
@@ -311,56 +301,54 @@ export default function ContractorTimeOffPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700 block">Start Date</label>
-                <div className="relative">
-                  <LuCalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" strokeWidth={1.75} />
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={e => setStartDate(e.target.value)}
-                    className={INPUT + " pl-9"}
-                  />
-                </div>
+            {/* Leave Type */}
+            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Type</p>
+              <select
+                value={leaveType}
+                onChange={(e) => { setLeaveType(e.target.value as typeof ALL_LEAVE_TYPES[number]); setFormError(""); setSuccess(""); }}
+                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {(isPtoHidden ? INDIA_LEAVE_TYPES : ALL_LEAVE_TYPES).map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+                />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-semibold text-slate-700 block">End Date</label>
-                <div className="relative">
-                  <LuCalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" strokeWidth={1.75} />
-                  <input
-                    type="date"
-                    value={isHalfDay ? startDate : endDate}
-                    onChange={e => setEndDate(e.target.value)}
-                    disabled={isHalfDay}
-                    className={INPUT + " pl-9 disabled:bg-slate-50 disabled:text-slate-400"}
-                  />
-                </div>
+              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">End Date</p>
+                <input
+                  type="date"
+                  value={isHalfDay ? startDate : endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  disabled={isHalfDay}
+                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-100 disabled:text-slate-400"
+                />
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-sm font-medium text-slate-700 select-none">
-              <input
-                type="checkbox"
-                checked={isHalfDay}
-                onChange={e => setIsHalfDay(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 accent-emerald-700 cursor-pointer"
-              />
-              Half day request (4 hours)
-            </label>
-
-            <div className="space-y-2">
-              <label className="text-sm font-semibold text-slate-700 block">Reason for request</label>
+            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason for Request</p>
               <textarea
-                rows={4}
+                rows={3}
                 value={reason}
                 onChange={e => setReason(e.target.value)}
                 placeholder="Briefly describe the reason for your time off..."
-                className={INPUT + " resize-none"}
+                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
               />
             </div>
 
-            <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
               <div className="flex items-center gap-2 text-xs text-slate-400">
                 <LuInfo size={14} strokeWidth={1.75} />
                 Estimated duration:{" "}
