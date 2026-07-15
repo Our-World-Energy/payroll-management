@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight,
   LuPencil, LuChevronRight as LuBreadcrumb,
@@ -128,6 +129,7 @@ const COLS = [
 ];
 
 export default function ContractorsPage() {
+  const searchParams = useSearchParams();
   const [rows, setRows]           = useState<Contractor[]>(pageCache?.rows ?? []);
   const [total, setTotal]         = useState(pageCache?.total ?? 0);
   const [loading, setLoading]     = useState(pageCache === null);
@@ -136,7 +138,11 @@ export default function ContractorsPage() {
 
   const [page, setPage]           = useState(1);
   const [pageSize, setPageSize]   = useState(25);
-  const [country, setCountry]     = useState("All Countries");
+  // Dashboard country tiles (e.g. Philippines, Guatemala) link here with
+  // ?country=<Name> — seed it directly so the very first fetch is already
+  // filtered correctly, instead of fetching "All Countries" first and
+  // re-fetching a second time once the param is applied.
+  const [country, setCountry]     = useState(() => searchParams.get("country") || "All Countries");
   const [status, setStatus]       = useState("All Statuses");
   const [activeRules, setActiveRules] = useState<FilterRule[]>([]);
 
@@ -375,6 +381,8 @@ export default function ContractorsPage() {
               <option>Mexico</option>
               <option>India</option>
               <option>USA</option>
+              <option>Guatemala</option>
+              <option>Colombia</option>
             </select>
 
             <select

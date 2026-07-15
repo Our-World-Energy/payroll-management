@@ -169,11 +169,11 @@ export default function AdminPage() {
 
   const METRICS = [
     { label: "Active Total Contractors", value: countryCounts.totalActive, delta: "+4% this month",       href: "/admin/contractors", highlight: true  },
-    { label: "Philippines",              value: countryCounts.philippines, sub: "Support & Logistics",    href: "/admin/contractors", highlight: false },
-    { label: "Mexico",                   value: countryCounts.mexico,      sub: "Manufacturing & Solar",  href: "/admin/contractors", highlight: false },
-    { label: "India",                    value: countryCounts.india,       sub: "Tech & Engineering",     href: "/admin/contractors", highlight: false },
-    { label: "Guatemala",                value: countryCounts.guatemala,   sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
-    { label: "Colombia",                 value: countryCounts.colombia,    sub: "Regional Operations",    href: "/admin/contractors", highlight: false },
+    { label: "Philippines",              value: countryCounts.philippines, sub: "Support & Logistics",    href: "/admin/contractors?country=Philippines", highlight: false },
+    { label: "Mexico",                   value: countryCounts.mexico,      sub: "Manufacturing & Solar",  href: "/admin/contractors?country=Mexico",      highlight: false },
+    { label: "India",                    value: countryCounts.india,       sub: "Tech & Engineering",     href: "/admin/contractors?country=India",       highlight: false },
+    { label: "Guatemala",                value: countryCounts.guatemala,   sub: "Regional Operations",    href: "/admin/contractors?country=Guatemala",   highlight: false },
+    { label: "Colombia",                 value: countryCounts.colombia,    sub: "Regional Operations",    href: "/admin/contractors?country=Colombia",    highlight: false },
     { label: "PTO Today",                value: m.ptoToday,                sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
   ];
 
