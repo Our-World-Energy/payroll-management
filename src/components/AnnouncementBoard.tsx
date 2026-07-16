@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { LuMegaphone, LuPlus, LuX, LuChevronDown, LuPencil } from "react-icons/lu";
+import { useState, useEffect } from "react";
+import { LuMegaphone, LuPlus, LuX, LuChevronDown, LuPencil, LuLoader } from "react-icons/lu";
+import {
+  fetchAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
+  type Announcement,
+} from "@/app/admin/announcements/actions";
 
 const LOCATIONS = [
   "All Locations",
@@ -11,16 +15,6 @@ const LOCATIONS = [
   "USA",
   "Offshore",
 ];
-
-type Announcement = {
-  id: number;
-  title: string;
-  body: string;
-  location: string;
-  date: string; // "YYYY-MM-DD" — the date this announcement is posted for
-};
-
-const INITIAL: Announcement[] = [];
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer appearance-none";
@@ -39,14 +33,28 @@ function formatAnnouncementDate(iso: string) {
 }
 
 export function AnnouncementBoard() {
-  const [announcements, setAnnouncements] = useState<Announcement[]>(INITIAL);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [filterLocation, setFilterLocation] = useState("All Locations");
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [location, setLocation] = useState(LOCATIONS[1]);
   const [date, setDate] = useState(todayIso());
+  const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetchAnnouncements()
+      .then((data) => { if (active) setAnnouncements(data); })
+      .catch((e) => { if (active) setLoadError(e instanceof Error ? e.message : "Failed to load announcements."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
 
   function resetForm() {
     setTitle("");
@@ -54,6 +62,7 @@ export function AnnouncementBoard() {
     setLocation(LOCATIONS[1]);
     setDate(todayIso());
     setEditingId(null);
+    setFormError("");
   }
 
   function openAddForm() {
@@ -67,6 +76,7 @@ export function AnnouncementBoard() {
     setBody(a.body);
     setLocation(a.location);
     setDate(a.date);
+    setFormError("");
     setShowForm(true);
   }
 
@@ -75,26 +85,43 @@ export function AnnouncementBoard() {
     resetForm();
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     const t = title.trim();
     const b = body.trim();
     if (!t || !b || !date) return;
-    if (editingId != null) {
-      setAnnouncements((prev) =>
-        prev.map((a) => (a.id === editingId ? { ...a, title: t, body: b, location, date } : a))
-          .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
-      );
-    } else {
-      setAnnouncements((prev) =>
-        [{ id: Date.now(), title: t, body: b, location, date }, ...prev]
-          .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
-      );
+    setSubmitting(true);
+    setFormError("");
+    try {
+      if (editingId != null) {
+        await updateAnnouncement({ id: editingId, title: t, body: b, location, date });
+        setAnnouncements((prev) =>
+          prev.map((a) => (a.id === editingId ? { ...a, title: t, body: b, location, date } : a))
+            .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
+        );
+      } else {
+        const created = await createAnnouncement({ title: t, body: b, location, date });
+        setAnnouncements((prev) =>
+          [created, ...prev].sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
+        );
+      }
+      closeForm();
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : "Failed to save announcement.");
+    } finally {
+      setSubmitting(false);
     }
-    closeForm();
   }
 
-  function handleRemove(id: number) {
-    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+  async function handleRemove(id: string) {
+    setDeletingId(id);
+    try {
+      await deleteAnnouncement(id);
+      setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to delete announcement.");
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   const filtered =
@@ -122,7 +149,7 @@ export function AnnouncementBoard() {
       {/* Add/Edit modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeForm} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !submitting && closeForm()} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
@@ -135,7 +162,7 @@ export function AnnouncementBoard() {
                   <p className="text-xs text-slate-400">Post to a specific location</p>
                 </div>
               </div>
-              <button onClick={closeForm} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={closeForm} disabled={submitting} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40">
                 <LuX size={18} />
               </button>
             </div>
@@ -175,21 +202,26 @@ export function AnnouncementBoard() {
                   <input type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
               </div>
+              {formError && <p className="text-xs font-medium text-red-600">{formError}</p>}
             </div>
             {/* Modal footer */}
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
               <button
                 onClick={closeForm}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+                disabled={submitting}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 onClick={handleSubmit}
-                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
+                disabled={submitting}
+                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-60"
               >
-                {editingId != null ? <LuPencil size={15} strokeWidth={2} /> : <LuMegaphone size={15} strokeWidth={2} />}
-                {editingId != null ? "Save Changes" : "Post Announcement"}
+                {submitting
+                  ? <LuLoader size={15} className="animate-spin" />
+                  : editingId != null ? <LuPencil size={15} strokeWidth={2} /> : <LuMegaphone size={15} strokeWidth={2} />}
+                {submitting ? "Saving…" : editingId != null ? "Save Changes" : "Post Announcement"}
               </button>
             </div>
           </div>
@@ -211,9 +243,15 @@ export function AnnouncementBoard() {
         </div>
       </div>
 
+      {loadError && <p className="text-xs font-medium text-red-600">{loadError}</p>}
+
       {/* List */}
       <div className="space-y-2 max-h-64 overflow-y-auto">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-6">
+            <LuLoader size={22} className="text-slate-300 animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="p-4 bg-slate-50 rounded-lg border border-slate-100">
             <p className="text-sm text-slate-500">
               No new announcements for today. All offshore teams are operating as scheduled.
@@ -242,10 +280,11 @@ export function AnnouncementBoard() {
                 </button>
                 <button
                   onClick={() => handleRemove(a.id)}
+                  disabled={deletingId === a.id}
                   title="Delete announcement"
-                  className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded"
+                  className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40"
                 >
-                  <LuX size={14} strokeWidth={2.5} />
+                  {deletingId === a.id ? <LuLoader size={14} className="animate-spin" /> : <LuX size={14} strokeWidth={2.5} />}
                 </button>
               </div>
             </div>

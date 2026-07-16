@@ -306,7 +306,7 @@ export default function TimeOffPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-full">
+    <div className="p-4 sm:p-5 md:p-6 max-w-full">
 
       {/* ── Detail Modal ── */}
       {selectedRow && (() => {
@@ -777,22 +777,22 @@ export default function TimeOffPage() {
       )}
 
       {/* ── Page header ── */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between mb-3 gap-2">
         <div>
-          <nav className="flex mb-2">
+          <nav className="flex mb-1">
             <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
               <li>Management</li>
               <li><LuChevronRight size={14} className="text-slate-400" /></li>
               <li className="text-teal-600">Time-Off Management</li>
             </ol>
           </nav>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
-          <p className="text-sm text-slate-500 mt-1">Track PTO and sick leave balances across your contractor workforce.</p>
+          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
         </div>
       </div>
 
       {/* ── Stat cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-3">
         <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-2.5 flex items-center justify-between">
           <div>
             <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
@@ -823,7 +823,7 @@ export default function TimeOffPage() {
       </div>
 
       {/* ── Filters ── */}
-      <div className="mb-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center">
+      <div className="mb-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center">
         <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
         <div className="relative w-full sm:w-64">
           <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />

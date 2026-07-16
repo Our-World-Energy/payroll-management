@@ -1,15 +1,36 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
-import { ATTENDANCE, CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
+import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, type AdminLeaveRequest } from "../contractors/actions";
 
+
+// Transparently retries a fetch on network failure or a 5xx/429 response —
+// covers the transient blips (cold starts, brief DB connection hiccups) that
+// were otherwise surfacing as "no data" until the user manually refreshed.
+// 4xx responses are returned as-is since retrying won't fix a bad request.
+async function fetchWithRetry(input: string, init?: RequestInit, retries = 2): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(input, init);
+      if (response.ok || (response.status < 500 && response.status !== 429)) return response;
+      lastError = new Error(`Request failed with status ${response.status}`);
+    } catch (err) {
+      lastError = err;
+    }
+    if (attempt < retries) {
+      await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Request failed");
+}
 
 function formatDayLabel(date: string) {
   return parseIsoDate(date).toLocaleDateString("en-US", {
@@ -31,6 +52,7 @@ type ReviewModalProps = {
   onSave: (contractorId: string, offsetCreditApplied?: number) => void;
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
+  allLeaveRequests: AdminLeaveRequest[];
 };
 
 type WorksnapEntry = {
@@ -261,6 +283,22 @@ function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest
   return `${Math.round(hours * 60)} mins`;
 }
 
+// Whether the matched portal leave REQUEST covering this date is worth a
+// full day (480 min) — a second, independent signal (alongside the admin-set
+// daily Time Off Status) that the day is already fully credited via time
+// off, so Worksnap time logged anyway is Regular OT Time, not regular/
+// evaluated time.
+function isFullTimeOffRequestDay(date: string, leaveRequests: AdminLeaveRequest[]) {
+  return timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)) === 480;
+}
+
+// Combines both signals — the admin-set daily Time Off Status and an actual
+// submitted leave request — into the single "is this day already fully
+// credited via time off" check used throughout Attendance Review.
+function resolveFullTimeOffDay(date: string, timeOffStatus: string, leaveRequests: AdminLeaveRequest[]) {
+  return isFullTimeOffStatus(timeOffStatus) || isFullTimeOffRequestDay(date, leaveRequests);
+}
+
 // Week total — sums each DISTINCT request that overlaps the week once (not
 // once per day it covers), since a request's hours are a flat per-request
 // amount, not scaled by how many days it spans.
@@ -441,7 +479,8 @@ function weeklyEvaluatedRegularAllocation(
   regularOtByDate: Record<string, number>,
   rdOtByDate: Record<string, number>,
   approvedByDate: Record<string, boolean>,
-  isRestDayByDate: Record<string, boolean>
+  isRestDayByDate: Record<string, boolean>,
+  isFullTimeOffDayByDate: Record<string, boolean> = {}
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
   const remainingRdOt: Record<string, number> = {};
@@ -454,7 +493,10 @@ function weeklyEvaluatedRegularAllocation(
   weekDates.forEach((date) => {
     borrowedByDate[date] = 0;
     const regularTime = regularTimeByDate[date] ?? 0;
-    if (isRestDayByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
+    // A full-time-off day's Regular Time is intentionally 0 (it's already
+    // credited via Time Off Time) — it must never borrow OT from other days
+    // to inflate its own Evaluated Regular Time back up to 480.
+    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
 
     let missing = 480 - regularTime;
 
@@ -590,15 +632,20 @@ function buildBulkApproveDaySnapshots(
   usaHolidays: HolidayEntry[],
   dailyLogs: DailyLogEntry[],
   allHolidays: HolidayEntry[],
-  adjustedDaily?: Record<string, number>
+  adjustedDaily?: Record<string, number>,
+  leaveRequests: AdminLeaveRequest[] = []
 ) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
   const shiftType = shiftTypeForAttendanceRow(row);
   const timeOffStatusUi = defaultTimeOffStatusFor(row);
   const timeOffMinutes = timeValueToMinutes(timeOffTimeFor(timeOffStatusUi));
-  const isFullTimeOffDay = isFullTimeOffStatus(timeOffStatusUi);
+  const isFullTimeOffStatusRow = isFullTimeOffStatus(timeOffStatusUi);
   const userLogs = dailyLogs.filter((l) => l.worksnapUserId === row.worksnapUserId);
+  // Either signal — the admin-set daily status OR an actual submitted leave
+  // request worth a full day — marks the day as already fully credited via
+  // time off, so Worksnap time logged anyway is Regular OT Time.
+  const isFullTimeOffDayFor = (date: string) => isFullTimeOffStatusRow || isFullTimeOffRequestDay(date, leaveRequests);
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time,
   // so it's built once across all weekDates together, same as the Review modal.
@@ -607,10 +654,12 @@ function buildBulkApproveDaySnapshots(
   const rdOtByDate: Record<string, number> = {};
   const approvedByDate: Record<string, boolean> = {};
   const isRestDayByDate: Record<string, boolean> = {};
+  const isFullTimeOffDayByDate: Record<string, boolean> = {};
 
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
+    const isFullTimeOffDay = isFullTimeOffDayFor(date);
     const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
@@ -623,14 +672,16 @@ function buildBulkApproveDaySnapshots(
     rdOtByDate[date] = rdOtMinutes;
     approvedByDate[date] = dailyDecisionStatus === "Approved";
     isRestDayByDate[date] = isRestDay;
+    isFullTimeOffDayByDate[date] = isFullTimeOffDay;
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
     const isRestDay = isRestDayDate(date, restDaysStr);
+    const isFullTimeOffDay = isFullTimeOffDayFor(date);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
@@ -669,9 +720,10 @@ function rowWeeklyTotals(
   usaHolidays: HolidayEntry[],
   dailyLogs: DailyLogEntry[],
   allHolidays: HolidayEntry[],
-  adjustedDaily?: Record<string, number>
+  adjustedDaily?: Record<string, number>,
+  leaveRequests: AdminLeaveRequest[] = []
 ) {
-  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily);
+  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, leaveRequests);
   return days.reduce(
     (totals, d) => ({
       totalEvaluatedRegularMinutes: totals.totalEvaluatedRegularMinutes + d.evaluatedRegularMinutes,
@@ -850,7 +902,7 @@ function payCategoryForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -862,7 +914,15 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const [adjustedTimes, setAdjustedTimes] = useState<Record<string, string>>({});
   const [editingAdjustedDate, setEditingAdjustedDate] = useState<string | null>(null);
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+
+  // Leave requests submitted through the contractor portal, matched to this
+  // week's days by date range, so "Time Off Request" can show what type of
+  // leave (if any) was requested for that day. Filtered from the parent's
+  // already-fetched list rather than re-querying the whole table again here.
+  const leaveRequests = useMemo(() => {
+    const email = record.role.includes("@") ? record.role : "";
+    return email ? allLeaveRequests.filter((r) => r.email === email) : [];
+  }, [allLeaveRequests, record]);
 
   const contractor = CONTRACTORS.find((item) => item.id === record.contractorId || item.name === record.name);
   const location = contractor?.site ?? record.region;
@@ -900,7 +960,7 @@ const totalHolidayMins = weekDates.reduce(
     const isRestDay = isRestDayDate(date, restDaysStr);
     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-    const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatus);
+    const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
     const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -911,14 +971,14 @@ const totalHolidayMins = weekDates.reduce(
   const totalEvaluatedMinutes = weekDates.reduce((sum, date) => {
     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType, isFullTimeOffStatus(dailyTimeOffStatus));
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType, resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests));
     return sum + timeValueToMinutes(evaluatedTime);
   }, 0);
   const totalRegularMinutes = weekDates.reduce(
     (sum, date) => sum + regularTimeMinutesFor(
       timeValueToMinutes(worksnapTimeForDate(effectiveDailyMinutes, date)),
       isRestDayDate(date, restDaysStr),
-      isFullTimeOffStatus(dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record))
+      resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests)
     ),
     0
   );
@@ -929,7 +989,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const isRestDay = isRestDayDate(date, restDaysStr);
         const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
         const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-        const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatus);
+        const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
         const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
         const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
@@ -960,7 +1020,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const isRestDay = isRestDayDate(date, restDaysStr);
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-      const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record));
+      const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
       const { hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
       return {
@@ -979,12 +1039,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const rdOtByDate: Record<string, number> = {};
     const approvedByDate: Record<string, boolean> = {};
     const isRestDayByDate: Record<string, boolean> = {};
+    const isFullTimeOffDayByDate: Record<string, boolean> = {};
 
     weekDates.forEach((date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
       const isRestDay = isRestDayDate(date, restDaysStr);
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-      const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record));
+      const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
       const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -996,14 +1057,19 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       rdOtByDate[date] = rdOtMinutes;
       approvedByDate[date] = dailyDecisionStatus === "Approved";
       isRestDayByDate[date] = isRestDay;
+      isFullTimeOffDayByDate[date] = isFullTimeOffDay;
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
   const totalAdjustedRdOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.rdOtMinutes ?? 0), 0);
 
+  // Resets the locally-edited review fields whenever a different
+  // contractor/week is opened (or the carried-over offset credit changes).
+  // Kept separate from the data-loading effect below so clicking "Retry"
+  // after a failed load doesn't wipe out edits the admin already made.
   useEffect(() => {
     const savedStatuses = (record as AttendanceRow).savedDailyDecisionStatuses;
     const defaultStatuses = savedStatuses
@@ -1014,72 +1080,68 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
     setOffsetCredit(0);
-
-    // Overlay whatever was actually last saved for this contractor/week, so the
-    // modal always reopens showing the latest saved review instead of resetting.
-    const worksnapUserId = (record as AttendanceRow).worksnapUserId;
-    const week = weekDates[0];
-    if (worksnapUserId == null || !week) return;
-
-    let isCancelled = false;
-    fetch(`/api/attendance/day-status?userId=${worksnapUserId}&week=${week}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { days?: Array<{ date: string; decisionStatus: string | null; timeOffStatus: string | null; adjustedMinutes: number | null }> } | null) => {
-        if (isCancelled || !data?.days) return;
-        const decisionByDate: Record<string, string> = {};
-        const timeOffByDate: Record<string, string> = {};
-        const adjustedByDate: Record<string, string> = {};
-        data.days.forEach((d) => {
-          if (d.decisionStatus) decisionByDate[d.date] = decisionStatusFromApi(d.decisionStatus);
-          if (d.timeOffStatus) timeOffByDate[d.date] = timeOffStatusFromApi(d.timeOffStatus);
-          if (d.adjustedMinutes != null) adjustedByDate[d.date] = formatMinutesAsMins(d.adjustedMinutes);
-        });
-        if (Object.keys(decisionByDate).length) setDailyDecisionStatuses((current) => ({ ...current, ...decisionByDate }));
-        if (Object.keys(timeOffByDate).length) setDailyTimeOffStatuses((current) => ({ ...current, ...timeOffByDate }));
-        if (Object.keys(adjustedByDate).length) setAdjustedTimes((current) => ({ ...current, ...adjustedByDate }));
-      })
-      .catch(() => {});
-
-    return () => { isCancelled = true; };
   }, [record, weekDates, appliedOffsetCredit]);
 
-  // Raw firstIn/lastOut instants for this contractor across the week, used to
-  // compute Local HO Time (needs real timestamps, not the pre-formatted
-  // Arizona-time strings the Task Breakdown modal displays).
+  // Loads the saved per-day review overlay (day-status) and the raw
+  // firstIn/lastOut instants (daily-log, for Local HO Time) together. Both
+  // requests retry transient failures automatically; `retryNonce` lets the
+  // user force another attempt via the error banner's Retry button without
+  // resetting any of the local edits above.
+  const [isLoadingReviewData, setIsLoadingReviewData] = useState(true);
+  const [reviewDataError, setReviewDataError] = useState("");
+  const [retryNonce, setRetryNonce] = useState(0);
+
   useEffect(() => {
     const worksnapUserId = (record as AttendanceRow).worksnapUserId;
-    if (worksnapUserId == null || !weekDates[0]) {
+    const week = weekDates[0];
+    if (worksnapUserId == null || !week) {
       setDailyLogs([]);
+      setIsLoadingReviewData(false);
       return;
     }
+
     let isCancelled = false;
-    const from = weekDates[0];
+    setIsLoadingReviewData(true);
+    setReviewDataError("");
+    const from = week;
     const to = weekDates[weekDates.length - 1];
-    fetch(`/api/attendance/daily-log?from=${from}&to=${to}&userId=${worksnapUserId}`)
-      .then((r) => (r.ok ? r.json() : { logs: [] }))
-      .then((data: { logs?: DailyLogEntry[] }) => {
-        if (!isCancelled) setDailyLogs(data.logs ?? []);
+
+    Promise.all([
+      fetchWithRetry(`/api/attendance/day-status?userId=${worksnapUserId}&week=${week}`).then((r) => (r.ok ? r.json() : null)),
+      fetchWithRetry(`/api/attendance/daily-log?from=${from}&to=${to}&userId=${worksnapUserId}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+    ])
+      .then(([dayStatusData, dailyLogData]: [
+        { days?: Array<{ date: string; decisionStatus: string | null; timeOffStatus: string | null; adjustedMinutes: number | null }> } | null,
+        { logs?: DailyLogEntry[] }
+      ]) => {
+        if (isCancelled) return;
+
+        if (dayStatusData?.days) {
+          const decisionByDate: Record<string, string> = {};
+          const timeOffByDate: Record<string, string> = {};
+          const adjustedByDate: Record<string, string> = {};
+          dayStatusData.days.forEach((d) => {
+            if (d.decisionStatus) decisionByDate[d.date] = decisionStatusFromApi(d.decisionStatus);
+            if (d.timeOffStatus) timeOffByDate[d.date] = timeOffStatusFromApi(d.timeOffStatus);
+            if (d.adjustedMinutes != null) adjustedByDate[d.date] = formatMinutesAsMins(d.adjustedMinutes);
+          });
+          if (Object.keys(decisionByDate).length) setDailyDecisionStatuses((current) => ({ ...current, ...decisionByDate }));
+          if (Object.keys(timeOffByDate).length) setDailyTimeOffStatuses((current) => ({ ...current, ...timeOffByDate }));
+          if (Object.keys(adjustedByDate).length) setAdjustedTimes((current) => ({ ...current, ...adjustedByDate }));
+        }
+        setDailyLogs(dailyLogData.logs ?? []);
       })
-      .catch(() => { if (!isCancelled) setDailyLogs([]); });
+      .catch(() => {
+        if (isCancelled) return;
+        setDailyLogs([]);
+        setReviewDataError("Couldn't load this contractor's saved review data. Some fields below may be incomplete.");
+      })
+      .finally(() => {
+        if (!isCancelled) setIsLoadingReviewData(false);
+      });
 
     return () => { isCancelled = true; };
-  }, [record, weekDates]);
-
-  // Leave requests submitted through the contractor portal, matched to this
-  // week's days by date range, so "Time Off Request" can show what type of
-  // leave (if any) was requested for that day.
-  useEffect(() => {
-    const email = record.role.includes("@") ? record.role : "";
-    if (!email) { setLeaveRequests([]); return; }
-    let isCancelled = false;
-    fetchAllLeaveRequestsAdmin()
-      .then((all) => {
-        if (!isCancelled) setLeaveRequests(all.filter((r) => r.email === email));
-      })
-      .catch(() => { if (!isCancelled) setLeaveRequests([]); });
-
-    return () => { isCancelled = true; };
-  }, [record]);
+  }, [record, weekDates, retryNonce]);
 
   function finishAdjustedEdit(date: string, fallbackValue: string) {
     setAdjustedTimes((current) => ({
@@ -1126,7 +1188,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           const isRestDay = isRestDayDate(date, restDaysStr);
           const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
           const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-          const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatus);
+          const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
           const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
           const adjustedTime = adjustedTimes[date] ?? "";
           const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
@@ -1191,7 +1253,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <div className="relative flex max-h-[97vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 px-4 py-2 sm:px-5 sm:py-2.5 border-b border-[#003527] bg-[#003527]">
           <div>
             <h3 className="text-xs font-bold text-white">Attendance Review</h3>
@@ -1208,7 +1270,23 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             <LuX size={15} strokeWidth={2} />
           </button>
         </div>
-        <div className="min-h-0 overflow-y-auto px-5 py-4 sm:px-6 sm:py-5">
+        {isLoadingReviewData && (
+          <p className="flex items-center gap-1.5 px-5 py-1.5 text-xs font-medium text-teal-700 bg-teal-50 border-b border-teal-100 sm:px-6">
+            <LuRefreshCw size={12} className="animate-spin" /> Loading saved review data…
+          </p>
+        )}
+        {!isLoadingReviewData && reviewDataError && (
+          <p className="flex items-center justify-between gap-3 px-5 py-1.5 text-xs font-medium text-red-700 bg-red-50 border-b border-red-100 sm:px-6">
+            <span>{reviewDataError}</span>
+            <button
+              onClick={() => setRetryNonce((n) => n + 1)}
+              className="inline-flex shrink-0 items-center gap-1 px-2 py-1 bg-white border border-red-200 rounded-md text-[11px] font-bold text-red-700 hover:bg-red-100"
+            >
+              <LuRefreshCw size={11} /> Retry
+            </button>
+          </p>
+        )}
+        <div className="min-h-0 overflow-y-auto px-5 py-2.5 sm:px-6 sm:py-3">
           <div className="sticky top-0 z-40 bg-white">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {details.map(([label, value]) => (
@@ -1230,7 +1308,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     {weeklyDayHeadings.map((heading) => (
                       <th
                         key={heading}
-                        className={`px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100 last:border-r-0 whitespace-nowrap ${
+                        className={`px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100 last:border-r-0 whitespace-nowrap ${
                           heading === "Days" ? "sticky left-0 z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
                         } ${
                           heading === "Decision" ? "sticky left-[156px] z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
@@ -1261,7 +1339,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
                     const isRestDay = isRestDayDate(date, restDaysStr);
                     const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-                    const isFullTimeOffDay = isFullTimeOffStatus(dailyTimeOffStatus);
+                    const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
                     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
                     const adjustedTime = adjustedTimes[date] ?? "";
@@ -1279,11 +1357,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
 
                     return (
                       <tr key={date}>
-                        <td className="sticky left-0 z-10 w-[156px] min-w-[156px] bg-white px-4 py-3 font-medium text-slate-800 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                        <td className="sticky left-0 z-10 w-[156px] min-w-[156px] bg-white px-4 py-2 font-medium text-slate-800 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                           {formatDayLabel(date)}
                         </td>
                         {!isIndia && (
-                          <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-3 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                          <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-2 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                             {showDailyDecisionActions(worksnapTime) ? (
                               <div className="flex items-center gap-1.5">
                                 <button
@@ -1310,10 +1388,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             )}
                           </td>
                         )}
-                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-3 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(rawWorksnapTime)}`}>
+                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(rawWorksnapTime)}`}>
                           {rawWorksnapTime}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           {isIndia ? "-" : isEditingAdjustedTime ? (
                             <input
                               autoFocus
@@ -1354,34 +1432,34 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
                           {regularTimeMinutes > 0 ? formatMinutesAsMins(regularTimeMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           {regularAllocation.evaluatedRegularTime > 0 ? formatMinutesAsMins(regularAllocation.evaluatedRegularTime) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           {regularAllocation.regularOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.regularOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {regularAllocation.rdOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.rdOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
                           {evaluatedTime}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {hoOtMinutes > 0 ? formatMinutesAsMins(hoOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           {localHoliday}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
-                        <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                           <select
                             value={dailyTimeOffStatus}
                             onChange={(event) => {
@@ -1399,24 +1477,24 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           </select>
                         </td>
                         {!isIndia && (
-                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100">
+                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
                             {timeOffTime}
                           </td>
                         )}
                         {!isIndia && (
-                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {timeOffRequestTypeFor(date, leaveRequests)}
                           </td>
                         )}
                         {!isIndia && (
-                          <td className="px-4 py-3 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {timeOffRequestMinutesFor(date, leaveRequests)}
                           </td>
                         )}
-                        <td className="px-4 py-3 text-slate-600">
+                        <td className="px-4 py-2 text-slate-600">
                           {completionTime}
                         </td>
-                        <td className={`px-4 py-3 ${approvalStatusClassName(dailyDecisionStatus)}`}>
+                        <td className={`px-4 py-2 ${approvalStatusClassName(dailyDecisionStatus)}`}>
                           {dailyDecisionStatus}
                         </td>
                       </tr>
@@ -1425,117 +1503,117 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                 </tbody>
                 <tfoot className="bg-slate-50">
                   <tr>
-                    <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                    <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                       Total Time
                     </td>
                     {!isIndia && (
-                      <td className="sticky left-[156px] z-20 w-[112px] min-w-[112px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                      <td className="sticky left-[156px] z-20 w-[112px] min-w-[112px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                         -
                       </td>
                     )}
-                    <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                    <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       {formatMinutesAsMins(worksnapTotalMinutes)}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       - 
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
+                    <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
                       {formatMinutesAsMins(totalRegularMinutes)}
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100">
+                    <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
                       {totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(totalEvaluatedRegularMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100">
+                    <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
                       {totalRegularOtMinutes > 0 ? formatMinutesAsMins(totalRegularOtMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                    <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {totalAdjustedRdOtMinutes > 0 ? formatMinutesAsMins(totalAdjustedRdOtMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-3 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
+                    <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
                       {totalEvaluatedMinutes > 0 ? formatMinutesAsMins(totalEvaluatedMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-3 border-r border-slate-100">
+                    <td className="px-4 py-2 border-r border-slate-100">
                       {totalDisplayedUsHoMinutes > 0
                         ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesAsMins(totalDisplayedUsHoMinutes)}</span>
                         : <span className="text-slate-500">-</span>}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {otTotals.ho > 0 ? formatMinutesAsMins(otTotals.ho) : "-"}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       -
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {totalLocalHolidayMinutes > 0 ? formatMinutesAsMins(totalLocalHolidayMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       -
                     </td>
                     {!isIndia && (
-                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                         -
                       </td>
                     )}
                     {!isIndia && (
-                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                         -
                       </td>
                     )}
                     {!isIndia && (
-                      <td className="px-4 py-3 text-slate-500 border-r border-slate-100">
+                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                         {totalTimeOffRequestMinutes > 0 ? formatMinutesAsMins(totalTimeOffRequestMinutes) : "-"}
                       </td>
                     )}
-                    <td className="px-4 py-3 font-bold text-slate-900">
+                    <td className="px-4 py-2 font-bold text-slate-900">
                       {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="px-4 py-2 text-slate-500">
                       -
                     </td>
                   </tr>
                   {isIndia && (
                     <>
                       <tr>
-                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                           Offset Credit
                         </td>
-                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
+                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className={`px-4 py-2 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
                           {formatMinutesAsMins(offsetCredit || appliedOffsetCredit)}
                         </td>
-                        <td className="px-4 py-3 text-slate-500">-</td>
+                        <td className="px-4 py-2 text-slate-500">-</td>
                       </tr>
                       <tr>
-                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#003527] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                        <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-[#003527] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                           Net Time
                         </td>
-                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-3 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-3 text-slate-500 border-r border-slate-100">-</td>
-                        <td className={`px-4 py-3 font-bold ${appliedOffsetCredit > 0 && offsetCredit === 0 ? "text-red-600" : "text-[#003527]"}`}>
+                        <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className={`px-4 py-2 font-bold ${appliedOffsetCredit > 0 && offsetCredit === 0 ? "text-red-600" : "text-[#003527]"}`}>
                           {formatMinutesAsMins(offsetCredit > 0 ? indiaTotalMinutes + offsetCredit + totalHolidayMins : indiaNetCompletionMinutes + totalHolidayMins)}
                         </td>
-                        <td className="px-4 py-3 text-slate-500">-</td>
+                        <td className="px-4 py-2 text-slate-500">-</td>
                       </tr>
                     </>
                   )}
@@ -1555,7 +1633,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             </div>
           )}
         </div>
-        <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
+        <div className="px-5 py-3 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
           {saveError && <p className="mr-auto text-sm font-medium text-red-600">{saveError}</p>}
           <button
             onClick={onClose}
@@ -1586,7 +1664,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           <button
             type="button"
             onClick={handleSaveClick}
-            disabled={isSaving}
+            disabled={isSaving || isLoadingReviewData}
+            title={isLoadingReviewData ? "Waiting for saved review data to finish loading…" : undefined}
             className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving ? "Saving…" : "Save"}
@@ -1597,8 +1676,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   );
 }
 
-function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHolidays }: {
+function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays }: {
   worksnapRows: AttendanceRow[];
+  allLeaveRequests: AdminLeaveRequest[];
   onClose: () => void;
   onApprove: () => void;
   usaHolidays: HolidayEntry[];
@@ -1617,8 +1697,16 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [bulkSaveError, setBulkSaveError] = useState("");
-  const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [retryNonce, setRetryNonce] = useState(0);
   const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
+
+  // Approved leave requests, filtered from the parent's already-fetched list
+  // rather than re-querying the whole leave_requests table again here.
+  const leaveRequests = useMemo(
+    () => allLeaveRequests.filter((r) => r.status === "Approved"),
+    [allLeaveRequests]
+  );
 
   // Same recent-Sun→Sat-weeks list the main page uses, anchored to the current
   // Arizona week, so the latest week is always selectable here too.
@@ -1636,17 +1724,22 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
 
   useEffect(() => {
     if (!modalWeek) return;
+    let isCancelled = false;
     const dates = datesBetween(modalWeek, addDaysIso(modalWeek, 6));
     const from = dates[0];
     const to = dates[dates.length - 1];
     setIsLoading(true);
-    Promise.all([
-      fetch(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
-      fetch(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
-      fetch(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
-      fetchAllLeaveRequestsAdmin().catch(() => []),
-    ])
-      .then(async ([entriesResult, weekStatusResult, dailyLogResult, leaveRequestsResult]) => {
+    setLoadError("");
+
+    async function load() {
+      try {
+        const [entriesResult, weekStatusResult, dailyLogResult] = await Promise.all([
+          fetchWithRetry(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
+          fetchWithRetry(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
+          fetchWithRetry(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+        ]);
+        if (isCancelled) return;
+
         const rows = worksnapEntriesToAttendanceRecords((entriesResult.entries ?? []) as WorksnapEntry[], dates);
         const savedByUserId = new Map<number, { requestStatus: string; completionMinutes: number | null }>(
           (weekStatusResult.weekStatuses ?? []).map((s: { worksnapUserId: number; requestStatus: string; completionMinutes: number | null }) => [s.worksnapUserId, s])
@@ -1662,7 +1755,6 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
         });
         setModalRows(mergedRows);
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
-        setLeaveRequests(leaveRequestsResult.filter((r) => r.status === "Approved"));
 
         // Adjusted Time overrides Worksnap Time the same way an individual
         // Attendance Review does — fetch any already-saved per-day adjustment
@@ -1671,7 +1763,7 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
           r.weeklyStatus === "For Review" && !isFixedContractor(r.payCategory) && r.worksnapUserId != null
         );
         const adjustedEntries = await Promise.all(candidateRows.map((r) =>
-          fetch(`/api/attendance/day-status?userId=${r.worksnapUserId}&week=${from}`)
+          fetchWithRetry(`/api/attendance/day-status?userId=${r.worksnapUserId}&week=${from}`)
             .then((res) => (res.ok ? res.json() : null))
             .then((data: { days?: Array<{ date: string; adjustedMinutes: number | null }> } | null) => {
               const map: Record<string, number> = {};
@@ -1680,10 +1772,20 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
             })
             .catch(() => [r.contractorId, {}] as [string, Record<string, number>])
         ));
+        if (isCancelled) return;
         setAdjustedByContractor(new Map(adjustedEntries));
-      })
-      .finally(() => setIsLoading(false));
-  }, [modalWeek]);
+      } catch {
+        if (isCancelled) return;
+        setModalRows([]);
+        setLoadError("Unable to load contractors for bulk approval. Please try again.");
+      } finally {
+        if (!isCancelled) setIsLoading(false);
+      }
+    }
+
+    load();
+    return () => { isCancelled = true; };
+  }, [modalWeek, retryNonce]);
 
   const filteredRows = modalRows
     .filter((r) =>
@@ -1749,20 +1851,21 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
     setIsSavingBulk(true);
     setBulkSaveError("");
-    const results = await Promise.all(rowsToSave.map((r) =>
-      fetch("/api/attendance/status", {
+    const results = await Promise.all(rowsToSave.map((r) => {
+      const email = r.role.includes("@") ? r.role : "";
+      return fetch("/api/attendance/status", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           worksnapUserId: r.worksnapUserId,
-          email: r.role.includes("@") ? r.role : "",
+          email,
           week: modalWeekDates[0],
           requestStatus: "APPROVED",
           completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
-          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId)),
+          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
         }),
-      }).then((res) => res.ok).catch(() => false)
-    ));
+      }).then((res) => res.ok).catch(() => false);
+    }));
     setIsSavingBulk(false);
 
     if (results.some((ok) => !ok)) {
@@ -1828,7 +1931,21 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">Loading...</td></tr>
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">
+                  <span className="inline-flex items-center gap-1.5"><LuRefreshCw size={14} className="animate-spin" /> Loading…</span>
+                </td></tr>
+              ) : loadError ? (
+                <tr><td colSpan={14} className="px-5 py-10 text-center text-sm">
+                  <span className="inline-flex items-center gap-2 text-red-600">
+                    {loadError}
+                    <button
+                      onClick={() => setRetryNonce((n) => n + 1)}
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded-md text-xs font-bold text-red-700 hover:bg-red-100"
+                    >
+                      <LuRefreshCw size={12} /> Retry
+                    </button>
+                  </span>
+                </td></tr>
               ) : filteredRows.length === 0 ? (
                 <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
@@ -1837,7 +1954,8 @@ function BulkApproveModal({ worksnapRows, onClose, onApprove, usaHolidays, allHo
                 const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates, adjustedByContractor.get(row.contractorId)) + rowHolidayBonusMins);
                 const isProcessed = processedMins !== undefined;
                 const localHolidayMins = rowLocalHolidayMinutes(row);
-                const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId));
+                const rowEmailForLeave = row.role.includes("@") ? row.role : "";
+                const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId), leaveRequests.filter((req) => req.email === rowEmailForLeave));
                 const timeOffRequestMins = rowTimeOffRequestMinutes(row);
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
@@ -2065,7 +2183,12 @@ export default function AttendancePage() {
 
   const rangeFrom = week;                 // Sunday (week start)
   const rangeTo = addDaysIso(week, 6);    // Saturday (week end)
-  const weekDates = datesBetween(rangeFrom, rangeTo);
+  // Memoized so it keeps the same array reference across unrelated re-renders
+  // (typing in a filter, holidays/leave-requests resolving, etc.) — ReviewModal
+  // and BulkApproveModal key their data-loading effects on this array, and a
+  // fresh reference on every render was re-triggering those fetches and
+  // resetting in-progress review edits back to defaults.
+  const weekDates = useMemo(() => datesBetween(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
 
   useEffect(() => {
     fetch("/api/holidays")
@@ -2101,48 +2224,54 @@ export default function AttendancePage() {
       setIsLoadingWorksnap(true);
       setWorksnapError("");
 
-      const [response, weekStatusResponse] = await Promise.all([
-        fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
-        fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
-      ]);
-      const result = await response.json();
+      try {
+        const [response, weekStatusResponse] = await Promise.all([
+          fetchWithRetry(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
+          fetchWithRetry(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`),
+        ]);
+        const result = await response.json();
 
-      if (!isMounted) return;
+        if (!isMounted) return;
 
-      if (!response.ok) {
-        setWorksnapRows([]);
-        setWorksnapError(result.error ?? "Unable to load Worksnap entries.");
-      } else {
-        const rows = worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates);
-        const weekStatusResult = weekStatusResponse.ok ? await weekStatusResponse.json() : { weekStatuses: [] };
-        type SavedWeekStatus = {
-          worksnapUserId: number; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null;
-          totalEvaluatedRegularMinutes: number | null; totalEvaluatedMinutes: number | null; totalUsHoMinutes: number | null;
-          totalRegularOtMinutes: number | null; totalRdOtMinutes: number | null; totalHoOtMinutes: number | null;
-        };
-        const savedByUserId = new Map<number, SavedWeekStatus>(
-          (weekStatusResult.weekStatuses ?? []).map((s: SavedWeekStatus) => [s.worksnapUserId, s])
-        );
-        setWorksnapRows(rows.map((row) => {
-          const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
-          if (!saved) return row;
-          return {
-            ...row,
-            completionMinutes: saved.completionMinutes ?? row.completionMinutes,
-            totalLocalHolidayMinutes: saved.totalLocalHolidayMinutes,
-            totalEvaluatedRegularMinutes: saved.totalEvaluatedRegularMinutes,
-            totalEvaluatedMinutes: saved.totalEvaluatedMinutes,
-            totalUsHoMinutes: saved.totalUsHoMinutes,
-            totalRegularOtMinutes: saved.totalRegularOtMinutes,
-            totalRdOtMinutes: saved.totalRdOtMinutes,
-            totalHoOtMinutes: saved.totalHoOtMinutes,
-            weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
+        if (!response.ok) {
+          setWorksnapRows([]);
+          setWorksnapError(result.error ?? "Unable to load Worksnap entries.");
+        } else {
+          const rows = worksnapEntriesToAttendanceRecords((result.entries ?? []) as WorksnapEntry[], weekDates);
+          const weekStatusResult = weekStatusResponse.ok ? await weekStatusResponse.json() : { weekStatuses: [] };
+          type SavedWeekStatus = {
+            worksnapUserId: number; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null;
+            totalEvaluatedRegularMinutes: number | null; totalEvaluatedMinutes: number | null; totalUsHoMinutes: number | null;
+            totalRegularOtMinutes: number | null; totalRdOtMinutes: number | null; totalHoOtMinutes: number | null;
           };
-        }));
-        setLastSyncedAt(result.lastSyncedAt ?? null);
+          const savedByUserId = new Map<number, SavedWeekStatus>(
+            (weekStatusResult.weekStatuses ?? []).map((s: SavedWeekStatus) => [s.worksnapUserId, s])
+          );
+          setWorksnapRows(rows.map((row) => {
+            const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
+            if (!saved) return row;
+            return {
+              ...row,
+              completionMinutes: saved.completionMinutes ?? row.completionMinutes,
+              totalLocalHolidayMinutes: saved.totalLocalHolidayMinutes,
+              totalEvaluatedRegularMinutes: saved.totalEvaluatedRegularMinutes,
+              totalEvaluatedMinutes: saved.totalEvaluatedMinutes,
+              totalUsHoMinutes: saved.totalUsHoMinutes,
+              totalRegularOtMinutes: saved.totalRegularOtMinutes,
+              totalRdOtMinutes: saved.totalRdOtMinutes,
+              totalHoOtMinutes: saved.totalHoOtMinutes,
+              weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
+            };
+          }));
+          setLastSyncedAt(result.lastSyncedAt ?? null);
+        }
+      } catch {
+        if (!isMounted) return;
+        setWorksnapRows([]);
+        setWorksnapError("Unable to load Worksnap entries. Please check your connection and try again.");
+      } finally {
+        if (isMounted) setIsLoadingWorksnap(false);
       }
-
-      setIsLoadingWorksnap(false);
     }
 
     loadWorksnapEntries();
@@ -2186,7 +2315,12 @@ export default function AttendancePage() {
     }) + " MST";
   }
 
-  const attendanceRows: AttendanceRow[] = worksnapError ? ATTENDANCE as AttendanceRow[] : worksnapRows;
+  // No mock-data fallback on error: showing fabricated numbers in a payroll
+  // table when the live fetch fails would look like real data and could
+  // silently drive incorrect approvals. Errors surface via worksnapError
+  // instead (banner + Retry), and the table stays empty until a real load
+  // succeeds.
+  const attendanceRows: AttendanceRow[] = worksnapRows;
   const filteredAttendanceRows = attendanceRows.filter((row) => {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
@@ -2260,11 +2394,11 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-400 mx-auto">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-4 mb-6 md:mb-8">
+    <div className="p-4 sm:p-5 md:p-6 max-w-400 mx-auto">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
         <div>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
-          <p className="text-sm md:text-base text-slate-600 mt-1">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
+          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
+          <p className="text-xs md:text-sm text-slate-600 mt-0.5">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap gap-2 sm:gap-3">
@@ -2294,7 +2428,7 @@ export default function AttendancePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-6 mb-6 md:mb-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-3 md:mb-4">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
           <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
             <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
@@ -2305,15 +2439,15 @@ export default function AttendancePage() {
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         {/* Table header toolbar */}
-        <div className="px-4 md:px-6 py-5 border-b border-slate-100 flex flex-col gap-5 bg-linear-to-b from-slate-50/80 to-white">
+        <div className="px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 bg-linear-to-b from-slate-50/80 to-white">
           {/* Row 1: title + week selector */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div className="flex items-start gap-3">
-              <div className="hidden sm:grid size-11 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
-                <LuChartColumn size={20} strokeWidth={2} />
+              <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+                <LuChartColumn size={18} strokeWidth={2} />
               </div>
               <div>
-                <h3 className="text-xl md:text-2xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
+                <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
                 <p className="mt-0.5 text-xs font-medium text-slate-500">
                   Summed from Worksnap entries · <span className="font-semibold text-slate-600">{formatRangeLabel(rangeFrom, rangeTo)}</span>
                 </p>
@@ -2323,7 +2457,15 @@ export default function AttendancePage() {
                   </p>
                 )}
                 {!isLoadingWorksnap && worksnapError && (
-                  <p className="mt-1 text-xs font-medium text-red-600">Using fallback attendance data. {worksnapError}</p>
+                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-red-600">
+                    Unable to load attendance data. {worksnapError}
+                    <button
+                      onClick={() => setReloadKey((key) => key + 1)}
+                      className="font-bold underline hover:no-underline"
+                    >
+                      Retry
+                    </button>
+                  </p>
                 )}
                 {!isLoadingWorksnap && !worksnapError && attendanceRows.length === 0 && (
                   <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
@@ -2451,14 +2593,37 @@ export default function AttendancePage() {
               </tr>
             </thead>
             <tbody>
-              {filteredAttendanceRows.length === 0 && (
+              {isLoadingWorksnap && attendanceRows.length === 0 && (
                 <tr>
                   <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
-                    {attendanceRows.length === 0 ? "No Worksnap entries found for weekly tracking." : "No weekly tracking rows match your search."}
+                    <span className="inline-flex items-center gap-1.5">
+                      <LuRefreshCw size={14} className="animate-spin" /> Loading attendance data…
+                    </span>
                   </td>
                 </tr>
               )}
-              {filteredAttendanceRows.map((row) => {
+              {!isLoadingWorksnap && filteredAttendanceRows.length === 0 && (
+                <tr>
+                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                    {worksnapError ? (
+                      <span className="inline-flex items-center gap-2 text-red-600">
+                        Unable to load attendance data. {worksnapError}
+                        <button
+                          onClick={() => setReloadKey((key) => key + 1)}
+                          className="inline-flex items-center gap-1 px-2 py-1 bg-red-50 border border-red-200 rounded-md text-xs font-bold text-red-700 hover:bg-red-100"
+                        >
+                          <LuRefreshCw size={12} /> Retry
+                        </button>
+                      </span>
+                    ) : attendanceRows.length === 0 ? (
+                      "No Worksnap entries found for weekly tracking."
+                    ) : (
+                      "No weekly tracking rows match your search."
+                    )}
+                  </td>
+                </tr>
+              )}
+              {!isLoadingWorksnap && filteredAttendanceRows.map((row) => {
                 const variance = row.actualMinutes - row.standardMinutes;
                 const isOnLeave = row.weeklyStatus === "On Leave";
                 const isStandard = row.weeklyStatus === "Standard Met";
@@ -2714,6 +2879,7 @@ export default function AttendancePage() {
           onSave={handleReviewSave}
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
+          allLeaveRequests={leaveRequests}
         />
       )}
 
@@ -2721,6 +2887,7 @@ export default function AttendancePage() {
       {showBulkApproveModal && (
         <BulkApproveModal
           worksnapRows={worksnapRows}
+          allLeaveRequests={leaveRequests}
           onClose={() => setShowBulkApproveModal(false)}
           onApprove={handleBulkApprove}
           usaHolidays={usaHolidays}

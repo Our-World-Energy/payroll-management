@@ -323,7 +323,7 @@ export default function PayrollPage() {
     <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 md:mb-8">
         <div>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Payroll</h2>
+          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Payroll</h2>
           <p className="text-sm md:text-base text-slate-500 mt-1">
             Pay period: <span className="font-semibold text-slate-600">{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
           </p>
@@ -340,7 +340,7 @@ export default function PayrollPage() {
           {/* Week selector */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h3 className="text-xl md:text-2xl font-bold tracking-tight text-[#003527]">Weekly Payroll</h3>
+              <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Payroll</h3>
               {isLoading && (
                 <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
                   <LuRefreshCw size={12} className="animate-spin" /> Loading payroll data…

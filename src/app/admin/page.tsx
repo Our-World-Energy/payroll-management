@@ -181,7 +181,7 @@ export default function AdminPage() {
     <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-6 md:mb-8">
-        <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Dashboard</h2>
+        <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Dashboard</h2>
         <p className="text-sm md:text-base text-slate-500 mt-1">Real-time overview of global workforce and operations.</p>
       </div>
 

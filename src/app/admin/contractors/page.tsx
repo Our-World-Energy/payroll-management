@@ -330,7 +330,7 @@ export default function ContractorsPage() {
                 <li className="text-teal-600">Contractor Details</li>
               </ol>
             </nav>
-            <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Contractor Details</h2>
+            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Contractor Details</h2>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <button

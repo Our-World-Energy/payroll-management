@@ -19,27 +19,53 @@ export async function GET(request: Request) {
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const pageSize = 1000;
-  const data = [];
-  let page = 0;
 
-  while (true) {
-    const start = page * pageSize;
-    const end = start + pageSize - 1;
-    const { data: pageData, error } = await supabase
+  function fetchPage(start: number, end: number) {
+    return supabase
       .from("worksnap_entries")
       .select("worksnapUserId,userName,email,durationMins,entryDate")
       .gte("entryDate", from)
       .lte("entryDate", to)
       .range(start, end);
+  }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+  // syncedAt is independent of the entries themselves, so it's kicked off
+  // alongside the first page instead of waiting for all entries to load first.
+  const [firstPage, latestSyncResult] = await Promise.all([
+    supabase
+      .from("worksnap_entries")
+      .select("worksnapUserId,userName,email,durationMins,entryDate", { count: "exact" })
+      .gte("entryDate", from)
+      .lte("entryDate", to)
+      .range(0, pageSize - 1),
+    supabase
+      .from("worksnap_entries")
+      .select("syncedAt")
+      .order("syncedAt", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (firstPage.error) {
+    return NextResponse.json({ error: firstPage.error.message }, { status: 500 });
+  }
+
+  const data = [...(firstPage.data ?? [])];
+  const total = firstPage.count ?? data.length;
+
+  // Remaining pages (if any) are all independent range reads, so they're
+  // fetched concurrently instead of one round trip at a time.
+  if (total > pageSize) {
+    const remainingPageStarts: number[] = [];
+    for (let start = pageSize; start < total; start += pageSize) remainingPageStarts.push(start);
+
+    const remainingPages = await Promise.all(
+      remainingPageStarts.map((start) => fetchPage(start, start + pageSize - 1))
+    );
+    for (const page of remainingPages) {
+      if (page.error) return NextResponse.json({ error: page.error.message }, { status: 500 });
+      data.push(...(page.data ?? []));
     }
-
-    data.push(...(pageData ?? []));
-
-    if (!pageData || pageData.length < pageSize) break;
-    page += 1;
   }
 
   const emails = Array.from(new Set(data
@@ -74,13 +100,5 @@ export async function GET(request: Request) {
     };
   });
 
-  // Most recent sync timestamp across all entries (the table is rewritten on each sync).
-  const { data: latestSync } = await supabase
-    .from("worksnap_entries")
-    .select("syncedAt")
-    .order("syncedAt", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  return NextResponse.json({ entries, lastSyncedAt: latestSync?.syncedAt ?? null });
+  return NextResponse.json({ entries, lastSyncedAt: latestSyncResult.data?.syncedAt ?? null });
 }

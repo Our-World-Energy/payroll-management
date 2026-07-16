@@ -365,6 +365,20 @@ model Holiday {
   @@map("holidays")
 }
 
+/// Offshore Announcements board shown on the Dashboard — admin-posted, each
+/// scoped to a specific location (or all locations).
+model Announcement {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String
+  body      String
+  location  String
+  date      DateTime @db.Date // the date this announcement is posted for
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("announcements")
+}
+
 /// Time-off requests submitted through the contractor portal
 model ContractorLeaveRequest {
   id                 String   @id @default(uuid()) @db.Uuid
