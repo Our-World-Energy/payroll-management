@@ -164,6 +164,7 @@ export function HolidayCalendar() {
   const [regionalToday, setRegionalToday] = useState<Record<string, { year: number; month: number; day: number }>>({});
   const [mainCalendarCountry, setMainCalendarCountry] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<{ date: string; holidays: Holiday[] } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Holiday | null>(null);
 
   // Add form state
   const [newName,    setNewName]    = useState("");
@@ -226,6 +227,8 @@ export function HolidayCalendar() {
         setHolidays(prev => prev.filter(h => h.id !== id));
       } catch (e) {
         console.error("Failed to delete holiday:", e);
+      } finally {
+        setDeleteTarget(null);
       }
     });
   }
@@ -459,7 +462,7 @@ export function HolidayCalendar() {
                       <p className="text-[10px] text-slate-400">{h.country} · {label}</p>
                     </div>
                     <button
-                      onClick={() => handleDelete(h.id)}
+                      onClick={() => setDeleteTarget(h)}
                       disabled={isPending}
                       className="shrink-0 opacity-0 group-hover:opacity-100 text-slate-300 hover:text-red-500 transition-all disabled:opacity-30"
                     >
@@ -589,6 +592,43 @@ export function HolidayCalendar() {
     </div>
   );
 
+  const deleteConfirmModal = deleteTarget && (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isPending && setDeleteTarget(null)} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <div className="flex items-start gap-4">
+          <div className="shrink-0 size-11 rounded-xl bg-red-50 flex items-center justify-center">
+            <LuTrash2 size={20} className="text-red-500" />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Delete Holiday</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              Are you sure you want to delete <span className="font-semibold text-slate-700">{deleteTarget.name}</span> ({deleteTarget.country})?
+              This action cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={() => setDeleteTarget(null)}
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleDelete(deleteTarget.id)}
+            disabled={isPending}
+            className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+          >
+            <LuTrash2 size={15} strokeWidth={2} />
+            {isPending ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <>
       {/* Widget card */}
@@ -630,9 +670,10 @@ export function HolidayCalendar() {
       </div>
 
       {/* Portals */}
-      {mounted && showModal   && createPortal(calendarModal,       document.body)}
-      {mounted && showAdd     && createPortal(addModal,            document.body)}
-      {mounted && selectedDay && createPortal(holidayDetailsModal, document.body)}
+      {mounted && showModal    && createPortal(calendarModal,       document.body)}
+      {mounted && showAdd      && createPortal(addModal,            document.body)}
+      {mounted && selectedDay  && createPortal(holidayDetailsModal, document.body)}
+      {mounted && deleteTarget && createPortal(deleteConfirmModal,  document.body)}
     </>
   );
 }

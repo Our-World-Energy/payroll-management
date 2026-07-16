@@ -183,12 +183,17 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       dismissalReason:    form.status === "Dismissed" ? (form.dismissalReason || "") : "",
       equipmentProvided:  form.equipmentProvided,
       worksnapId:         form.worksnapId,
-      ptoBalance:         0,
-      ptoUsed:            0,
-      sickLeaveBalance:   0,
-      sickLeaveUsed:      0,
-      birthdayLeave:      0,
-      advanceSickLeave:   0,
+      // Preserve on edit — these are recomputed/maintained server-side
+      // (accrual balances, advance-leave repayment) and must not be reset
+      // to 0 just because an unrelated profile field changed.
+      ptoBalance:         initial?.ptoBalance       ?? 0,
+      ptoUsed:            initial?.ptoUsed          ?? 0,
+      sickLeaveBalance:   initial?.sickLeaveBalance ?? 0,
+      sickLeaveUsed:      initial?.sickLeaveUsed    ?? 0,
+      birthdayLeave:      initial?.birthdayLeave    ?? 0,
+      advanceSickLeave:   initial?.advanceSickLeave ?? 0,
+      specialLeaveCredits: initial?.specialLeaveCredits ?? 0,
+      specialLeaveUsed:    initial?.specialLeaveUsed    ?? 0,
     };
 
     onSave(contractor);

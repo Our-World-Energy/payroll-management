@@ -230,12 +230,14 @@ model ContractorProfile {
   worksnapId        String   @default("")
 
   // Time-off tracking
-  ptoBalance        Float    @default(0)
-  ptoUsed           Float    @default(0)
-  sickLeaveBalance  Float    @default(0)
-  sickLeaveUsed     Float    @default(0)
-  birthdayLeave     Float    @default(0)
-  advanceSickLeave  Float    @default(0)
+  ptoBalance          Float    @default(0)
+  ptoUsed             Float    @default(0)
+  sickLeaveBalance    Float    @default(0)
+  sickLeaveUsed       Float    @default(0)
+  birthdayLeave       Float    @default(0)
+  advanceSickLeave    Float    @default(0)
+  specialLeaveCredits Float    @default(0) // admin-granted bonus leave balance, drawable via Leave Override
+  specialLeaveUsed    Float    @default(0)
 
   @@map("contractor_profiles")
 }
@@ -375,6 +377,7 @@ model ContractorLeaveRequest {
   status             String   @default("Pending") // "Pending" | "Approved" | "Rejected"
   ptoUsedHours       Float    @default(0) // hours this request deducts from PTO Used if approved
   sickLeaveUsedHours Float    @default(0) // hours this request deducts from Sick Leave Used if approved
+  specialLeaveUsedHours Float @default(0) // hours this request deducts from Special Leave Used if approved
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

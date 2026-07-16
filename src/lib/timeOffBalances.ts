@@ -17,7 +17,8 @@ export const LEAVE_TYPE_HOURS: Record<string, number> = {
   "PTO Half Day": 4,
   "Sick Leave": 8,
   "Sick Leave Half Day": 4,
-  "Unpaid Sick Leave": 0,
+  "Unpaid Leave": 0,
+  "Special Leave": 8,
 };
 
 export function leaveTypeHours(type: string): number {
@@ -27,6 +28,29 @@ export function leaveTypeHours(type: string): number {
 export function isPtoLeaveType(type: string): boolean {
   return type.startsWith("PTO");
 }
+
+// Which balance a leave request type draws down. "Special Leave" is a
+// separately-granted bonus balance (Special Leave Credits) — everything else
+// keeps the existing PTO vs. Sick Leave split ("Unpaid Leave" lands in the
+// Sick Leave bucket too, but always deducts 0 hours so it has no effect).
+export type LeaveBucket = "pto" | "sickLeave" | "specialLeave";
+
+export function leaveBucketFor(type: string): LeaveBucket {
+  if (type.startsWith("PTO")) return "pto";
+  if (type.startsWith("Special Leave")) return "specialLeave";
+  return "sickLeave";
+}
+
+export const LEAVE_BUCKET_FIELDS: Record<LeaveBucket, {
+  usedField: "ptoUsed" | "sickLeaveUsed" | "specialLeaveUsed";
+  balanceField: "ptoBalance" | "sickLeaveBalance" | "specialLeaveCredits";
+  hoursColumn: "ptoUsedHours" | "sickLeaveUsedHours" | "specialLeaveUsedHours";
+  label: string;
+}> = {
+  pto:          { usedField: "ptoUsed",          balanceField: "ptoBalance",          hoursColumn: "ptoUsedHours",          label: "PTO" },
+  sickLeave:    { usedField: "sickLeaveUsed",     balanceField: "sickLeaveBalance",    hoursColumn: "sickLeaveUsedHours",    label: "Sick Leave" },
+  specialLeave: { usedField: "specialLeaveUsed",  balanceField: "specialLeaveCredits", hoursColumn: "specialLeaveUsedHours", label: "Special Leave" },
+};
 
 export type RequestDecision = "Approved" | "Pending" | "Rejected";
 export type RequestDecisionMap = Record<string, RequestDecision>;
@@ -129,6 +153,29 @@ export function calculatePtoBalance(hireDate: string) {
 
 export function calculateSickLeaveBalance(hireDate: string) {
   return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL);
+}
+
+// Whenever newly-accrued Sick Leave becomes available, any outstanding
+// Advance Sick Leave balance is repaid first: the newly-accrued amount is
+// credited to Sick Leave Used (instead of increasing Sick Leave Available)
+// until the advance reaches zero, then any leftover accrual increases
+// Available normally. Repayment never exceeds either the amount just accrued
+// or the remaining advance balance.
+export function applyAdvanceSickLeaveRepayment(
+  previousSickLeaveBalance: number,
+  nextSickLeaveBalance: number,
+  currentSickLeaveUsed: number,
+  currentAdvanceSickLeave: number
+): { sickLeaveUsed: number; advanceSickLeave: number } {
+  const accrued = nextSickLeaveBalance - previousSickLeaveBalance;
+  if (accrued <= 0 || currentAdvanceSickLeave <= 0) {
+    return { sickLeaveUsed: currentSickLeaveUsed, advanceSickLeave: currentAdvanceSickLeave };
+  }
+  const repayment = Math.min(accrued, currentAdvanceSickLeave);
+  return {
+    sickLeaveUsed: roundBalance(currentSickLeaveUsed + repayment),
+    advanceSickLeave: roundBalance(currentAdvanceSickLeave - repayment),
+  };
 }
 
 export function calculateUnusedSickLeaveBalance(

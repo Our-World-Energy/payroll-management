@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LuMegaphone, LuPlus, LuX, LuChevronDown } from "react-icons/lu";
+import { LuMegaphone, LuPlus, LuX, LuChevronDown, LuPencil } from "react-icons/lu";
 
 const LOCATIONS = [
   "All Locations",
@@ -42,24 +42,55 @@ export function AnnouncementBoard() {
   const [announcements, setAnnouncements] = useState<Announcement[]>(INITIAL);
   const [filterLocation, setFilterLocation] = useState("All Locations");
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [location, setLocation] = useState(LOCATIONS[1]);
   const [date, setDate] = useState(todayIso());
 
-  function handleAdd() {
-    const t = title.trim();
-    const b = body.trim();
-    if (!t || !b || !date) return;
-    setAnnouncements((prev) =>
-      [{ id: Date.now(), title: t, body: b, location, date }, ...prev]
-        .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
-    );
+  function resetForm() {
     setTitle("");
     setBody("");
     setLocation(LOCATIONS[1]);
     setDate(todayIso());
+    setEditingId(null);
+  }
+
+  function openAddForm() {
+    resetForm();
+    setShowForm(true);
+  }
+
+  function openEditForm(a: Announcement) {
+    setEditingId(a.id);
+    setTitle(a.title);
+    setBody(a.body);
+    setLocation(a.location);
+    setDate(a.date);
+    setShowForm(true);
+  }
+
+  function closeForm() {
     setShowForm(false);
+    resetForm();
+  }
+
+  function handleSubmit() {
+    const t = title.trim();
+    const b = body.trim();
+    if (!t || !b || !date) return;
+    if (editingId != null) {
+      setAnnouncements((prev) =>
+        prev.map((a) => (a.id === editingId ? { ...a, title: t, body: b, location, date } : a))
+          .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
+      );
+    } else {
+      setAnnouncements((prev) =>
+        [{ id: Date.now(), title: t, body: b, location, date }, ...prev]
+          .sort((a, z) => (a.date < z.date ? 1 : a.date > z.date ? -1 : 0))
+      );
+    }
+    closeForm();
   }
 
   function handleRemove(id: number) {
@@ -79,7 +110,7 @@ export function AnnouncementBoard() {
         <div className="flex items-center gap-2">
           <LuMegaphone size={22} strokeWidth={1.75} className="text-teal-600" />
           <button
-            onClick={() => setShowForm((v) => !v)}
+            onClick={() => (showForm ? closeForm() : openAddForm())}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#003527] hover:bg-[#064e3b] text-white text-xs font-semibold rounded-lg transition-colors"
           >
             <LuPlus size={14} strokeWidth={2.5} />
@@ -88,23 +119,23 @@ export function AnnouncementBoard() {
         </div>
       </div>
 
-      {/* Add modal */}
+      {/* Add/Edit modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeForm} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col">
             {/* Modal header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="size-9 rounded-xl bg-[#003527] text-white grid place-items-center">
-                  <LuMegaphone size={17} strokeWidth={2} />
+                  {editingId != null ? <LuPencil size={17} strokeWidth={2} /> : <LuMegaphone size={17} strokeWidth={2} />}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-[#003527]">New Announcement</h3>
+                  <h3 className="text-base font-bold text-[#003527]">{editingId != null ? "Edit Announcement" : "New Announcement"}</h3>
                   <p className="text-xs text-slate-400">Post to a specific location</p>
                 </div>
               </div>
-              <button onClick={() => setShowForm(false)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={closeForm} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
                 <LuX size={18} />
               </button>
             </div>
@@ -148,17 +179,17 @@ export function AnnouncementBoard() {
             {/* Modal footer */}
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
               <button
-                onClick={() => setShowForm(false)}
+                onClick={closeForm}
                 className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 Cancel
               </button>
               <button
-                onClick={handleAdd}
+                onClick={handleSubmit}
                 className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
               >
-                <LuMegaphone size={15} strokeWidth={2} />
-                Post Announcement
+                {editingId != null ? <LuPencil size={15} strokeWidth={2} /> : <LuMegaphone size={15} strokeWidth={2} />}
+                {editingId != null ? "Save Changes" : "Post Announcement"}
               </button>
             </div>
           </div>
@@ -201,12 +232,22 @@ export function AnnouncementBoard() {
                 <p className="text-xs text-slate-500 leading-relaxed">{a.body}</p>
                 <p className="text-xs text-slate-400 mt-1">{formatAnnouncementDate(a.date)}</p>
               </div>
-              <button
-                onClick={() => handleRemove(a.id)}
-                className="shrink-0 p-1 text-slate-300 hover:text-red-500 transition-colors rounded self-start"
-              >
-                <LuX size={14} strokeWidth={2.5} />
-              </button>
+              <div className="shrink-0 flex items-center gap-1 self-start">
+                <button
+                  onClick={() => openEditForm(a)}
+                  title="Edit announcement"
+                  className="p-1 text-slate-300 hover:text-teal-600 transition-colors rounded"
+                >
+                  <LuPencil size={13} strokeWidth={2} />
+                </button>
+                <button
+                  onClick={() => handleRemove(a.id)}
+                  title="Delete announcement"
+                  className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded"
+                >
+                  <LuX size={14} strokeWidth={2.5} />
+                </button>
+              </div>
             </div>
           ))
         )}

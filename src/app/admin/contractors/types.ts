@@ -37,6 +37,8 @@ export type Contractor = {
   sickLeaveUsed: number;
   birthdayLeave: number;
   advanceSickLeave: number;
+  specialLeaveCredits: number;
+  specialLeaveUsed: number;
 };
 
 export type ColumnDef = {

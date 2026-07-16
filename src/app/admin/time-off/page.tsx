@@ -5,14 +5,14 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuCalendarPlus, LuUmbrella, LuStethoscope,
-  LuSlidersHorizontal, LuCircleAlert,
+  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift,
 } from "react-icons/lu";
 import {
   fetchAllContractors, updateTimeOffUsage,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, type AdminLeaveRequest,
 } from "../contractors/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor } from "@/lib/timeOffBalances";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -143,6 +143,9 @@ type TimeOffRow = {
   sickLeaveAvailable: number;
   birthdayLeave: number;
   advanceSickLeave: number;
+  specialLeaveCredits: number;
+  specialLeaveUsed: number;
+  specialLeaveAvailable: number;
   unusedSickLeave: number;
   latestRequest: AdminLeaveRequest | null;
 };
@@ -156,12 +159,13 @@ export default function TimeOffPage() {
   const [loading,       setLoading]       = useState(true);
   const [loadError,     setLoadError]     = useState("");
 
+  const [nameSearch,         setNameSearch]         = useState("");
   const [countryFilter,      setCountryFilter]      = useState("All Countries");
   const [departmentFilter,   setDepartmentFilter]   = useState("All Departments");
   const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
 
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [modalTab,      setModalTab]      = useState<"details" | "info" | "override">("info");
+  const [modalTab,      setModalTab]      = useState<"details" | "info" | "override" | "special">("info");
 
   const [editLeaveType, setEditLeaveType] = useState<"Advance Sick Leave" | "Advance PTO/Birthday Leave">("Advance Sick Leave");
   const [editHours,     setEditHours]     = useState("");
@@ -169,7 +173,10 @@ export default function TimeOffPage() {
   const [editFrom,      setEditFrom]      = useState("");
   const [editTo,        setEditTo]        = useState("");
 
-  const OVERRIDE_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Sick Leave"] as const;
+  const [specialHours, setSpecialHours] = useState("");
+  const [specialReason, setSpecialReason] = useState("");
+
+  const OVERRIDE_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Special Leave"] as const;
   const [overrideType,       setOverrideType]       = useState<typeof OVERRIDE_TYPES[number]>("PTO");
   const [overrideStartDate,  setOverrideStartDate]  = useState("");
   const [overrideEndDate,    setOverrideEndDate]    = useState("");
@@ -216,6 +223,7 @@ export default function TimeOffPage() {
     const sickLeaveUsed    = c.sickLeaveUsed;
     const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
     const sickLeaveAvailable = roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0));
+    const specialLeaveAvailable = roundBalance(Math.max(c.specialLeaveCredits - c.specialLeaveUsed, 0));
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
@@ -224,6 +232,9 @@ export default function TimeOffPage() {
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
       birthdayLeave:    c.birthdayLeave,
       advanceSickLeave: c.advanceSickLeave,
+      specialLeaveCredits: c.specialLeaveCredits,
+      specialLeaveUsed:    c.specialLeaveUsed,
+      specialLeaveAvailable,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
       latestRequest:    latestByEmail[c.email] ?? null,
     };
@@ -231,13 +242,14 @@ export default function TimeOffPage() {
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = countryFilter !== "All Countries" || departmentFilter !== "All Departments" || reviewStatusFilter !== "All Statuses";
+  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Departments" || reviewStatusFilter !== "All Statuses";
 
   const filteredRows = rows.filter((r) => {
+    const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
     const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
     const dm = departmentFilter === "All Departments" || (r.department || "Unassigned") === departmentFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
-    return cm && dm && sm;
+    return nm && cm && dm && sm;
   });
 
   const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
@@ -270,7 +282,8 @@ export default function TimeOffPage() {
       "Name", "Country", "Department", "Hire Date",
       "PTO Accrual (h)", "PTO Used (h)", "PTO Available (h)",
       "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Available (h)",
-      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)", "Status",
+      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
+      "Special Leave Credits (h)", "Special Leave Used (h)", "Special Leave Available (h)", "Status",
     ];
     const csvRows = [
       headers.join(","),
@@ -280,6 +293,7 @@ export default function TimeOffPage() {
           r.ptoBalance, r.ptoUsed, r.ptoAvailable,
           r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
           r.birthdayLeave, r.advanceSickLeave,
+          r.specialLeaveCredits, r.specialLeaveUsed, r.specialLeaveAvailable,
           `"${r.latestRequest?.status ?? "No Request"}"`,
         ].join(",")
       ),
@@ -303,7 +317,7 @@ export default function TimeOffPage() {
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedRowId(null)} />
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
 
               {/* Header */}
               <div className="px-6 py-5 bg-gradient-to-r from-[#003527] to-[#006b5f] flex items-start justify-between gap-4">
@@ -312,7 +326,8 @@ export default function TimeOffPage() {
                     {avatarInitials(selectedRow.fullName)}
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white">{selectedRow.fullName}</h3>
+                    <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wider">Contractor Time Off – Advance Leave Request Details</p>
+                    <h3 className="text-lg font-bold text-white mt-0.5">{selectedRow.fullName}</h3>
                     <p className="text-sm text-white/60 mt-0.5">{selectedRow.department || "—"}</p>
                     <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
                   </div>
@@ -328,6 +343,7 @@ export default function TimeOffPage() {
                   { key: "info",     label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
                   { key: "details",  label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
                   { key: "override", label: "Leave Override",             icon: <LuSlidersHorizontal size={13} /> },
+                  { key: "special",  label: "Special Leave Credits",      icon: <LuGift size={13} /> },
                 ] as const).map(({ key, label, icon }) => (
                   <button
                     key={key}
@@ -546,12 +562,18 @@ export default function TimeOffPage() {
                       return;
                     }
                     const requiredHours = leaveTypeHours(overrideType);
-                    const isPtoType = isPtoLeaveType(overrideType);
-                    const availableHours = isPtoType ? selectedRow.ptoAvailable : selectedRow.sickLeaveAvailable;
+                    const overrideBucket = leaveBucketFor(overrideType);
+                    const availableHours =
+                      overrideBucket === "pto" ? selectedRow.ptoAvailable :
+                      overrideBucket === "specialLeave" ? selectedRow.specialLeaveAvailable :
+                      selectedRow.sickLeaveAvailable;
                     if (requiredHours > 0 && availableHours < requiredHours) {
-                      const leaveLabel = isPtoType ? "PTO" : "Sick Leave";
+                      const leaveLabel =
+                        overrideBucket === "pto" ? "PTO" :
+                        overrideBucket === "specialLeave" ? "Special Leave Credits" :
+                        "Sick Leave";
                       setOverrideBlocked(
-                        `${leaveLabel} Accrual Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
+                        `${leaveLabel} Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
                       );
                       return;
                     }
@@ -572,7 +594,12 @@ export default function TimeOffPage() {
                     const req = result.request;
                     setContractors((prev) => prev.map((c) =>
                       c.uid === selectedRow.id
-                        ? { ...c, ptoUsed: c.ptoUsed + req.ptoUsedHours, sickLeaveUsed: c.sickLeaveUsed + req.sickLeaveUsedHours }
+                        ? {
+                            ...c,
+                            ptoUsed: c.ptoUsed + req.ptoUsedHours,
+                            sickLeaveUsed: c.sickLeaveUsed + req.sickLeaveUsedHours,
+                            specialLeaveUsed: c.specialLeaveUsed + req.specialLeaveUsedHours,
+                          }
                         : c
                     ));
                     setLeaveRequests((prev) => [req, ...prev]);
@@ -649,6 +676,60 @@ export default function TimeOffPage() {
                         className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                         <LuCircleCheck size={15} strokeWidth={2} /> {overrideSubmitting ? "Applying…" : "Apply Leave Override"}
                       </button>
+                    </div>
+                  );
+                })() : modalTab === "special" ? (() => {
+                  async function applySpecialGrant() {
+                    if (!selectedRow) return;
+                    const hoursToAdd = parseFloat(specialHours) || 0;
+                    if (hoursToAdd <= 0) return;
+                    const newCredits = selectedRow.specialLeaveCredits + hoursToAdd;
+                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits });
+                    setContractors((prev) => prev.map((c) =>
+                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits } : c
+                    ));
+                    setSpecialHours(""); setSpecialReason("");
+                  }
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-2">
+                        {([
+                          ["Special Leave Credits",   `${fmtBalance(selectedRow.specialLeaveCredits)}h`],
+                          ["Special Leave Used",      `${fmtBalance(selectedRow.specialLeaveUsed)}h`],
+                          ["Special Leave Available", `${fmtBalance(selectedRow.specialLeaveAvailable)}h`],
+                        ] as [string, string][]).map(([label, value]) => (
+                          <div key={label} className="rounded-xl border border-purple-100 bg-purple-50 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">{label}</p>
+                            <p className="text-lg font-bold text-purple-700 mt-0.5 tabular-nums">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                          <LuGift size={13} /> Grant Special Leave Credits
+                        </p>
+                        <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                          Grants an extra bonus leave balance for this contractor, on top of their regular PTO/Sick Leave — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
+                        </p>
+                        <div className="space-y-2">
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours to Grant <span className="text-red-400">*</span></p>
+                            <input type="number" min="1" value={specialHours} onChange={(e) => setSpecialHours(e.target.value)} placeholder="Enter hours e.g. 8"
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          </div>
+                          <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason</p>
+                            <textarea value={specialReason} onChange={(e) => setSpecialReason(e.target.value)} placeholder="Enter reason for this special leave grant..." rows={2}
+                              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
+                          </div>
+                          <button onClick={applySpecialGrant} disabled={!specialHours || parseFloat(specialHours) <= 0}
+                            className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                            <LuCircleCheck size={15} strokeWidth={2} /> Apply Special Leave Credits
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   );
                 })() : null}
@@ -744,6 +825,26 @@ export default function TimeOffPage() {
       {/* ── Filters ── */}
       <div className="mb-4 bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center">
         <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
+        <div className="relative w-full sm:w-64">
+          <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            placeholder="Search by name…"
+            disabled={loading}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-8 text-sm text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 disabled:opacity-60"
+          />
+          {nameSearch && (
+            <button
+              onClick={() => setNameSearch("")}
+              aria-label="Clear search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 grid size-5 place-items-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            >
+              <LuX size={13} />
+            </button>
+          )}
+        </div>
         <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} disabled={loading}
           className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Countries</option>
@@ -762,7 +863,7 @@ export default function TimeOffPage() {
           <option value="Rejected">Rejected</option>
         </select>
         {filtersActive && (
-          <button onClick={() => { setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
+          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={16} strokeWidth={2} />
           </button>

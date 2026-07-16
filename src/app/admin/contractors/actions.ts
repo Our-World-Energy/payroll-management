@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvanceSickLeaveRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS } from "@/lib/timeOffBalances";
 
 const TABLE = "contractor_profiles";
 
@@ -54,6 +54,8 @@ function toContractor(row: Record<string, unknown>): Contractor {
     sickLeaveUsed:    Number(row.sickLeaveUsed     ?? 0),
     birthdayLeave:    Number(row.birthdayLeave     ?? 0),
     advanceSickLeave: Number(row.advanceSickLeave  ?? 0),
+    specialLeaveCredits: Number(row.specialLeaveCredits ?? 0),
+    specialLeaveUsed:    Number(row.specialLeaveUsed    ?? 0),
   };
 }
 
@@ -221,6 +223,8 @@ export async function createContractor(c: Contractor): Promise<void> {
     sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
     birthdayLeave:     c.birthdayLeave    ?? 0,
     advanceSickLeave:  c.advanceSickLeave ?? 0,
+    specialLeaveCredits: c.specialLeaveCredits ?? 0,
+    specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   });
   if (error) throw new Error(error.message);
 
@@ -232,6 +236,22 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
   const ptoBalance       = calculatePtoBalance(c.hireDate);
   const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
+
+  // Any outstanding Advance Sick Leave is repaid out of newly-accrued Sick
+  // Leave before it's allowed to raise Sick Leave Available — compared
+  // against the currently-stored balance/used/advance, not whatever the
+  // client happens to have in memory.
+  const { data: existing } = await sb.from(TABLE)
+    .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave")
+    .eq("uid", c.uid)
+    .maybeSingle();
+  const { sickLeaveUsed, advanceSickLeave } = applyAdvanceSickLeaveRepayment(
+    existing?.sickLeaveBalance ?? 0,
+    sickLeaveBalance,
+    existing?.sickLeaveUsed ?? (c.sickLeaveUsed ?? 0),
+    existing?.advanceSickLeave ?? (c.advanceSickLeave ?? 0)
+  );
+
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -267,9 +287,11 @@ export async function updateContractor(c: Contractor): Promise<void> {
     ptoBalance,
     ptoUsed:           c.ptoUsed          ?? 0,
     sickLeaveBalance,
-    sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
+    sickLeaveUsed,
     birthdayLeave:     c.birthdayLeave    ?? 0,
-    advanceSickLeave:  c.advanceSickLeave ?? 0,
+    advanceSickLeave,
+    specialLeaveCredits: c.specialLeaveCredits ?? 0,
+    specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   }).eq("uid", c.uid);
   if (error) throw new Error(error.message);
 }
@@ -282,7 +304,10 @@ export async function deleteContractor(uid: string): Promise<void> {
 
 export async function updateTimeOffUsage(
   uid: string,
-  fields: Partial<{ ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; advanceSickLeave: number }>
+  fields: Partial<{
+    ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; advanceSickLeave: number;
+    specialLeaveCredits: number; specialLeaveUsed: number;
+  }>
 ): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.from(TABLE).update(fields).eq("uid", uid);
@@ -291,7 +316,8 @@ export async function updateTimeOffUsage(
 
 export async function backfillLeaveBalances(): Promise<{ updated: number }> {
   const sb = getSupabase();
-  const { data, error } = await sb.from(TABLE).select("uid, hireDate");
+  const { data, error } = await sb.from(TABLE)
+    .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave");
   if (error) throw new Error(error.message);
 
   let updated = 0;
@@ -299,7 +325,13 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
     if (!row.hireDate) continue;
     const ptoBalance       = calculatePtoBalance(row.hireDate);
     const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate);
-    await sb.from(TABLE).update({ ptoBalance, sickLeaveBalance }).eq("uid", row.uid);
+    const { sickLeaveUsed, advanceSickLeave } = applyAdvanceSickLeaveRepayment(
+      row.sickLeaveBalance ?? 0,
+      sickLeaveBalance,
+      row.sickLeaveUsed ?? 0,
+      row.advanceSickLeave ?? 0
+    );
+    await sb.from(TABLE).update({ ptoBalance, sickLeaveBalance, sickLeaveUsed, advanceSickLeave }).eq("uid", row.uid);
     updated++;
   }
   return { updated };
@@ -318,6 +350,7 @@ export type AdminLeaveRequest = {
   status:             string;
   ptoUsedHours:       number;
   sickLeaveUsedHours: number;
+  specialLeaveUsedHours: number;
   createdAt:          string;
 };
 
@@ -325,7 +358,7 @@ export async function fetchAllLeaveRequestsAdmin(): Promise<AdminLeaveRequest[]>
   const sb = getSupabase();
   const { data, error } = await sb
     .from(LEAVE_TABLE)
-    .select("id, email, type, startDate, endDate, durationDays, reason, status, ptoUsedHours, sickLeaveUsedHours, createdAt")
+    .select("id, email, type, startDate, endDate, durationDays, reason, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours, createdAt")
     .order("createdAt", { ascending: false });
 
   if (error || !data) return [];
@@ -340,6 +373,7 @@ export async function fetchAllLeaveRequestsAdmin(): Promise<AdminLeaveRequest[]>
     status:             String(r.status ?? "Pending"),
     ptoUsedHours:       Number(r.ptoUsedHours ?? 0),
     sickLeaveUsedHours: Number(r.sickLeaveUsedHours ?? 0),
+    specialLeaveUsedHours: Number(r.specialLeaveUsedHours ?? 0),
     createdAt:          String(r.createdAt),
   }));
 }
@@ -353,27 +387,25 @@ export async function updateLeaveRequestStatus(
   // Fetch the request so we know email, type, its stored hours, and prior status
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
     .eq("id", id)
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
 
   const prevStatus    = String(req.status);
   const email         = String(req.email);
-  const type          = String(req.type);           // "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day"
-  const isPto         = isPtoLeaveType(type);
+  const type          = String(req.type);           // "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Special Leave" | ...
+  const bucket        = leaveBucketFor(type);
+  const { usedField, balanceField, hoursColumn, label: leaveLabel } = LEAVE_BUCKET_FIELDS[bucket];
   // Use the hours stamped on the request itself (set at submission time) so
   // this stays consistent with what's shown in the admin tables, and so a
   // future change to LEAVE_TYPE_HOURS never rewrites already-submitted requests.
-  const hours         = Number(isPto ? req.ptoUsedHours : req.sickLeaveUsedHours) || leaveTypeHours(type);
-  const usedField     = isPto ? "ptoUsed" : "sickLeaveUsed";
-  const balanceField  = isPto ? "ptoBalance" : "sickLeaveBalance";
-  const leaveLabel    = isPto ? "PTO" : "Sick Leave";
+  const hours         = Number(req[hoursColumn]) || leaveTypeHours(type);
 
   // Fetch current contractor leave balance
   const { data: profile, error: profileErr } = await sb
     .from(TABLE)
-    .select("ptoUsed, sickLeaveUsed, ptoBalance, sickLeaveBalance")
+    .select("ptoUsed, sickLeaveUsed, specialLeaveUsed, ptoBalance, sickLeaveBalance, specialLeaveCredits")
     .eq("email", email)
     .single();
   if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
@@ -405,7 +437,7 @@ export async function updateLeaveRequestStatus(
   // never diverges from what was actually deducted (e.g. a stale 0 from a
   // request submitted before this column existed self-heals here).
   const [{ error: reqErr }, { error: profileUpdateErr }] = await Promise.all([
-    sb.from(LEAVE_TABLE).update({ status, [`${usedField}Hours`]: hours, updatedAt: new Date().toISOString() }).eq("id", id),
+    sb.from(LEAVE_TABLE).update({ status, [hoursColumn]: hours, updatedAt: new Date().toISOString() }).eq("id", id),
     sb.from(TABLE).update({ [usedField]: newUsed }).eq("email", email),
   ]);
 
@@ -422,7 +454,7 @@ export async function updateLeaveRequestStatus(
 // request awaiting review).
 export async function createLeaveOverride(params: {
   email: string;
-  type: "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Sick Leave";
+  type: "PTO" | "PTO Half Day" | "Sick Leave" | "Sick Leave Half Day" | "Unpaid Leave" | "Special Leave";
   startDate: string;
   endDate: string;
   reason: string;
@@ -430,10 +462,11 @@ export async function createLeaveOverride(params: {
   const sb = getSupabase();
 
   const hours = leaveTypeHours(params.type);
-  const isPto = isPtoLeaveType(params.type);
-  const ptoUsedHours = isPto ? hours : 0;
-  const sickLeaveUsedHours = isPto ? 0 : hours;
-  const usedField = isPto ? "ptoUsed" : "sickLeaveUsed";
+  const bucket = leaveBucketFor(params.type);
+  const { usedField } = LEAVE_BUCKET_FIELDS[bucket];
+  const ptoUsedHours = bucket === "pto" ? hours : 0;
+  const sickLeaveUsedHours = bucket === "sickLeave" ? hours : 0;
+  const specialLeaveUsedHours = bucket === "specialLeave" ? hours : 0;
 
   const durationDays = Math.max(
     1,
@@ -454,16 +487,17 @@ export async function createLeaveOverride(params: {
     status: "Approved",
     ptoUsedHours,
     sickLeaveUsedHours,
+    specialLeaveUsedHours,
     createdAt: now,
     updatedAt: now,
   });
   if (insertErr) return { ok: false, error: insertErr.message };
 
-  const hoursToAdd = isPto ? ptoUsedHours : sickLeaveUsedHours;
+  const hoursToAdd = hours;
   if (hoursToAdd > 0) {
     const { data: profile, error: profileErr } = await sb
       .from(TABLE)
-      .select("ptoUsed, sickLeaveUsed")
+      .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
       .eq("email", params.email)
       .single();
     if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
@@ -489,6 +523,7 @@ export async function createLeaveOverride(params: {
       status: "Approved",
       ptoUsedHours,
       sickLeaveUsedHours,
+      specialLeaveUsedHours,
       createdAt: now,
     },
   };
@@ -503,20 +538,20 @@ export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean
 
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
     .eq("id", id)
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
 
   if (String(req.status) === "Approved") {
-    const isPto = isPtoLeaveType(String(req.type));
-    const usedField = isPto ? "ptoUsed" : "sickLeaveUsed";
-    const hours = Number(isPto ? req.ptoUsedHours : req.sickLeaveUsedHours) || 0;
+    const bucket = leaveBucketFor(String(req.type));
+    const { usedField, hoursColumn } = LEAVE_BUCKET_FIELDS[bucket];
+    const hours = Number(req[hoursColumn]) || 0;
 
     if (hours > 0) {
       const { data: profile, error: profileErr } = await sb
         .from(TABLE)
-        .select("ptoUsed, sickLeaveUsed")
+        .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
         .eq("email", String(req.email))
         .single();
       if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
