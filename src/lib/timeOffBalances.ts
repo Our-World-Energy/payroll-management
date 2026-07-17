@@ -160,21 +160,25 @@ export function calculateSickLeaveBalance(hireDate: string) {
 // credited to Sick Leave Used (instead of increasing Sick Leave Available)
 // until the advance reaches zero, then any leftover accrual increases
 // Available normally. Repayment never exceeds either the amount just accrued
-// or the remaining advance balance.
+// or the remaining advance balance. advanceSickLeaveUsed is a running total
+// of every repayment ever made, for the "Advance Leave Used" scorecard —
+// it only ever grows, unlike advanceSickLeave (the remaining balance).
 export function applyAdvanceSickLeaveRepayment(
   previousSickLeaveBalance: number,
   nextSickLeaveBalance: number,
   currentSickLeaveUsed: number,
-  currentAdvanceSickLeave: number
-): { sickLeaveUsed: number; advanceSickLeave: number } {
+  currentAdvanceSickLeave: number,
+  currentAdvanceSickLeaveUsed: number
+): { sickLeaveUsed: number; advanceSickLeave: number; advanceSickLeaveUsed: number } {
   const accrued = nextSickLeaveBalance - previousSickLeaveBalance;
   if (accrued <= 0 || currentAdvanceSickLeave <= 0) {
-    return { sickLeaveUsed: currentSickLeaveUsed, advanceSickLeave: currentAdvanceSickLeave };
+    return { sickLeaveUsed: currentSickLeaveUsed, advanceSickLeave: currentAdvanceSickLeave, advanceSickLeaveUsed: currentAdvanceSickLeaveUsed };
   }
   const repayment = Math.min(accrued, currentAdvanceSickLeave);
   return {
     sickLeaveUsed: roundBalance(currentSickLeaveUsed + repayment),
     advanceSickLeave: roundBalance(currentAdvanceSickLeave - repayment),
+    advanceSickLeaveUsed: roundBalance(currentAdvanceSickLeaveUsed + repayment),
   };
 }
 
@@ -183,21 +187,23 @@ export function applyAdvanceSickLeaveRepayment(
 // newly-accrued amount is credited to PTO Used (instead of increasing PTO
 // Available) until the advance reaches zero, then any leftover accrual
 // increases Available normally. Mirrors applyAdvanceSickLeaveRepayment for
-// the PTO bucket.
+// the PTO bucket, including the running birthdayLeaveUsed total.
 export function applyAdvancePtoRepayment(
   previousPtoBalance: number,
   nextPtoBalance: number,
   currentPtoUsed: number,
-  currentBirthdayLeave: number
-): { ptoUsed: number; birthdayLeave: number } {
+  currentBirthdayLeave: number,
+  currentBirthdayLeaveUsed: number
+): { ptoUsed: number; birthdayLeave: number; birthdayLeaveUsed: number } {
   const accrued = nextPtoBalance - previousPtoBalance;
   if (accrued <= 0 || currentBirthdayLeave <= 0) {
-    return { ptoUsed: currentPtoUsed, birthdayLeave: currentBirthdayLeave };
+    return { ptoUsed: currentPtoUsed, birthdayLeave: currentBirthdayLeave, birthdayLeaveUsed: currentBirthdayLeaveUsed };
   }
   const repayment = Math.min(accrued, currentBirthdayLeave);
   return {
     ptoUsed: roundBalance(currentPtoUsed + repayment),
     birthdayLeave: roundBalance(currentBirthdayLeave - repayment),
+    birthdayLeaveUsed: roundBalance(currentBirthdayLeaveUsed + repayment),
   };
 }
 

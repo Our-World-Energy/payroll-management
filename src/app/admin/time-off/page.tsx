@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuCalendarPlus, LuUmbrella, LuStethoscope,
-  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift,
+  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil,
 } from "react-icons/lu";
 import {
   fetchAllContractors, updateTimeOffUsage,
@@ -142,7 +142,9 @@ type TimeOffRow = {
   sickLeaveUsed: number;
   sickLeaveAvailable: number;
   birthdayLeave: number;
+  birthdayLeaveUsed: number;
   advanceSickLeave: number;
+  advanceSickLeaveUsed: number;
   specialLeaveCredits: number;
   specialLeaveUsed: number;
   specialLeaveAvailable: number;
@@ -175,6 +177,9 @@ export default function TimeOffPage() {
 
   const [specialHours, setSpecialHours] = useState("");
   const [specialReason, setSpecialReason] = useState("");
+  const [isEditingSpecialBalance, setIsEditingSpecialBalance] = useState(false);
+  const [editSpecialCredits, setEditSpecialCredits] = useState("");
+  const [editSpecialUsed, setEditSpecialUsed] = useState("");
 
   const OVERRIDE_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Special Leave"] as const;
   const [overrideType,       setOverrideType]       = useState<typeof OVERRIDE_TYPES[number]>("PTO");
@@ -233,7 +238,9 @@ export default function TimeOffPage() {
       ptoBalance, ptoUsed, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
       birthdayLeave:    c.birthdayLeave,
+      birthdayLeaveUsed: c.birthdayLeaveUsed,
       advanceSickLeave: c.advanceSickLeave,
+      advanceSickLeaveUsed: c.advanceSickLeaveUsed,
       specialLeaveCredits: c.specialLeaveCredits,
       specialLeaveUsed:    c.specialLeaveUsed,
       specialLeaveAvailable,
@@ -476,21 +483,39 @@ export default function TimeOffPage() {
                     <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
                       {!isRowIndia && (
                         <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
-                          <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider">Advance PTO/Birthday Leave</p>
-                          <p className="text-xl font-black text-pink-700 leading-tight mt-0.5">
-                            {selectedRow.birthdayLeave > 0
-                              ? <>{fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span></>
-                              : <span className="text-sm text-pink-300">Not eligible</span>}
-                          </p>
+                          <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1.5">Advance PTO/Birthday Leave</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-[9px] font-semibold text-pink-500 uppercase tracking-wider">Time</p>
+                              <p className="text-lg font-black text-pink-700 leading-tight mt-0.5 tabular-nums">
+                                {fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span>
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[9px] font-semibold text-pink-500 uppercase tracking-wider">Used</p>
+                              <p className="text-lg font-black text-pink-700 leading-tight mt-0.5 tabular-nums">
+                                {fmtBalance(selectedRow.birthdayLeaveUsed)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span>
+                              </p>
+                            </div>
+                          </div>
                         </div>
                       )}
                       <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
-                        <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">Advance Sick Leave</p>
-                        <p className="text-xl font-black text-blue-700 leading-tight mt-0.5">
-                          {selectedRow.advanceSickLeave > 0
-                            ? <>{fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span></>
-                            : <span className="text-sm text-blue-300">Not eligible</span>}
-                        </p>
+                        <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1.5">Advance Sick Leave</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <p className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider">Time</p>
+                            <p className="text-lg font-black text-blue-700 leading-tight mt-0.5 tabular-nums">
+                              {fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span>
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider">Used</p>
+                            <p className="text-lg font-black text-blue-700 leading-tight mt-0.5 tabular-nums">
+                              {fmtBalance(selectedRow.advanceSickLeaveUsed)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span>
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -735,20 +760,89 @@ export default function TimeOffPage() {
                     setSpecialHours(""); setSpecialReason("");
                   }
 
+                  function startEditSpecialBalance() {
+                    if (!selectedRow) return;
+                    setEditSpecialCredits(String(selectedRow.specialLeaveCredits));
+                    setEditSpecialUsed(String(selectedRow.specialLeaveUsed));
+                    setIsEditingSpecialBalance(true);
+                  }
+
+                  // Directly sets Credits/Used to the entered values (unlike the
+                  // Grant flow above, which only ever adds on top) — for correcting
+                  // a wrong grant or clearing a contractor's balance outright.
+                  async function saveSpecialBalanceEdit() {
+                    if (!selectedRow) return;
+                    const newCredits = Math.max(0, parseFloat(editSpecialCredits) || 0);
+                    const newUsed = Math.max(0, parseFloat(editSpecialUsed) || 0);
+                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits, specialLeaveUsed: newUsed });
+                    setContractors((prev) => prev.map((c) =>
+                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits, specialLeaveUsed: newUsed } : c
+                    ));
+                    setIsEditingSpecialBalance(false);
+                  }
+
                   return (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          ["Special Leave Credits",   `${fmtBalance(selectedRow.specialLeaveCredits)}h`],
-                          ["Special Leave Used",      `${fmtBalance(selectedRow.specialLeaveUsed)}h`],
-                          ["Special Leave Available", `${fmtBalance(selectedRow.specialLeaveAvailable)}h`],
-                        ] as [string, string][]).map(([label, value]) => (
-                          <div key={label} className="rounded-xl border border-purple-100 bg-purple-50 px-3 py-2.5">
-                            <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">{label}</p>
-                            <p className="text-lg font-bold text-purple-700 mt-0.5 tabular-nums">{value}</p>
-                          </div>
-                        ))}
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Current Balance</p>
+                        {!isEditingSpecialBalance && (
+                          <button
+                            onClick={startEditSpecialBalance}
+                            className="flex items-center gap-1 text-xs font-semibold text-purple-600 hover:text-purple-800 transition-colors"
+                          >
+                            <LuPencil size={12} strokeWidth={2} /> Edit
+                          </button>
+                        )}
                       </div>
+                      {isEditingSpecialBalance ? (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-3 gap-2">
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Credits</p>
+                              <input type="number" min="0" step="0.01" value={editSpecialCredits} onChange={(e) => setEditSpecialCredits(e.target.value)}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Used</p>
+                              <input type="number" min="0" step="0.01" value={editSpecialUsed} onChange={(e) => setEditSpecialUsed(e.target.value)}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                            <div className="rounded-xl border border-purple-100 bg-purple-50 px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">Available</p>
+                              <p className="text-lg font-bold text-purple-700 mt-0.5 tabular-nums leading-9">
+                                {fmtBalance(Math.max(0, (parseFloat(editSpecialCredits) || 0) - (parseFloat(editSpecialUsed) || 0)))}h
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setIsEditingSpecialBalance(false)}
+                              className="flex-1 py-2 bg-white border border-slate-200 text-slate-600 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={saveSpecialBalanceEdit}
+                              className="flex-1 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                            >
+                              <LuCircleCheck size={15} strokeWidth={2} /> Save Changes
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-3 gap-2">
+                          {([
+                            ["Special Leave Credits",   `${fmtBalance(selectedRow.specialLeaveCredits)}h`],
+                            ["Special Leave Used",      `${fmtBalance(selectedRow.specialLeaveUsed)}h`],
+                            ["Special Leave Available", `${fmtBalance(selectedRow.specialLeaveAvailable)}h`],
+                          ] as [string, string][]).map(([label, value]) => (
+                            <div key={label} className="rounded-xl border border-purple-100 bg-purple-50 px-3 py-2.5">
+                              <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">{label}</p>
+                              <p className="text-lg font-bold text-purple-700 mt-0.5 tabular-nums">{value}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">

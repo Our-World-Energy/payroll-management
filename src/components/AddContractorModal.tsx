@@ -46,9 +46,9 @@ function getPayPeriod() {
   return `${fmt(sun)} – ${fmt(sat)}`;
 }
 
-// monthly → weekly (÷ 4.33) and hourly (÷ 4.33 ÷ 40), rounded to 2dp
-function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m / 4.33).toFixed(2); }
-function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m / 4.33 / 40).toFixed(2); }
+// monthly → weekly (× 12 ÷ 52) and hourly (÷ 5 ÷ 8), rounded to 2dp
+function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52).toFixed(2); }
+function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52 / 5 / 8).toFixed(2); }
 
 const FIELD = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
   <div className="flex flex-col gap-1">
@@ -191,7 +191,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       sickLeaveBalance:   initial?.sickLeaveBalance ?? 0,
       sickLeaveUsed:      initial?.sickLeaveUsed    ?? 0,
       birthdayLeave:      initial?.birthdayLeave    ?? 0,
+      birthdayLeaveUsed:  initial?.birthdayLeaveUsed ?? 0,
       advanceSickLeave:   initial?.advanceSickLeave ?? 0,
+      advanceSickLeaveUsed: initial?.advanceSickLeaveUsed ?? 0,
       specialLeaveCredits: initial?.specialLeaveCredits ?? 0,
       specialLeaveUsed:    initial?.specialLeaveUsed    ?? 0,
     };
@@ -463,7 +465,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   placeholder="Auto from monthly" />
               </FIELD>
             </div>
-            <p className="text-xs text-slate-400 mt-2">Weekly = Monthly ÷ 4.33 &nbsp;·&nbsp; Hourly = Weekly ÷ 40</p>
+            <p className="text-xs text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
           </section>
         </form>
 

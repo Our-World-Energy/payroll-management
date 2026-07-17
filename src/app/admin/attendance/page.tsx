@@ -69,35 +69,7 @@ type WorksnapEntry = {
   dailyWorksnapMinutes?: Record<string, number>;
 };
 
-const TIME_OFF_STATUS_OPTIONS = [
-  "No Time Off",
-  "PTO",
-  "Sick Leave",
-  "PTO Half Day",
-  "Sick Leave Half Day",
-  "Unpaid Leave",
-];
-
 const EMPTY_DAILY_WORKSNAP_MINUTES: Record<string, number> = {};
-
-// UI status strings ↔ the enum values stored on attendance_day_status / attendance_week_status.
-const TIME_OFF_API_BY_UI: Record<string, string> = {
-  "No Time Off": "NOT_SET",
-  "PTO": "PTO",
-  "Sick Leave": "SICK_LEAVE",
-  "PTO Half Day": "PTO_HALF_DAY",
-  "Sick Leave Half Day": "SICK_LEAVE_HALF_DAY",
-  "Unpaid Leave": "UNPAID_LEAVE",
-};
-const TIME_OFF_UI_BY_API: Record<string, string> = Object.fromEntries(
-  Object.entries(TIME_OFF_API_BY_UI).map(([ui, api]) => [api, ui])
-);
-function timeOffStatusToApi(uiStatus: string) {
-  return TIME_OFF_API_BY_UI[uiStatus] ?? "NOT_SET";
-}
-function timeOffStatusFromApi(apiStatus: string) {
-  return TIME_OFF_UI_BY_API[apiStatus] ?? "No Time Off";
-}
 
 const DECISION_API_BY_UI: Record<string, string> = { "No Status": "NOT_SET", "Approved": "APPROVED", "Rejected": "REJECTED" };
 const DECISION_UI_BY_API: Record<string, string> = { NOT_SET: "No Status", APPROVED: "Approved", REJECTED: "Rejected", OPEN: "No Status" };
@@ -121,19 +93,6 @@ function timeOffStatusFor(record: AttendanceRecord) {
 
   if (request) return `${request.type} - ${request.status}`;
   return record.status === "On Leave" ? "On Leave" : "No Time Off";
-}
-
-function defaultTimeOffStatusFor(record: AttendanceRecord) {
-  const request = TIME_OFF.find((item) =>
-    item.name === record.name &&
-    record.date >= item.from &&
-    record.date <= item.to
-  );
-
-  if (!request) return record.status === "On Leave" ? "PTO" : "No Time Off";
-  if (request.type === "Sick Leave") return "Sick Leave";
-  if (request.type === "Unpaid Leave") return "Unpaid Leave";
-  return "PTO";
 }
 
 function attendanceTimeValue(value: string) {
@@ -248,13 +207,6 @@ function defaultDailyDecisionStatuses(weekDates: string[]) {
   }, {});
 }
 
-function defaultDailyTimeOffStatuses(weekDates: string[], status: string) {
-  return weekDates.reduce<Record<string, string>>((statuses, date) => {
-    statuses[date] = status;
-    return statuses;
-  }, {});
-}
-
 function timeOffTimeFor(timeOffStatus: string) {
   if (timeOffStatus === "PTO" || timeOffStatus === "Sick Leave") return "480 mins";
   if (timeOffStatus === "Sick Leave Half Day" || timeOffStatus === "PTO Half Day") return "240 mins";
@@ -277,29 +229,42 @@ function timeOffRequestTypeFor(date: string, leaveRequests: AdminLeaveRequest[])
   return match?.type ?? "-";
 }
 
-// Minutes for that same matched request — PTO types read ptoUsedHours, Sick
-// Leave types read sickLeaveUsedHours, converted hours → minutes.
+// Hours stamped on a leave request for its own type's bucket — PTO types read
+// ptoUsedHours, Special Leave reads specialLeaveUsedHours, everything else
+// (Sick Leave, Unpaid Leave) reads sickLeaveUsedHours.
+function hoursForLeaveRequest(r: AdminLeaveRequest): number {
+  if (r.type.startsWith("PTO")) return r.ptoUsedHours;
+  if (r.type.startsWith("Special Leave")) return r.specialLeaveUsedHours;
+  return r.sickLeaveUsedHours;
+}
+
+// Minutes for the request covering this date, converted hours → minutes —
+// e.g. a full-day Special Leave request reads its stamped 8h as 480 mins,
+// same as a full-day PTO/Sick Leave request.
 function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
   const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
   if (!match) return "-";
-  const hours = match.type.startsWith("PTO") ? match.ptoUsedHours : match.sickLeaveUsedHours;
-  return `${Math.round(hours * 60)} mins`;
+  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
 }
 
-// Whether the matched portal leave REQUEST covering this date is worth a
-// full day (480 min) — a second, independent signal (alongside the admin-set
-// daily Time Off Status) that the day is already fully credited via time
-// off, so Worksnap time logged anyway is Regular OT Time, not regular/
-// evaluated time.
-function isFullTimeOffRequestDay(date: string, leaveRequests: AdminLeaveRequest[]) {
-  return timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)) === 480;
+// Minutes for the APPROVED request covering this date only — unlike
+// timeOffRequestMinutesFor (which shows whatever was requested regardless of
+// status, for the read-only Time Off Request columns), this is what actually
+// drives Completion Time / OT suppression in Attendance Review, so a merely
+// Pending or Rejected request can't grant time-off credit.
+function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
+  const match = leaveRequests.find((r) => r.status === "Approved" && date >= r.startDate && date <= r.endDate);
+  if (!match) return "-";
+  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
 }
 
-// Combines both signals — the admin-set daily Time Off Status and an actual
-// submitted leave request — into the single "is this day already fully
-// credited via time off" check used throughout Attendance Review.
-function resolveFullTimeOffDay(date: string, timeOffStatus: string, leaveRequests: AdminLeaveRequest[]) {
-  return isFullTimeOffStatus(timeOffStatus) || isFullTimeOffRequestDay(date, leaveRequests);
+// Whether an APPROVED portal request covering `date` is worth a full day
+// (480 min) — the sole signal driving Attendance Review's "is this day
+// already fully credited via time off" check (Attendance Review has no
+// admin-set daily status of its own; that's read straight from the
+// contractor's submitted requests instead).
+function isApprovedFullTimeOffRequestDay(date: string, leaveRequests: AdminLeaveRequest[]) {
+  return timeValueToMinutes(approvedTimeOffRequestMinutesFor(date, leaveRequests)) === 480;
 }
 
 const APPROVED_LEAVE_CONFLICT_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day"];
@@ -322,7 +287,7 @@ function totalTimeOffRequestMinutesFor(weekDates: string[], leaveRequests: Admin
   if (!weekStart || !weekEnd) return 0;
   return leaveRequests
     .filter((r) => r.startDate <= weekEnd && r.endDate >= weekStart)
-    .reduce((sum, r) => sum + (r.type.startsWith("PTO") ? r.ptoUsedHours : r.sickLeaveUsedHours) * 60, 0);
+    .reduce((sum, r) => sum + hoursForLeaveRequest(r) * 60, 0);
 }
 
 function completionTimeFor(evaluatedTime: string, timeOffTime: string, holidayTime = "-", rdOtTime = "-") {
@@ -662,14 +627,7 @@ function buildBulkApproveDaySnapshots(
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
   const shiftType = shiftTypeForAttendanceRow(row);
-  const timeOffStatusUi = defaultTimeOffStatusFor(row);
-  const timeOffMinutes = timeValueToMinutes(timeOffTimeFor(timeOffStatusUi));
-  const isFullTimeOffStatusRow = isFullTimeOffStatus(timeOffStatusUi);
   const userLogs = dailyLogs.filter((l) => l.worksnapUserId === row.worksnapUserId);
-  // Either signal — the admin-set daily status OR an actual submitted leave
-  // request worth a full day — marks the day as already fully credited via
-  // time off, so Worksnap time logged anyway is Regular OT Time.
-  const isFullTimeOffDayFor = (date: string) => isFullTimeOffStatusRow || isFullTimeOffRequestDay(date, leaveRequests);
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time,
   // so it's built once across all weekDates together, same as the Review modal.
@@ -684,7 +642,7 @@ function buildBulkApproveDaySnapshots(
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
-    const isFullTimeOffDay = isFullTimeOffDayFor(date);
+    const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
@@ -707,7 +665,7 @@ function buildBulkApproveDaySnapshots(
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
     const isRestDay = isRestDayDate(date, restDaysStr);
-    const isFullTimeOffDay = isFullTimeOffDayFor(date);
+    const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
@@ -731,8 +689,6 @@ function buildBulkApproveDaySnapshots(
       regularOtMinutes: allocation.regularOtMinutes,
       rdOtMinutes: allocation.rdOtMinutes,
       hoOtMinutes,
-      timeOffStatus: timeOffStatusToApi(timeOffStatusUi),
-      timeOffMinutes,
     };
   });
 }
@@ -936,7 +892,6 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const type = record.actualMinutes > record.standardMinutes ? "overtime" : "undertime";
   const [note, setNote] = useState("");
   const [dailyDecisionStatuses, setDailyDecisionStatuses] = useState<Record<string, string>>({});
-  const [dailyTimeOffStatuses, setDailyTimeOffStatuses] = useState<Record<string, string>>({});
   const [adjustedTimes, setAdjustedTimes] = useState<Record<string, string>>({});
   const [editingAdjustedDate, setEditingAdjustedDate] = useState<string | null>(null);
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
@@ -985,8 +940,7 @@ const totalHolidayMins = weekDates.reduce(
     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-    const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-    const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
+    const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
     const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -996,15 +950,14 @@ const totalHolidayMins = weekDates.reduce(
   }, 0);
   const totalEvaluatedMinutes = weekDates.reduce((sum, date) => {
     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
-    const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType, resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests));
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), evaluationShiftType, isApprovedFullTimeOffRequestDay(date, leaveRequests));
     return sum + timeValueToMinutes(evaluatedTime);
   }, 0);
   const totalRegularMinutes = weekDates.reduce(
     (sum, date) => sum + regularTimeMinutesFor(
       timeValueToMinutes(worksnapTimeForDate(effectiveDailyMinutes, date)),
       isRestDayDate(date, restDaysStr),
-      resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests),
+      isApprovedFullTimeOffRequestDay(date, leaveRequests),
       isHolidayDayFor(
         holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates),
         localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays)
@@ -1018,10 +971,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
         const isRestDay = isRestDayDate(date, restDaysStr);
         const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-        const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-        const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
+        const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
-        const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
+        const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
         const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
         const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
         const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
@@ -1035,8 +987,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Status", "Time Off Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
-    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Time" || heading === "Time Off Request" || heading === "Time Off Request Time")));
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
+    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
     0
@@ -1050,7 +1002,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const isRestDay = isRestDayDate(date, restDaysStr);
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-      const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests);
+      const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
       const { hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
       return {
@@ -1076,7 +1028,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
       const isRestDay = isRestDayDate(date, restDaysStr);
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-      const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record), leaveRequests);
+      const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
       const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -1108,7 +1060,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       ? { ...defaultDailyDecisionStatuses(weekDates), ...savedStatuses }
       : defaultDailyDecisionStatuses(weekDates);
     setDailyDecisionStatuses(defaultStatuses);
-    setDailyTimeOffStatuses(defaultDailyTimeOffStatuses(weekDates, defaultTimeOffStatusFor(record)));
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
     setOffsetCredit(0);
@@ -1150,15 +1101,12 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
 
         if (dayStatusData?.days) {
           const decisionByDate: Record<string, string> = {};
-          const timeOffByDate: Record<string, string> = {};
           const adjustedByDate: Record<string, string> = {};
           dayStatusData.days.forEach((d) => {
             if (d.decisionStatus) decisionByDate[d.date] = decisionStatusFromApi(d.decisionStatus);
-            if (d.timeOffStatus) timeOffByDate[d.date] = timeOffStatusFromApi(d.timeOffStatus);
             if (d.adjustedMinutes != null) adjustedByDate[d.date] = formatMinutesAsMins(d.adjustedMinutes);
           });
           if (Object.keys(decisionByDate).length) setDailyDecisionStatuses((current) => ({ ...current, ...decisionByDate }));
-          if (Object.keys(timeOffByDate).length) setDailyTimeOffStatuses((current) => ({ ...current, ...timeOffByDate }));
           if (Object.keys(adjustedByDate).length) setAdjustedTimes((current) => ({ ...current, ...adjustedByDate }));
         }
         setDailyLogs(dailyLogData.logs ?? []);
@@ -1217,11 +1165,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
           const isRestDay = isRestDayDate(date, restDaysStr);
           const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-          const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-          const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
+          const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
           const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
           const adjustedTime = adjustedTimes[date] ?? "";
-          const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
           const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
           const adjustedMinutesParsed = timeValueToMinutes(adjustedTime);
           const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
@@ -1245,8 +1191,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             regularOtMinutes: allocation.regularOtMinutes,
             rdOtMinutes: allocation.rdOtMinutes,
             hoOtMinutes,
-            timeOffStatus: timeOffStatusToApi(dailyTimeOffStatus),
-            timeOffMinutes: timeValueToMinutes(timeOffTime),
           };
         });
 
@@ -1376,14 +1320,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     // calculation below reads this instead of the raw value.
                     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
                     const isRestDay = isRestDayDate(date, restDaysStr);
-                    const dailyTimeOffStatus = dailyTimeOffStatuses[date] ?? defaultTimeOffStatusFor(record);
-                    const isFullTimeOffDay = resolveFullTimeOffDay(date, dailyTimeOffStatus, leaveRequests);
+                    const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, evaluationShiftType, isFullTimeOffDay);
                     const adjustedTime = adjustedTimes[date] ?? "";
                     const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
                     const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
                     const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
-                    const timeOffTime = timeOffTimeFor(dailyTimeOffStatus);
+                    const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
                     const isEditingAdjustedTime = editingAdjustedDate === date;
                     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
                     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
@@ -1502,28 +1445,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
-                          <select
-                            value={dailyTimeOffStatus}
-                            onChange={(event) => {
-                              const nextStatus = event.target.value;
-                              setDailyTimeOffStatuses((current) => ({
-                                ...current,
-                                [date]: nextStatus,
-                              }));
-                            }}
-                            className="h-8 w-40 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500"
-                          >
-                            {TIME_OFF_STATUS_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
-                        </td>
-                        {!isIndia && (
-                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
-                            {timeOffTime}
-                          </td>
-                        )}
                         {!isIndia && (
                           <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
                             {timeOffRequestTypeFor(date, leaveRequests)}
@@ -1589,14 +1510,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {totalLocalHolidayMinutes > 0 ? formatMinutesAsMins(totalLocalHolidayMinutes) : "-"}
                     </td>
-                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                      -
-                    </td>
-                    {!isIndia && (
-                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                        -
-                      </td>
-                    )}
                     {!isIndia && (
                       <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                         -
@@ -1630,7 +1543,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
-                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className={`px-4 py-2 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
                           {formatMinutesAsMins(offsetCredit || appliedOffsetCredit)}
                         </td>
@@ -1642,7 +1554,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
                         <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
-                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>

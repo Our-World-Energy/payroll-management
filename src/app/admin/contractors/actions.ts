@@ -53,7 +53,9 @@ function toContractor(row: Record<string, unknown>): Contractor {
     sickLeaveBalance: Number(row.sickLeaveBalance  ?? 0),
     sickLeaveUsed:    Number(row.sickLeaveUsed     ?? 0),
     birthdayLeave:    Number(row.birthdayLeave     ?? 0),
+    birthdayLeaveUsed: Number(row.birthdayLeaveUsed ?? 0),
     advanceSickLeave: Number(row.advanceSickLeave  ?? 0),
+    advanceSickLeaveUsed: Number(row.advanceSickLeaveUsed ?? 0),
     specialLeaveCredits: Number(row.specialLeaveCredits ?? 0),
     specialLeaveUsed:    Number(row.specialLeaveUsed    ?? 0),
   };
@@ -231,7 +233,9 @@ export async function createContractor(c: Contractor): Promise<void> {
     sickLeaveBalance,
     sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
     birthdayLeave:     c.birthdayLeave    ?? 0,
+    birthdayLeaveUsed: c.birthdayLeaveUsed ?? 0,
     advanceSickLeave:  c.advanceSickLeave ?? 0,
+    advanceSickLeaveUsed: c.advanceSickLeaveUsed ?? 0,
     specialLeaveCredits: c.specialLeaveCredits ?? 0,
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   });
@@ -251,20 +255,22 @@ export async function updateContractor(c: Contractor): Promise<void> {
   // corresponding Available balance — compared against the currently-stored
   // balance/used/advance, not whatever the client happens to have in memory.
   const { data: existing } = await sb.from(TABLE)
-    .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave, ptoBalance, ptoUsed, birthdayLeave")
+    .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, ptoBalance, ptoUsed, birthdayLeave, birthdayLeaveUsed")
     .eq("uid", c.uid)
     .maybeSingle();
-  const { sickLeaveUsed, advanceSickLeave } = applyAdvanceSickLeaveRepayment(
+  const { sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed } = applyAdvanceSickLeaveRepayment(
     existing?.sickLeaveBalance ?? 0,
     sickLeaveBalance,
     existing?.sickLeaveUsed ?? (c.sickLeaveUsed ?? 0),
-    existing?.advanceSickLeave ?? (c.advanceSickLeave ?? 0)
+    existing?.advanceSickLeave ?? (c.advanceSickLeave ?? 0),
+    existing?.advanceSickLeaveUsed ?? (c.advanceSickLeaveUsed ?? 0)
   );
-  const { ptoUsed, birthdayLeave } = applyAdvancePtoRepayment(
+  const { ptoUsed, birthdayLeave, birthdayLeaveUsed } = applyAdvancePtoRepayment(
     existing?.ptoBalance ?? 0,
     ptoBalance,
     existing?.ptoUsed ?? (c.ptoUsed ?? 0),
-    existing?.birthdayLeave ?? (c.birthdayLeave ?? 0)
+    existing?.birthdayLeave ?? (c.birthdayLeave ?? 0),
+    existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0)
   );
 
   const { error } = await sb.from(TABLE).update({
@@ -304,7 +310,9 @@ export async function updateContractor(c: Contractor): Promise<void> {
     sickLeaveBalance,
     sickLeaveUsed,
     birthdayLeave,
+    birthdayLeaveUsed,
     advanceSickLeave,
+    advanceSickLeaveUsed,
     specialLeaveCredits: c.specialLeaveCredits ?? 0,
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   }).eq("uid", c.uid);
@@ -320,7 +328,8 @@ export async function deleteContractor(uid: string): Promise<void> {
 export async function updateTimeOffUsage(
   uid: string,
   fields: Partial<{
-    ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; advanceSickLeave: number;
+    ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; birthdayLeaveUsed: number;
+    advanceSickLeave: number; advanceSickLeaveUsed: number;
     specialLeaveCredits: number; specialLeaveUsed: number;
   }>
 ): Promise<void> {
@@ -332,7 +341,7 @@ export async function updateTimeOffUsage(
 export async function backfillLeaveBalances(): Promise<{ updated: number }> {
   const sb = getSupabase();
   const { data, error } = await sb.from(TABLE)
-    .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave, ptoBalance, ptoUsed, birthdayLeave");
+    .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, ptoBalance, ptoUsed, birthdayLeave, birthdayLeaveUsed");
   if (error) throw new Error(error.message);
 
   let updated = 0;
@@ -340,19 +349,21 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
     if (!row.hireDate) continue;
     const ptoBalance       = calculatePtoBalance(row.hireDate);
     const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate);
-    const { sickLeaveUsed, advanceSickLeave } = applyAdvanceSickLeaveRepayment(
+    const { sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed } = applyAdvanceSickLeaveRepayment(
       row.sickLeaveBalance ?? 0,
       sickLeaveBalance,
       row.sickLeaveUsed ?? 0,
-      row.advanceSickLeave ?? 0
+      row.advanceSickLeave ?? 0,
+      row.advanceSickLeaveUsed ?? 0
     );
-    const { ptoUsed, birthdayLeave } = applyAdvancePtoRepayment(
+    const { ptoUsed, birthdayLeave, birthdayLeaveUsed } = applyAdvancePtoRepayment(
       row.ptoBalance ?? 0,
       ptoBalance,
       row.ptoUsed ?? 0,
-      row.birthdayLeave ?? 0
+      row.birthdayLeave ?? 0,
+      row.birthdayLeaveUsed ?? 0
     );
-    await sb.from(TABLE).update({ ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, advanceSickLeave }).eq("uid", row.uid);
+    await sb.from(TABLE).update({ ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, birthdayLeaveUsed, advanceSickLeave, advanceSickLeaveUsed }).eq("uid", row.uid);
     updated++;
   }
   return { updated };

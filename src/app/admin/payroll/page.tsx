@@ -14,6 +14,48 @@ import { Logo } from "@/components/Logo";
 // placeholder ratio the old mock page used, not a real tax calculation.
 const DEDUCTION_RATE = 0.15;
 
+// Pay multipliers applied on top of Hourly Rate for each OT bucket. Regular
+// Time, US Holiday Time, and Local Holiday Time all pay at the plain hourly
+// rate (100%) and need no multiplier of their own.
+const REGULAR_OT_MULTIPLIER = 1.25;
+const RD_OT_MULTIPLIER = 1.5;
+const HO_OT_MULTIPLIER = 2.25;
+
+// Each payroll component is calculated independently from its own saved time
+// total, the contractor's Hourly Rate, and its own pay multiplier, then
+// summed into one base payroll gross. Shared by the main table's Gross Pay
+// column and the printable voucher so the two totals can never drift apart.
+function computePayComponents(hourlyRate: number, totals: {
+  totalEvaluatedRegularMinutes: number | null;
+  totalRegularOtMinutes: number | null;
+  totalRdOtMinutes: number | null;
+  totalUsHoMinutes: number | null;
+  totalHoOtMinutes: number | null;
+  localHolidayMinutes: number | null;
+}) {
+  const regHours = (totals.totalEvaluatedRegularMinutes ?? 0) / 60;
+  const regOtHours = (totals.totalRegularOtMinutes ?? 0) / 60;
+  const rdOtHours = (totals.totalRdOtMinutes ?? 0) / 60;
+  const usHolidayHours = (totals.totalUsHoMinutes ?? 0) / 60;
+  const hoOtHours = (totals.totalHoOtMinutes ?? 0) / 60;
+  const localHolidayHours = (totals.localHolidayMinutes ?? 0) / 60;
+
+  const regPay = regHours * hourlyRate;
+  const regOtPay = regOtHours * hourlyRate * REGULAR_OT_MULTIPLIER;
+  const rdOtPay = rdOtHours * hourlyRate * RD_OT_MULTIPLIER;
+  const usHolidayPay = usHolidayHours * hourlyRate;
+  const hoOtPay = hoOtHours * hourlyRate * HO_OT_MULTIPLIER;
+  const localHolidayPay = localHolidayHours * hourlyRate;
+
+  const grossPay = regPay + regOtPay + rdOtPay + usHolidayPay + hoOtPay + localHolidayPay;
+
+  return {
+    regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
+    regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
+    grossPay,
+  };
+}
+
 type PayrollRow = {
   email: string;
   name: string;
@@ -213,7 +255,19 @@ export default function PayrollPage() {
             const isReviewed = saved?.requestStatus === "APPROVED" && saved.completionMinutes != null;
             const hourlyRate = parseFloat(c.hourlyRate) || 0;
             const hours = isReviewed ? (saved!.completionMinutes as number) / 60 : null;
-            const gross = hours != null ? hours * hourlyRate : null;
+            // Gross Pay is the sum of each payroll component calculated independently
+            // (its own time total × Hourly Rate × its own multiplier) — see
+            // computePayComponents — so this always matches the voucher's total.
+            const gross = isReviewed
+              ? computePayComponents(hourlyRate, {
+                  totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
+                  totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
+                  totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
+                  totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
+                  totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
+                  localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
+                }).grossPay
+              : null;
             const deductions = gross != null ? gross * DEDUCTION_RATE : null;
             const net = gross != null && deductions != null ? gross - deductions : null;
             const country = countryFromLocation(c.location || "");
@@ -559,23 +613,24 @@ function PayrollVoucherModal({
     row.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
   );
 
-  const regHours = (row.totalEvaluatedRegularMinutes ?? 0) / 60;
   const ptoHours = row.ptoHours;
-  const hoHours = ((row.totalUsHoMinutes ?? 0) + (row.localHolidayMinutes ?? 0)) / 60;
-  const regOtHours = (row.totalRegularOtMinutes ?? 0) / 60;
-  const rdOtHours = (row.totalRdOtMinutes ?? 0) / 60;
-  const hoOtHours = (row.totalHoOtMinutes ?? 0) / 60;
-
-  const regPay = regHours * row.hourlyRate;
-  const regOtPay = regOtHours * row.hourlyRate;
-  const rdOtPay = rdOtHours * row.hourlyRate;
-  const holidayPay = hoHours * row.hourlyRate;
-  const hoOtPay = hoOtHours * row.hourlyRate;
+  const {
+    regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
+    regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
+    grossPay: componentGrossPay,
+  } = computePayComponents(row.hourlyRate, {
+    totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
+    totalRegularOtMinutes: row.totalRegularOtMinutes,
+    totalRdOtMinutes: row.totalRdOtMinutes,
+    totalUsHoMinutes: row.totalUsHoMinutes,
+    totalHoOtMinutes: row.totalHoOtMinutes,
+    localHolidayMinutes: row.localHolidayMinutes,
+  });
   const ptoPay = ptoHours * row.hourlyRate;
   // Bonus/MISC/Retro Pay/REIM (earnings) and Cash Advance/HMO/Tax (deductions)
   // all come from the manual Review adjustment (if any).
   const { bonus, misc, retroPay, reim, cashAdvance, hmo, tax } = row;
-  const grossPay = regPay + regOtPay + rdOtPay + holidayPay + hoOtPay + ptoPay + bonus + misc + retroPay + reim;
+  const grossPay = componentGrossPay + ptoPay + bonus + misc + retroPay + reim;
   const totalDeductions = cashAdvance + hmo + tax;
   const netPay = grossPay - totalDeductions;
 
@@ -651,7 +706,8 @@ function PayrollVoucherModal({
                 {[
                   ["REG Hours", regHours],
                   ["PTO HRS", ptoHours],
-                  ["HO HRS", hoHours],
+                  ["US HO HRS", usHolidayHours],
+                  ["LOCAL HO HRS", localHolidayHours],
                 ].map(([label, value]) => (
                   <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
                     <span className="text-slate-500">{label}</span>
@@ -674,10 +730,11 @@ function PayrollVoucherModal({
             <div className="space-y-2 text-xs">
               {[
                 ["REG HRS Pay", regPay],
-                ["REG OT", regOtPay],
-                ["RD OT", rdOtPay],
-                ["HOLIDAY PAY", holidayPay],
-                ["HO OT", hoOtPay],
+                ["REG OT (125%)", regOtPay],
+                ["RD OT (150%)", rdOtPay],
+                ["US HOLIDAY PAY", usHolidayPay],
+                ["HO OT (225%)", hoOtPay],
+                ["LOCAL HOLIDAY PAY", localHolidayPay],
                 ["PTO", ptoPay],
                 ["Bonus", bonus],
                 ["MISC", misc],

@@ -36,7 +36,9 @@ export type Contractor = {
   sickLeaveBalance: number;
   sickLeaveUsed: number;
   birthdayLeave: number;
+  birthdayLeaveUsed: number;
   advanceSickLeave: number;
+  advanceSickLeaveUsed: number;
   specialLeaveCredits: number;
   specialLeaveUsed: number;
 };

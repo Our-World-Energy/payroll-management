@@ -117,8 +117,8 @@ function validateRow(data: Record<string, string>, rowNum: number): RowResult {
 
 function rowToContractor(data: Record<string, string>): Contractor {
   const monthly = data.monthly_rate ?? "";
-  const weekly  = monthly ? (parseFloat(monthly) / 4.33).toFixed(2)       : "—";
-  const hourly  = monthly ? (parseFloat(monthly) / 4.33 / 40).toFixed(2)  : "—";
+  const weekly  = monthly ? (parseFloat(monthly) * 12 / 52).toFixed(2)       : "—";
+  const hourly  = monthly ? (parseFloat(monthly) * 12 / 52 / 5 / 8).toFixed(2) : "—";
   const firstName  = data.first_name?.trim()  ?? "";
   const middleName = data.middle_name?.trim() ?? "";
   const surname    = data.surname?.trim()     ?? "";
@@ -161,7 +161,9 @@ function rowToContractor(data: Record<string, string>): Contractor {
     sickLeaveBalance:   0,
     sickLeaveUsed:      0,
     birthdayLeave:      0,
+    birthdayLeaveUsed:  0,
     advanceSickLeave:   0,
+    advanceSickLeaveUsed: 0,
     specialLeaveCredits: 0,
     specialLeaveUsed:    0,
   };
