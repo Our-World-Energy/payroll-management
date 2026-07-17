@@ -35,7 +35,7 @@ function parseShiftStart(shiftHours: string): { hour: number; minute: number } |
   return { hour, minute: Number(m[2]) };
 }
 
-const LATE_GRACE_MINUTES = 10;
+const LATE_GRACE_MINUTES = 15;
 
 // contractor_profiles.location is stored as "City, Country" — same parsing
 // convention used on the Contractors/Payroll pages for country filtering.
@@ -133,9 +133,11 @@ export default function AdminPage() {
 
         // Late Today only applies to Fixed shift contractors — real check:
         // firstIn (worksnap_daily_log) vs the contractor's own Shift Start
-        // (contractor_profiles.shiftHours), in Arizona time, with a 10-minute
-        // grace period. Flexible shift contractors have no fixed start time
-        // to be late against, so they're excluded from Late Today entirely.
+        // (contractor_profiles.shiftHours), in Arizona time, with a 15-minute
+        // grace period (a clock-in at exactly Shift Start + 15 min is still on
+        // time; one minute past that is late). Flexible shift contractors have
+        // no fixed start time to be late against, so they're excluded from
+        // Late Today entirely.
         const lateRows: LateRow[] = [];
         for (const c of activeContractors) {
           const isFixed = (c.shiftType || "").trim().toLowerCase() === "fixed";

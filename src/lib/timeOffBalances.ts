@@ -178,6 +178,29 @@ export function applyAdvanceSickLeaveRepayment(
   };
 }
 
+// Whenever newly-accrued PTO becomes available, any outstanding Advance
+// PTO/Birthday Leave balance (stored on birthdayLeave) is repaid first: the
+// newly-accrued amount is credited to PTO Used (instead of increasing PTO
+// Available) until the advance reaches zero, then any leftover accrual
+// increases Available normally. Mirrors applyAdvanceSickLeaveRepayment for
+// the PTO bucket.
+export function applyAdvancePtoRepayment(
+  previousPtoBalance: number,
+  nextPtoBalance: number,
+  currentPtoUsed: number,
+  currentBirthdayLeave: number
+): { ptoUsed: number; birthdayLeave: number } {
+  const accrued = nextPtoBalance - previousPtoBalance;
+  if (accrued <= 0 || currentBirthdayLeave <= 0) {
+    return { ptoUsed: currentPtoUsed, birthdayLeave: currentBirthdayLeave };
+  }
+  const repayment = Math.min(accrued, currentBirthdayLeave);
+  return {
+    ptoUsed: roundBalance(currentPtoUsed + repayment),
+    birthdayLeave: roundBalance(currentBirthdayLeave - repayment),
+  };
+}
+
 export function calculateUnusedSickLeaveBalance(
   name: string,
   hireDate: string,

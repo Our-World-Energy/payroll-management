@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvanceSickLeaveRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvanceSickLeaveRepayment, applyAdvancePtoRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS } from "@/lib/timeOffBalances";
 
 const TABLE = "contractor_profiles";
 
@@ -65,11 +65,12 @@ export type FetchParams = {
   country: string;
   status: string;
   rules: FilterRule[];
+  search?: string;
 };
 
 // Apply quick-filter + advanced rules to a Supabase query builder
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyFilters(query: any, country: string, status: string, rules: FilterRule[]) {
+function applyFilters(query: any, country: string, status: string, rules: FilterRule[], search = "") {
   if (country !== "All Countries") {
     // locations are stored as "City, Country" — just ilike "%Country" covers both
     // "Gujarat, India" and "India" without the comma parsing issue in .or()
@@ -78,6 +79,14 @@ function applyFilters(query: any, country: string, status: string, rules: Filter
 
   if (status !== "All Statuses") {
     query = query.eq("status", status);
+  }
+
+  // Name search — fullName can be blank in the DB with the display name only
+  // derived client-side from firstName/surname (see contractorFullName), so
+  // all three are checked to avoid missing rows with an empty fullName.
+  const term = search.trim();
+  if (term) {
+    query = query.or(`fullName.ilike.%${term}%,firstName.ilike.%${term}%,surname.ilike.%${term}%`);
   }
 
   for (const rule of rules) {
@@ -155,7 +164,7 @@ export async function fetchContractorsPage(params: FetchParams): Promise<{
   const to = from + params.pageSize - 1;
 
   let query = sb.from(TABLE).select("*", { count: "exact" });
-  query = applyFilters(query, params.country, params.status, params.rules);
+  query = applyFilters(query, params.country, params.status, params.rules, params.search);
   query = query.order("id", { ascending: false }).range(from, to);
 
   const { data, error, count } = await query;
@@ -170,7 +179,7 @@ export async function fetchAllContractors(
 ): Promise<Contractor[]> {
   const sb = getSupabase();
   let query = sb.from(TABLE).select("*");
-  query = applyFilters(query, params.country, params.status, params.rules);
+  query = applyFilters(query, params.country, params.status, params.rules, params.search);
   query = query.order("id", { ascending: false });
 
   const { data, error } = await query;
@@ -237,12 +246,12 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const ptoBalance       = calculatePtoBalance(c.hireDate);
   const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
 
-  // Any outstanding Advance Sick Leave is repaid out of newly-accrued Sick
-  // Leave before it's allowed to raise Sick Leave Available — compared
-  // against the currently-stored balance/used/advance, not whatever the
-  // client happens to have in memory.
+  // Any outstanding Advance Sick Leave / Advance PTO-Birthday Leave is repaid
+  // out of newly-accrued Sick Leave / PTO before it's allowed to raise the
+  // corresponding Available balance — compared against the currently-stored
+  // balance/used/advance, not whatever the client happens to have in memory.
   const { data: existing } = await sb.from(TABLE)
-    .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave")
+    .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave, ptoBalance, ptoUsed, birthdayLeave")
     .eq("uid", c.uid)
     .maybeSingle();
   const { sickLeaveUsed, advanceSickLeave } = applyAdvanceSickLeaveRepayment(
@@ -250,6 +259,12 @@ export async function updateContractor(c: Contractor): Promise<void> {
     sickLeaveBalance,
     existing?.sickLeaveUsed ?? (c.sickLeaveUsed ?? 0),
     existing?.advanceSickLeave ?? (c.advanceSickLeave ?? 0)
+  );
+  const { ptoUsed, birthdayLeave } = applyAdvancePtoRepayment(
+    existing?.ptoBalance ?? 0,
+    ptoBalance,
+    existing?.ptoUsed ?? (c.ptoUsed ?? 0),
+    existing?.birthdayLeave ?? (c.birthdayLeave ?? 0)
   );
 
   const { error } = await sb.from(TABLE).update({
@@ -285,10 +300,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
     equipmentProvided: c.equipmentProvided,
     worksnapId:        c.worksnapId,
     ptoBalance,
-    ptoUsed:           c.ptoUsed          ?? 0,
+    ptoUsed,
     sickLeaveBalance,
     sickLeaveUsed,
-    birthdayLeave:     c.birthdayLeave    ?? 0,
+    birthdayLeave,
     advanceSickLeave,
     specialLeaveCredits: c.specialLeaveCredits ?? 0,
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
@@ -317,7 +332,7 @@ export async function updateTimeOffUsage(
 export async function backfillLeaveBalances(): Promise<{ updated: number }> {
   const sb = getSupabase();
   const { data, error } = await sb.from(TABLE)
-    .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave");
+    .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave, ptoBalance, ptoUsed, birthdayLeave");
   if (error) throw new Error(error.message);
 
   let updated = 0;
@@ -331,7 +346,13 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
       row.sickLeaveUsed ?? 0,
       row.advanceSickLeave ?? 0
     );
-    await sb.from(TABLE).update({ ptoBalance, sickLeaveBalance, sickLeaveUsed, advanceSickLeave }).eq("uid", row.uid);
+    const { ptoUsed, birthdayLeave } = applyAdvancePtoRepayment(
+      row.ptoBalance ?? 0,
+      ptoBalance,
+      row.ptoUsed ?? 0,
+      row.birthdayLeave ?? 0
+    );
+    await sb.from(TABLE).update({ ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, advanceSickLeave }).eq("uid", row.uid);
     updated++;
   }
   return { updated };

@@ -185,6 +185,8 @@ export default function TimeOffPage() {
   const [overrideError,      setOverrideError]      = useState("");
   const [overrideSuccess,    setOverrideSuccess]    = useState("");
   const [overrideBlocked,    setOverrideBlocked]    = useState("");
+  const [overrideDuplicateWarning, setOverrideDuplicateWarning] = useState("");
+  const [confirmOverrideAnyway, setConfirmOverrideAnyway] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -439,10 +441,21 @@ export default function TimeOffPage() {
                   </div>
 
                 ) : modalTab === "details" ? (() => {
-                  const hasNoPtoBalance  = selectedRow.ptoBalance === 0 && selectedRow.ptoAvailable === 0;
-                  const hasNoSickBalance = selectedRow.sickLeaveBalance === 0 && selectedRow.sickLeaveAvailable === 0;
-                  const advanceEligible  = isRowIndia ? hasNoSickBalance : (hasNoPtoBalance && hasNoSickBalance);
-                  const isPto = editLeaveType === "Advance PTO/Birthday Leave";
+                  // Advance leave is available per-type, purely on current available
+                  // balance — not on tenure. A brand-new hire and a long-tenured
+                  // contractor who has simply run low both qualify the same way.
+                  const ptoAdvanceEligible  = !isRowIndia && selectedRow.ptoAvailable < 8;
+                  const sickAdvanceEligible = selectedRow.sickLeaveAvailable < 8;
+                  const advanceEligible = ptoAdvanceEligible || sickAdvanceEligible;
+                  const eligibleLeaveTypes = [
+                    ...(sickAdvanceEligible ? ["Advance Sick Leave"] as const : []),
+                    ...(ptoAdvanceEligible ? ["Advance PTO/Birthday Leave"] as const : []),
+                  ];
+                  // Falls back to whichever type is actually eligible if the
+                  // dropdown's stored selection no longer qualifies (e.g. PTO
+                  // balance recovered above 8h since it was last picked).
+                  const effectiveLeaveType = eligibleLeaveTypes.includes(editLeaveType) ? editLeaveType : eligibleLeaveTypes[0];
+                  const isPto = effectiveLeaveType === "Advance PTO/Birthday Leave";
 
                   async function applyAdvanceGrant() {
                     if (!selectedRow) return;
@@ -504,7 +517,7 @@ export default function TimeOffPage() {
                         <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
                           <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
                           <p className="text-xs text-slate-500 leading-relaxed">
-                            Advance leave is only available to contractors who have <strong>no regular PTO or sick leave balance</strong>. This contractor has an existing leave balance and is not eligible for advance leave.
+                            Advance leave becomes available once a contractor&apos;s available PTO or Sick Leave balance drops <strong>below 8 hours</strong>. This contractor currently has 8+ hours available in {isRowIndia ? "Sick Leave" : "both PTO and Sick Leave"}, so advance leave isn&apos;t needed.
                           </p>
                         </div>
                       ) : (
@@ -513,12 +526,12 @@ export default function TimeOffPage() {
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
                               <select
-                                value={editLeaveType}
+                                value={effectiveLeaveType}
                                 onChange={(e) => { setEditLeaveType(e.target.value as typeof editLeaveType); setEditHours(""); }}
                                 className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                               >
-                                <option value="Advance Sick Leave">Advance Sick Leave</option>
-                                {!isRowIndia && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
+                                {sickAdvanceEligible && <option value="Advance Sick Leave">Advance Sick Leave</option>}
+                                {ptoAdvanceEligible && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
                               </select>
                             </div>
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 col-span-2">
@@ -551,32 +564,11 @@ export default function TimeOffPage() {
                     </div>
                   </>);
                 })() : modalTab === "override" ? (() => {
-                  async function handleOverrideSubmit() {
+                  // Actually creates the override — split out from the validation/
+                  // duplicate-check above it so the "Apply Anyway" button on the
+                  // duplicate-warning prompt can call straight through to it.
+                  async function submitOverride() {
                     if (!selectedRow) return;
-                    if (!overrideStartDate || !overrideEndDate) {
-                      setOverrideError("Start Date and End Date are required.");
-                      return;
-                    }
-                    if (new Date(overrideEndDate) < new Date(overrideStartDate)) {
-                      setOverrideError("End Date must be on or after Start Date.");
-                      return;
-                    }
-                    const requiredHours = leaveTypeHours(overrideType);
-                    const overrideBucket = leaveBucketFor(overrideType);
-                    const availableHours =
-                      overrideBucket === "pto" ? selectedRow.ptoAvailable :
-                      overrideBucket === "specialLeave" ? selectedRow.specialLeaveAvailable :
-                      selectedRow.sickLeaveAvailable;
-                    if (requiredHours > 0 && availableHours < requiredHours) {
-                      const leaveLabel =
-                        overrideBucket === "pto" ? "PTO" :
-                        overrideBucket === "specialLeave" ? "Special Leave Credits" :
-                        "Sick Leave";
-                      setOverrideBlocked(
-                        `${leaveLabel} Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
-                      );
-                      return;
-                    }
                     setOverrideError(""); setOverrideSuccess("");
                     setOverrideSubmitting(true);
                     const result = await createLeaveOverride({
@@ -605,6 +597,58 @@ export default function TimeOffPage() {
                     setLeaveRequests((prev) => [req, ...prev]);
                     setOverrideSuccess("Leave override created and applied.");
                     setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason("");
+                  }
+
+                  async function handleOverrideSubmit(skipDuplicateCheck = false) {
+                    if (!selectedRow) return;
+                    if (!overrideStartDate || !overrideEndDate) {
+                      setOverrideError("Start Date and End Date are required.");
+                      return;
+                    }
+                    if (new Date(overrideEndDate) < new Date(overrideStartDate)) {
+                      setOverrideError("End Date must be on or after Start Date.");
+                      return;
+                    }
+                    const requiredHours = leaveTypeHours(overrideType);
+                    const overrideBucket = leaveBucketFor(overrideType);
+                    const availableHours =
+                      overrideBucket === "pto" ? selectedRow.ptoAvailable :
+                      overrideBucket === "specialLeave" ? selectedRow.specialLeaveAvailable :
+                      selectedRow.sickLeaveAvailable;
+                    if (requiredHours > 0 && availableHours < requiredHours) {
+                      const leaveLabel =
+                        overrideBucket === "pto" ? "PTO" :
+                        overrideBucket === "specialLeave" ? "Special Leave Credits" :
+                        "Sick Leave";
+                      setOverrideBlocked(
+                        `${leaveLabel} Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
+                      );
+                      return;
+                    }
+
+                    // Warn (rather than block outright) when this contractor already
+                    // has a non-rejected PTO/Sick Leave request overlapping these
+                    // dates — an admin override for the same days is very likely a
+                    // duplicate, but they may still need to apply it (e.g. correcting
+                    // a prior entry), so let them confirm instead of hard-blocking.
+                    if (!skipDuplicateCheck && (overrideBucket === "pto" || overrideBucket === "sickLeave")) {
+                      const conflict = leaveRequests.find((r) =>
+                        r.email === selectedRow.email &&
+                        r.status !== "Rejected" &&
+                        leaveBucketFor(r.type) === overrideBucket &&
+                        r.startDate <= overrideEndDate &&
+                        r.endDate >= overrideStartDate
+                      );
+                      if (conflict) {
+                        setOverrideDuplicateWarning(
+                          `This contractor already has a ${conflict.status.toLowerCase()} ${conflict.type} request from ${fmtDate(conflict.startDate)} to ${fmtDate(conflict.endDate)} that overlaps these dates. Apply this override anyway?`
+                        );
+                        setConfirmOverrideAnyway(() => () => handleOverrideSubmit(true));
+                        return;
+                      }
+                    }
+
+                    await submitOverride();
                   }
 
                   return (
@@ -672,7 +716,7 @@ export default function TimeOffPage() {
                       </div>
                       {overrideError && <p className="text-xs font-medium text-red-600">{overrideError}</p>}
                       {overrideSuccess && <p className="text-xs font-medium text-emerald-600">{overrideSuccess}</p>}
-                      <button onClick={handleOverrideSubmit} disabled={overrideSubmitting || !overrideStartDate || !overrideEndDate}
+                      <button onClick={() => handleOverrideSubmit()} disabled={overrideSubmitting || !overrideStartDate || !overrideEndDate}
                         className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                         <LuCircleCheck size={15} strokeWidth={2} /> {overrideSubmitting ? "Applying…" : "Apply Leave Override"}
                       </button>
@@ -772,6 +816,55 @@ export default function TimeOffPage() {
             >
               OK
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate PTO/Sick Leave request warning for Leave Override — a soft
+          confirmation (unlike the hard-blocking Insufficient Balance dialog
+          above) since an admin may still need to apply it, e.g. to correct
+          an existing entry. */}
+      {overrideDuplicateWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => { setOverrideDuplicateWarning(""); setConfirmOverrideAnyway(null); }}
+          />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={() => { setOverrideDuplicateWarning(""); setConfirmOverrideAnyway(null); }}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-500">
+                <LuCircleAlert size={20} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Possible Duplicate Request</h3>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">{overrideDuplicateWarning}</p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={() => { setOverrideDuplicateWarning(""); setConfirmOverrideAnyway(null); }}
+                className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-600 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const proceed = confirmOverrideAnyway;
+                  setOverrideDuplicateWarning("");
+                  setConfirmOverrideAnyway(null);
+                  proceed?.();
+                }}
+                className="flex-1 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors"
+              >
+                Apply Anyway
+              </button>
+            </div>
           </div>
         </div>
       )}

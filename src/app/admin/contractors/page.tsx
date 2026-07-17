@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import {
   LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight,
   LuPencil, LuChevronRight as LuBreadcrumb,
-  LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle,
+  LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle, LuSearch,
 } from "react-icons/lu";
 import type { Contractor, FilterRule } from "./types";
 import { fmtBalance } from "@/lib/timeOffBalances";
@@ -27,8 +27,8 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 type CacheEntry = { rows: Contractor[]; total: number; key: string };
 let pageCache: CacheEntry | null = null;
 
-function cacheKey(page: number, pageSize: number, country: string, status: string, rules: FilterRule[]) {
-  return `${page}|${pageSize}|${country}|${status}|${JSON.stringify(rules)}`;
+function cacheKey(page: number, pageSize: number, country: string, status: string, rules: FilterRule[], search: string) {
+  return `${page}|${pageSize}|${country}|${status}|${JSON.stringify(rules)}|${search}`;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -145,6 +145,11 @@ export default function ContractorsPage() {
   const [country, setCountry]     = useState(() => searchParams.get("country") || "All Countries");
   const [status, setStatus]       = useState("All Statuses");
   const [activeRules, setActiveRules] = useState<FilterRule[]>([]);
+  // nameSearchInput updates immediately as the user types; nameSearch (the
+  // value actually sent to the server) is debounced so each keystroke
+  // doesn't trigger its own round trip.
+  const [nameSearchInput, setNameSearchInput] = useState("");
+  const [nameSearch, setNameSearch] = useState("");
 
   const [showAdd, setShowAdd]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
@@ -157,10 +162,10 @@ export default function ContractorsPage() {
   const fetchIdRef = useRef(0);
 
   const loadPage = useCallback(async (
-    p: number, ps: number, c: string, s: string, rules: FilterRule[],
+    p: number, ps: number, c: string, s: string, rules: FilterRule[], search: string,
     { force = false } = {}
   ) => {
-    const key = cacheKey(p, ps, c, s, rules);
+    const key = cacheKey(p, ps, c, s, rules, search);
     // Serve from cache unless forced (e.g. after add/edit/import)
     if (!force && pageCache?.key === key) {
       setRows(pageCache.rows);
@@ -171,7 +176,7 @@ export default function ContractorsPage() {
     const id = ++fetchIdRef.current;
     setLoading(true);
     try {
-      const params: FetchParams = { page: p, pageSize: ps, country: c, status: s, rules };
+      const params: FetchParams = { page: p, pageSize: ps, country: c, status: s, rules, search };
       const result = await fetchContractorsPage(params);
       if (id !== fetchIdRef.current) return; // stale
       pageCache = { rows: result.rows, total: result.total, key };
@@ -182,9 +187,19 @@ export default function ContractorsPage() {
     }
   }, []);
 
+  // Debounce the search box — wait for a pause in typing before it feeds
+  // into nameSearch (and therefore the server fetch below).
   useEffect(() => {
-    loadPage(page, pageSize, country, status, activeRules);
-  }, [page, pageSize, country, status, activeRules, loadPage]);
+    const t = setTimeout(() => {
+      setNameSearch(nameSearchInput);
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [nameSearchInput]);
+
+  useEffect(() => {
+    loadPage(page, pageSize, country, status, activeRules, nameSearch);
+  }, [page, pageSize, country, status, activeRules, nameSearch, loadPage]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -201,12 +216,16 @@ export default function ContractorsPage() {
     setPage(1);
   }
 
-  const reset = () => changeFilter("All Countries", "All Statuses", []);
+  const reset = () => {
+    changeFilter("All Countries", "All Statuses", []);
+    setNameSearchInput("");
+    setNameSearch("");
+  };
 
   async function handleExport() {
     setExporting(true);
     try {
-      const all = await fetchAllContractors({ country, status, rules: activeRules });
+      const all = await fetchAllContractors({ country, status, rules: activeRules, search: nameSearch });
       exportCSV(all);
     } finally {
       setExporting(false);
@@ -219,7 +238,7 @@ export default function ContractorsPage() {
       await createContractor(c);
       pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules, { force: true });
+      await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
     } finally {
       setSaving(false);
     }
@@ -230,7 +249,7 @@ export default function ContractorsPage() {
     try {
       await updateContractor(c);
       pageCache = null;
-      await loadPage(page, pageSize, country, status, activeRules, { force: true });
+      await loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true });
     } finally {
       setSaving(false);
     }
@@ -242,7 +261,7 @@ export default function ContractorsPage() {
       await Promise.all(contractors.map((c) => createContractor(c)));
       pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules, { force: true });
+      await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
     } finally {
       setSaving(false);
     }
@@ -258,7 +277,7 @@ export default function ContractorsPage() {
       // If we just deleted the last row on this page, go back one
       const newPage = rows.length === 1 && page > 1 ? page - 1 : page;
       setPage(newPage);
-      await loadPage(newPage, pageSize, country, status, activeRules, { force: true });
+      await loadPage(newPage, pageSize, country, status, activeRules, nameSearch, { force: true });
     } finally {
       setDeleting(false);
     }
@@ -334,7 +353,7 @@ export default function ContractorsPage() {
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <button
-              onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, { force: true }); }}
+              onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true }); }}
               disabled={loading}
               title="Refresh"
               className="inline-flex items-center gap-2 px-3 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
@@ -370,6 +389,17 @@ export default function ContractorsPage() {
         <div className="mb-4">
           <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center sticky top-16 z-20">
             <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
+
+            <div className="relative">
+              <LuSearch size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={nameSearchInput}
+                onChange={(e) => setNameSearchInput(e.target.value)}
+                placeholder="Search name..."
+                className="text-sm border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 w-48"
+              />
+            </div>
 
             <select
               value={country}
@@ -412,7 +442,7 @@ export default function ContractorsPage() {
               )}
             </button>
 
-            {(country !== "All Countries" || status !== "All Statuses" || activeRules.length > 0) && (
+            {(country !== "All Countries" || status !== "All Statuses" || activeRules.length > 0 || nameSearchInput !== "") && (
               <button
                 onClick={reset}
                 className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
@@ -489,7 +519,7 @@ export default function ContractorsPage() {
                 ) : rows.length === 0 ? (
                   <tr>
                     <td colSpan={COLS.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 300 }}>
-                      {total === 0 && country === "All Countries" && status === "All Statuses" && activeRules.length === 0
+                      {total === 0 && country === "All Countries" && status === "All Statuses" && activeRules.length === 0 && nameSearch === ""
                         ? <>No contractors yet.<br />Click <strong>Add Contractor</strong> to get started.</>
                         : "No contractors match your filters."
                       }
