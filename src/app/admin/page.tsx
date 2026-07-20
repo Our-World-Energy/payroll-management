@@ -3,11 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { LuTrendingUp, LuTriangleAlert, LuX, LuClock } from "react-icons/lu";
-import { getDashboardMetrics } from "@/lib/data";
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
-import { fetchAllContractors } from "./contractors/actions";
+import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 
 type AbsentRow = {
@@ -22,6 +21,13 @@ type LateRow = {
   department: string;
   date: string;
   detail: string;
+};
+
+type PtoRow = {
+  name: string;
+  department: string;
+  date: string;
+  status: string;
 };
 
 // contractor_profiles.shiftHours is free text like "9:00 AM to 6:00 PM"
@@ -58,11 +64,12 @@ const EMPTY_COUNTRY_COUNTS: CountryCounts = {
 };
 
 export default function AdminPage() {
-  const m = getDashboardMetrics();
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [showLateModal, setShowLateModal] = useState(false);
+  const [showPtoModal, setShowPtoModal] = useState(false);
   const [absentRows, setAbsentRows] = useState<AbsentRow[]>([]);
   const [lateRows, setLateRows] = useState<LateRow[]>([]);
+  const [ptoRows, setPtoRows] = useState<PtoRow[]>([]);
   const [countryCounts, setCountryCounts] = useState<CountryCounts>(EMPTY_COUNTRY_COUNTS);
 
   // Live per-country Active headcounts (independent of the absent/late gate
@@ -102,10 +109,11 @@ export default function AdminPage() {
       ].join("-");
 
       try {
-        const [entriesRes, contractors, dailyLogRes] = await Promise.all([
+        const [entriesRes, contractors, dailyLogRes, leaveRequests] = await Promise.all([
           fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+          fetchAllLeaveRequestsAdmin().catch(() => []),
         ]);
 
         const minutesByEmail = new Map<string, number>();
@@ -122,13 +130,26 @@ export default function AdminPage() {
 
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
 
+        // If a contractor with no logged time today has an approved leave
+        // request covering today, that's why they're absent — label it PTO
+        // or Sick Leave instead of a bare "Absent" (Half Day/Unpaid/Special
+        // Leave requests are left as "Absent" since they weren't asked for).
+        function absenceStatusFor(email: string): string {
+          const match = leaveRequests.find((r) =>
+            r.status === "Approved" && r.email.trim().toLowerCase() === email && todayLocal >= r.startDate && todayLocal <= r.endDate
+          );
+          if (match?.type === "PTO") return "PTO";
+          if (match?.type === "Sick Leave") return "Sick Leave";
+          return "Absent";
+        }
+
         // Absent = no actual Worksnap time logged today at all (matches the same
         // "Worksnap Actual Time" total shown in Attendance Review) — checked by
         // total minutes, not just whether a (possibly zero-duration) entry exists.
         setAbsentRows(
           activeContractors
             .filter((c) => (minutesByEmail.get(c.email!.trim().toLowerCase()) ?? 0) === 0)
-            .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: "Absent" }))
+            .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: absenceStatusFor(c.email!.trim().toLowerCase()) }))
         );
 
         // Late Today only applies to Fixed shift contractors — real check:
@@ -161,6 +182,25 @@ export default function AdminPage() {
           }
         }
         setLateRows(lateRows);
+
+        // PTO/Sick Leave Today — every active contractor with an Approved
+        // PTO or Sick Leave request (full or half day) covering today,
+        // sourced straight from Time Off Management, independent of whether
+        // they also logged Worksnap time today.
+        const ptoRows: PtoRow[] = [];
+        for (const c of activeContractors) {
+          const email = c.email!.trim().toLowerCase();
+          const match = leaveRequests.find((r) =>
+            r.status === "Approved" &&
+            r.email.trim().toLowerCase() === email &&
+            todayLocal >= r.startDate && todayLocal <= r.endDate &&
+            (r.type === "PTO" || r.type === "PTO Half Day" || r.type === "Sick Leave" || r.type === "Sick Leave Half Day")
+          );
+          if (match) {
+            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "PTO" : "Sick Leave" });
+          }
+        }
+        setPtoRows(ptoRows);
       } catch {
         // silently fail — keep empty lists
       }
@@ -176,7 +216,6 @@ export default function AdminPage() {
     { label: "India",                    value: countryCounts.india,       sub: "Tech & Engineering",     href: "/admin/contractors?country=India",       highlight: false },
     { label: "Guatemala",                value: countryCounts.guatemala,   sub: "Regional Operations",    href: "/admin/contractors?country=Guatemala",   highlight: false },
     { label: "Colombia",                 value: countryCounts.colombia,    sub: "Regional Operations",    href: "/admin/contractors?country=Colombia",    highlight: false },
-    { label: "PTO Today",                value: m.ptoToday,                sub: "Approved requests",      href: "/admin/time-off",    highlight: false, accent: true },
   ];
 
   return (
@@ -204,17 +243,6 @@ export default function AdminPage() {
               </Link>
             );
           }
-          if (card.accent) {
-            return (
-              <Link key={card.label} href={card.href} className="bg-blue-50 hover:bg-blue-100 p-2 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
-                <div>
-                  <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">{card.label}</p>
-                  <p className="text-xl font-bold text-blue-700 mt-0.5">{card.value}</p>
-                </div>
-                <p className="mt-1 text-[10px] text-blue-400">{card.sub}</p>
-              </Link>
-            );
-          }
           return (
             <Link key={card.label} href={card.href} className="bg-white hover:bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer">
               <div>
@@ -225,6 +253,18 @@ export default function AdminPage() {
             </Link>
           );
         })}
+
+        {/* PTO/Sick Leave Today */}
+        <button
+          onClick={() => setShowPtoModal(true)}
+          className="text-left bg-blue-50 hover:bg-blue-100 p-2 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer"
+        >
+          <div>
+            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">PTO/Sick Leave</p>
+            <p className="text-xl font-bold text-blue-700 mt-0.5">{ptoRows.length}</p>
+          </div>
+          <p className="mt-1 text-[10px] text-blue-400">Approved today</p>
+        </button>
 
         {/* Absent Today + Late Today — stacked in one grid cell */}
         <div className="flex flex-col gap-1.5">
@@ -309,7 +349,9 @@ export default function AdminPage() {
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.department}</td>
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
                       <td className="px-5 py-3">
-                        <span className="px-2 py-1 rounded-md text-[11px] font-bold uppercase bg-red-100 text-red-700">
+                        <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${
+                          row.status === "Absent" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"
+                        }`}>
                           {row.status}
                         </span>
                       </td>
@@ -375,6 +417,63 @@ export default function AdminPage() {
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end bg-slate-50">
               <button onClick={() => setShowLateModal(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PTO/Sick Leave Today Modal */}
+      {showPtoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPtoModal(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between px-6 py-5 bg-blue-600">
+              <div>
+                <h3 className="text-lg font-bold text-white">PTO/Sick Leave Today</h3>
+                <p className="text-sm text-blue-100 mt-0.5">{ptoRows.length} contractor{ptoRows.length !== 1 ? "s" : ""} on approved leave today</p>
+              </div>
+              <button
+                onClick={() => setShowPtoModal(false)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-blue-100 transition-colors hover:bg-blue-700 hover:text-white"
+              >
+                <LuX size={18} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="overflow-y-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
+                  <tr>
+                    {["Name", "Department", "Date", "Status"].map((h) => (
+                      <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {ptoRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved PTO or Sick Leave today.</td>
+                    </tr>
+                  ) : ptoRows.map((row, i) => (
+                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">{row.name}</td>
+                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.department}</td>
+                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
+                      <td className="px-5 py-3">
+                        <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${
+                          row.status === "PTO" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                        }`}>
+                          {row.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end bg-slate-50">
+              <button onClick={() => setShowPtoModal(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
                 Close
               </button>
             </div>

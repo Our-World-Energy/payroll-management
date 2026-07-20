@@ -6,6 +6,13 @@ import { prisma } from "@/lib/prisma";
  * Feeds the Action popup's per-day editor.
  *
  *   GET /api/attendance/day-status?userId=1051389&week=2026-05-31
+ *
+ * Bulk mode (no userId, from/to instead of week) returns every contractor's
+ * saved per-day Evaluated Regular Time in the range — feeds the Payroll
+ * Voucher's Sun→Sat grid, which needs the reviewed/adjusted figure rather
+ * than raw Worksnap minutes.
+ *
+ *   GET /api/attendance/day-status?from=2026-06-21&to=2026-06-27
  */
 
 export const runtime = "nodejs";
@@ -19,6 +26,19 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const userId = Number(url.searchParams.get("userId"));
   const week = url.searchParams.get("week");
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+
+  if (!userId && from && to) {
+    const rows = await prisma.attendanceDayStatus.findMany({
+      where: { date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } },
+      select: { email: true, date: true, evaluatedRegularMinutes: true },
+    });
+    return Response.json({
+      days: rows.map((r) => ({ email: r.email, date: toISODate(r.date), evaluatedRegularMinutes: r.evaluatedRegularMinutes })),
+    });
+  }
+
   if (!userId || !week) {
     return Response.json({ error: "userId and week are required" }, { status: 400 });
   }

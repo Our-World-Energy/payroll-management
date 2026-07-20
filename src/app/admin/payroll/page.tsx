@@ -85,7 +85,9 @@ type PayrollRow = {
   deductions: number | null;
   net: number | null;
   status: "Reviewed" | "For Review" | "No Activity";
-  dailyMinutes: Record<string, number>;
+  // Saved per-day Evaluated Regular Time (not raw Worksnap minutes) — feeds
+  // the voucher's Sun→Sat grid.
+  evaluatedRegularDailyMinutes: Record<string, number>;
   bonus: number;
   misc: number;
   retroPay: number;
@@ -196,10 +198,11 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult, holidays, leaveRequests, adjustments] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
+          fetch(`/api/attendance/day-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { days: [] })),
           fetchHolidays().catch(() => [] as Holiday[]),
           fetchAllLeaveRequestsAdmin().catch(() => []),
           fetchPayrollAdjustments(rangeFrom).catch(() => []),
@@ -208,18 +211,23 @@ export default function PayrollPage() {
         if (!isMounted) return;
 
         const minutesByEmail = new Map<string, number>();
-        const dailyMinutesByEmail = new Map<string, Record<string, number>>();
         for (const e of (entriesResult.entries ?? [])) {
           const email = String(e.email ?? "").trim().toLowerCase();
           const durationMins = (e as { durationMins?: number }).durationMins ?? 0;
           if (!email) continue;
           minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + durationMins);
-          const entryDate = String((e as { entryDate?: string }).entryDate ?? "").slice(0, 10);
-          if (entryDate) {
-            const days = dailyMinutesByEmail.get(email) ?? {};
-            days[entryDate] = (days[entryDate] ?? 0) + durationMins;
-            dailyMinutesByEmail.set(email, days);
-          }
+        }
+
+        // Saved per-day Evaluated Regular Time (not raw Worksnap minutes) for
+        // the voucher's Sun→Sat grid — reflects admin review/adjustments.
+        const evaluatedRegularDailyMinutesByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; evaluatedRegularMinutes?: number }>) {
+          const email = String(d.email ?? "").trim().toLowerCase();
+          const date = String(d.date ?? "").slice(0, 10);
+          if (!email || !date) continue;
+          const days = evaluatedRegularDailyMinutesByEmail.get(email) ?? {};
+          days[date] = (days[date] ?? 0) + (d.evaluatedRegularMinutes ?? 0);
+          evaluatedRegularDailyMinutesByEmail.set(email, days);
         }
 
         type SavedWeekStatus = {
@@ -305,7 +313,7 @@ export default function PayrollPage() {
               deductions,
               net,
               status: isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
-              dailyMinutes: dailyMinutesByEmail.get(email) ?? {},
+              evaluatedRegularDailyMinutes: evaluatedRegularDailyMinutesByEmail.get(email) ?? {},
               bonus: adjustmentByEmail.get(email)?.bonus ?? 0,
               misc: adjustmentByEmail.get(email)?.misc ?? 0,
               retroPay: adjustmentByEmail.get(email)?.retroPay ?? 0,
@@ -691,7 +699,7 @@ function PayrollVoucherModal({
                     {weekDates.map((date, i) => {
                       const label = DAY_LABELS[i];
                       const isOff = restDayLabels.has(label);
-                      const hours = (row.dailyMinutes[date] ?? 0) / 60;
+                      const hours = (row.evaluatedRegularDailyMinutes[date] ?? 0) / 60;
                       return (
                         <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
                           {isOff ? "OFF" : hours.toFixed(2)}
@@ -730,10 +738,10 @@ function PayrollVoucherModal({
             <div className="space-y-2 text-xs">
               {[
                 ["REG HRS Pay", regPay],
-                ["REG OT (125%)", regOtPay],
-                ["RD OT (150%)", rdOtPay],
+                ["REG OT", regOtPay],
+                ["RD OT", rdOtPay],
                 ["US HOLIDAY PAY", usHolidayPay],
-                ["HO OT (225%)", hoOtPay],
+                ["HO OT", hoOtPay],
                 ["LOCAL HOLIDAY PAY", localHolidayPay],
                 ["PTO", ptoPay],
                 ["Bonus", bonus],
@@ -760,7 +768,6 @@ function PayrollVoucherModal({
               {[
                 ["Cash Advance", cashAdvance],
                 ["HMO Premium", hmo],
-                ["Tax", tax],
               ].map(([label, value]) => (
                 <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
                   <span className="text-slate-500">{label}</span>
