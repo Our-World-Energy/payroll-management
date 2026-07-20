@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { fetchOrgConfig, seedOrgDefaults } from "@/app/admin/settings/actions";
 
-// ── Default office locations ──────────────────────────────────────────────────
+// ── Fallback defaults (used only on first seed) ───────────────────────────────
 const DEFAULT_OFFICE_LOCATIONS = [
   "PGS [AZ, Yuma]", "OWE [MA, Auburn]", "Solar Godz [FL, Jacksonville]",
   "eEquals [VA, Richmond]", "Allied Energy Solutions [ME, Brunswick]", "Adrian Martinez",
@@ -24,7 +25,6 @@ const DEFAULT_OFFICE_LOCATIONS = [
   "Allied Energy Solutions [MA, Mansfield]", "DT Solar [TX, Brownsville]",
 ];
 
-// ── Default dept → sub → roles tree ──────────────────────────────────────────
 export type DeptTree = Record<string, Record<string, string[]>>;
 
 const DEFAULT_DEPT_TREE: DeptTree = {
@@ -60,6 +60,8 @@ const DEFAULT_DEPT_TREE: DeptTree = {
 
 const DEFAULT_MANAGERS = ["Colten Warnock", "Dillard Blanton"];
 
+// ── Context type ──────────────────────────────────────────────────────────────
+
 type ContractorConfig = {
   officeLocations: string[];
   setOfficeLocations: (v: string[]) => void;
@@ -67,6 +69,8 @@ type ContractorConfig = {
   setDeptTree: (v: DeptTree) => void;
   managers: string[];
   setManagers: (v: string[]) => void;
+  configLoaded: boolean;
+  reloadConfig: () => Promise<void>;
 };
 
 const ContractorConfigContext = createContext<ContractorConfig>({
@@ -76,15 +80,53 @@ const ContractorConfigContext = createContext<ContractorConfig>({
   setDeptTree: () => {},
   managers: DEFAULT_MANAGERS,
   setManagers: () => {},
+  configLoaded: false,
+  reloadConfig: async () => {},
 });
 
 export function ContractorConfigProvider({ children }: { children: React.ReactNode }) {
-  const [officeLocations, setOfficeLocations] = useState<string[]>(DEFAULT_OFFICE_LOCATIONS);
-  const [deptTree, setDeptTree]               = useState<DeptTree>(DEFAULT_DEPT_TREE);
-  const [managers, setManagers]               = useState<string[]>(DEFAULT_MANAGERS);
+  const [officeLocations, setOfficeLocations] = useState<string[]>([]);
+  const [deptTree, setDeptTree]               = useState<DeptTree>({});
+  const [managers, setManagers]               = useState<string[]>([]);
+  const [configLoaded, setConfigLoaded]       = useState(false);
+
+  const reloadConfig = useCallback(async () => {
+    try {
+      const cfg = await fetchOrgConfig();
+
+      // If DB is empty (first run), seed from defaults then reload
+      if (cfg.officeLocations.length === 0 && cfg.managers.length === 0 && Object.keys(cfg.deptTree).length === 0) {
+        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE);
+        const seeded = await fetchOrgConfig();
+        setOfficeLocations(seeded.officeLocations);
+        setManagers(seeded.managers);
+        setDeptTree(seeded.deptTree);
+      } else {
+        setOfficeLocations(cfg.officeLocations);
+        setManagers(cfg.managers);
+        setDeptTree(cfg.deptTree);
+      }
+    } catch {
+      // Fall back to hardcoded defaults if DB is unreachable
+      setOfficeLocations(DEFAULT_OFFICE_LOCATIONS);
+      setManagers(DEFAULT_MANAGERS);
+      setDeptTree(DEFAULT_DEPT_TREE);
+    }
+    setConfigLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    reloadConfig();
+  }, [reloadConfig]);
 
   return (
-    <ContractorConfigContext.Provider value={{ officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers }}>
+    <ContractorConfigContext.Provider value={{
+      officeLocations, setOfficeLocations,
+      deptTree, setDeptTree,
+      managers, setManagers,
+      configLoaded,
+      reloadConfig,
+    }}>
       {children}
     </ContractorConfigContext.Provider>
   );

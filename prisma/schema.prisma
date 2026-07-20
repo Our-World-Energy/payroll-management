@@ -422,6 +422,61 @@ model PayrollAdjustment {
   @@map("payroll_adjustments")
 }
 
+/// Org-wide settings: office locations list
+model OrgOfficeLocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("org_office_locations")
+}
+
+/// Org-wide settings: manager names list
+model OrgManager {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("org_managers")
+}
+
+/// Org-wide settings: department names
+model OrgDepartment {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  subDepartments OrgSubDepartment[]
+
+  @@map("org_departments")
+}
+
+/// Org-wide settings: sub-departments linked to a department
+model OrgSubDepartment {
+  id           String        @id @default(uuid()) @db.Uuid
+  departmentId String        @db.Uuid
+  department   OrgDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  name         String
+  createdAt    DateTime      @default(now())
+
+  roles OrgRole[]
+
+  @@unique([departmentId, name])
+  @@map("org_sub_departments")
+}
+
+/// Org-wide settings: roles linked to a sub-department
+model OrgRole {
+  id              String           @id @default(uuid()) @db.Uuid
+  subDepartmentId String           @db.Uuid
+  subDepartment   OrgSubDepartment @relation(fields: [subDepartmentId], references: [id], onDelete: Cascade)
+  name            String
+  createdAt       DateTime         @default(now())
+
+  @@unique([subDepartmentId, name])
+  @@map("org_roles")
+}
+
 /// Per-employee per-DAY attendance review snapshot (admin picks the date) —
 /// mirrors every column of the Attendance Review modal's daily table so a
 /// reopened review always matches exactly what was last saved.

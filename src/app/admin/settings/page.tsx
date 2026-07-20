@@ -1,14 +1,42 @@
 "use client";
 
 import { useState } from "react";
-import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle } from "react-icons/lu";
+import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader } from "react-icons/lu";
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
+import {
+  addOfficeLocation, removeOfficeLocation,
+  addManager, removeManager,
+  addDepartment, removeDepartment,
+  addSubDepartment, removeSubDepartment,
+  addRole, removeRole,
+} from "./actions";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer";
 
 export default function SettingsPage() {
   const { officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers } = useContractorConfig();
+
+  // ── Busy/error state ──────────────────────────────────────────────────────
+  const [busy, setBusy]     = useState(false);
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  async function run(fn: () => Promise<{ ok: boolean; error?: string }>, revertFn?: () => void) {
+    setBusy(true);
+    setErrMsg(null);
+    try {
+      const res = await fn();
+      if (!res.ok) {
+        setErrMsg(res.error ?? "Unknown error");
+        revertFn?.();
+      }
+    } catch (e) {
+      setErrMsg(String(e));
+      revertFn?.();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // ── Confirm delete popup ──────────────────────────────────────────────────
   type ConfirmTarget = { label: string; onConfirm: () => void };
@@ -18,85 +46,105 @@ export default function SettingsPage() {
     setConfirm({ label, onConfirm });
   }
 
-  // ── Office location state ─────────────────────────────────────────────────
+  // ── Office location handlers ──────────────────────────────────────────────
   const [newLocation, setNewLocation] = useState("");
 
-  function addLocation() {
+  async function handleAddLocation() {
     const v = newLocation.trim();
     if (!v || officeLocations.includes(v)) return;
+    const prev = officeLocations;
     setOfficeLocations([...officeLocations, v]);
     setNewLocation("");
+    await run(() => addOfficeLocation(v), () => setOfficeLocations(prev));
   }
 
-  function removeLocation(loc: string) {
+  async function handleRemoveLocation(loc: string) {
+    const prev = officeLocations;
     setOfficeLocations(officeLocations.filter((l) => l !== loc));
+    await run(() => removeOfficeLocation(loc), () => setOfficeLocations(prev));
   }
 
-  // ── Manager state ─────────────────────────────────────────────────────────
+  // ── Manager handlers ──────────────────────────────────────────────────────
   const [newManager, setNewManager] = useState("");
 
-  function addManager() {
+  async function handleAddManager() {
     const v = newManager.trim();
     if (!v || managers.includes(v)) return;
+    const prev = managers;
     setManagers([...managers, v]);
     setNewManager("");
+    await run(() => addManager(v), () => setManagers(prev));
   }
 
-  function removeManager(m: string) {
+  async function handleRemoveManager(m: string) {
+    const prev = managers;
     setManagers(managers.filter((x) => x !== m));
+    await run(() => removeManager(m), () => setManagers(prev));
   }
 
-  // ── Role management state ─────────────────────────────────────────────────
-  const [expandedDept, setExpandedDept]   = useState<string | null>(null);
-  const [expandedSub,  setExpandedSub]    = useState<string | null>(null);
-  const [newDept,      setNewDept]        = useState("");
-  const [newSub,       setNewSub]         = useState<Record<string, string>>({});
-  const [newRole,      setNewRole]        = useState<Record<string, string>>({});
+  // ── Dept/sub/role state ───────────────────────────────────────────────────
+  const [expandedDept, setExpandedDept] = useState<string | null>(null);
+  const [expandedSub,  setExpandedSub]  = useState<string | null>(null);
+  const [newDept,      setNewDept]      = useState("");
+  const [newSub,       setNewSub]       = useState<Record<string, string>>({});
+  const [newRole,      setNewRole]      = useState<Record<string, string>>({});
 
-  function addDepartment() {
+  async function handleAddDepartment() {
     const v = newDept.trim();
     if (!v || deptTree[v]) return;
+    const prev = deptTree;
     setDeptTree({ ...deptTree, [v]: {} });
     setNewDept("");
+    await run(() => addDepartment(v), () => setDeptTree(prev));
   }
 
-  function removeDepartment(dept: string) {
+  async function handleRemoveDepartment(dept: string) {
+    const prev = deptTree;
     const next: DeptTree = { ...deptTree };
     delete next[dept];
     setDeptTree(next);
     if (expandedDept === dept) setExpandedDept(null);
+    await run(() => removeDepartment(dept), () => setDeptTree(prev));
   }
 
-  function addSubDepartment(dept: string) {
+  async function handleAddSubDepartment(dept: string) {
     const v = (newSub[dept] ?? "").trim();
     if (!v || deptTree[dept]?.[v]) return;
+    const prev = deptTree;
     setDeptTree({ ...deptTree, [dept]: { ...deptTree[dept], [v]: [] } });
     setNewSub({ ...newSub, [dept]: "" });
+    await run(() => addSubDepartment(dept, v), () => setDeptTree(prev));
   }
 
-  function removeSubDepartment(dept: string, sub: string) {
+  async function handleRemoveSubDepartment(dept: string, sub: string) {
+    const prev = deptTree;
     const next: DeptTree = { ...deptTree, [dept]: { ...deptTree[dept] } };
     delete next[dept][sub];
     setDeptTree(next);
     if (expandedSub === `${dept}::${sub}`) setExpandedSub(null);
+    await run(() => removeSubDepartment(dept, sub), () => setDeptTree(prev));
   }
 
-  function addRole(dept: string, sub: string) {
+  async function handleAddRole(dept: string, sub: string) {
     const key = `${dept}::${sub}`;
     const v   = (newRole[key] ?? "").trim();
     if (!v || deptTree[dept]?.[sub]?.includes(v)) return;
+    const prev = deptTree;
     setDeptTree({
       ...deptTree,
       [dept]: { ...deptTree[dept], [sub]: [...(deptTree[dept][sub] ?? []), v] },
     });
     setNewRole({ ...newRole, [key]: "" });
+    await run(() => addRole(dept, sub, v), () => setDeptTree(prev));
   }
 
-  function removeRole(dept: string, sub: string, role: string) {
+  async function handleRemoveRole(dept: string, sub: string, role: string) {
+    const prev = deptTree;
     setDeptTree({
       ...deptTree,
       [dept]: { ...deptTree[dept], [sub]: deptTree[dept][sub].filter((r) => r !== role) },
     });
+    await run(() => removeRole(dept, sub, role), () => setDeptTree(prev));
   }
 
   return (
@@ -119,10 +167,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setConfirm(null)}
-                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
+              <button onClick={() => setConfirm(null)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">
                 Cancel
               </button>
               <button
@@ -136,10 +181,25 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-      <div className="mb-2">
-        <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Settings</h2>
-        <p className="text-sm text-slate-500 mt-1">Manage organisation-wide configuration.</p>
+
+      <div className="mb-2 flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Settings</h2>
+          <p className="text-sm text-slate-500 mt-1">Manage organisation-wide configuration.</p>
+        </div>
+        {busy && (
+          <div className="flex items-center gap-2 text-sm text-slate-500">
+            <LuLoader size={15} className="animate-spin" />
+            Saving…
+          </div>
+        )}
       </div>
+
+      {errMsg && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">
+          {errMsg}
+        </div>
+      )}
 
       {/* Organisation */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -179,29 +239,24 @@ export default function SettingsPage() {
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{officeLocations.length} locations</span>
         </div>
         <div className="px-6 py-5 space-y-4">
-          {/* Add new */}
           <div className="flex gap-2">
             <input
               value={newLocation}
               onChange={(e) => setNewLocation(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addLocation()}
+              onKeyDown={(e) => e.key === "Enter" && handleAddLocation()}
               placeholder="e.g. OWE [NY, New York]"
               className={INPUT}
             />
-            <button
-              onClick={addLocation}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors"
-            >
-              <LuPlus size={15} strokeWidth={2.5} />
-              Add
+            <button onClick={handleAddLocation} disabled={busy}
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+              <LuPlus size={15} strokeWidth={2.5} />Add
             </button>
           </div>
-          {/* List */}
           <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
             {officeLocations.map((loc) => (
               <span key={loc} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 {loc}
-                <button onClick={() => askConfirm(loc, () => removeLocation(loc))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                <button onClick={() => askConfirm(loc, () => handleRemoveLocation(loc))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
                   <LuX size={13} strokeWidth={2.5} />
                 </button>
               </span>
@@ -224,23 +279,20 @@ export default function SettingsPage() {
             <input
               value={newManager}
               onChange={(e) => setNewManager(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addManager()}
+              onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
               placeholder="e.g. Jane Smith"
               className={INPUT}
             />
-            <button
-              onClick={addManager}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors"
-            >
-              <LuPlus size={15} strokeWidth={2.5} />
-              Add
+            <button onClick={handleAddManager} disabled={busy}
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+              <LuPlus size={15} strokeWidth={2.5} />Add
             </button>
           </div>
           <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
             {managers.map((m) => (
               <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
                 {m}
-                <button onClick={() => askConfirm(m, () => removeManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                <button onClick={() => askConfirm(m, () => handleRemoveManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
                   <LuX size={13} strokeWidth={2.5} />
                 </button>
               </span>
@@ -259,28 +311,22 @@ export default function SettingsPage() {
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{Object.keys(deptTree).length} departments</span>
         </div>
         <div className="px-6 py-5 space-y-3">
-          {/* Add department */}
           <div className="flex gap-2 mb-4">
             <input
               value={newDept}
               onChange={(e) => setNewDept(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addDepartment()}
+              onKeyDown={(e) => e.key === "Enter" && handleAddDepartment()}
               placeholder="New department name"
               className={INPUT}
             />
-            <button
-              onClick={addDepartment}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors"
-            >
-              <LuPlus size={15} strokeWidth={2.5} />
-              Add Dept
+            <button onClick={handleAddDepartment} disabled={busy}
+              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+              <LuPlus size={15} strokeWidth={2.5} />Add Dept
             </button>
           </div>
 
-          {/* Department list */}
           {Object.entries(deptTree).map(([dept, subs]) => (
             <div key={dept} className="border border-slate-200 rounded-xl overflow-hidden">
-              {/* Dept header */}
               <div className="flex items-center justify-between px-4 py-3 bg-slate-50">
                 <button
                   onClick={() => setExpandedDept(expandedDept === dept ? null : dept)}
@@ -290,29 +336,27 @@ export default function SettingsPage() {
                   {dept}
                   <span className="text-xs font-normal text-slate-400 ml-1">{Object.keys(subs).length} sub-dept{Object.keys(subs).length !== 1 ? "s" : ""}</span>
                 </button>
-                <button onClick={() => askConfirm(dept, () => removeDepartment(dept))} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
+                <button onClick={() => askConfirm(dept, () => handleRemoveDepartment(dept))} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
                   <LuX size={14} strokeWidth={2.5} />
                 </button>
               </div>
 
               {expandedDept === dept && (
                 <div className="px-4 py-3 space-y-3 border-t border-slate-100">
-                  {/* Add sub-dept */}
                   <div className="flex gap-2">
                     <input
                       value={newSub[dept] ?? ""}
                       onChange={(e) => setNewSub({ ...newSub, [dept]: e.target.value })}
-                      onKeyDown={(e) => e.key === "Enter" && addSubDepartment(dept)}
+                      onKeyDown={(e) => e.key === "Enter" && handleAddSubDepartment(dept)}
                       placeholder="New sub-department"
                       className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
-                    <button onClick={() => addSubDepartment(dept)}
-                      className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-teal-600 text-white text-xs font-semibold rounded-lg hover:bg-teal-700 transition-colors">
+                    <button onClick={() => handleAddSubDepartment(dept)} disabled={busy}
+                      className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-teal-600 text-white text-xs font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50">
                       <LuPlus size={13} strokeWidth={2.5} />Add Sub
                     </button>
                   </div>
 
-                  {/* Sub-dept list */}
                   {Object.entries(subs).map(([sub, roles]) => {
                     const subKey = `${dept}::${sub}`;
                     return (
@@ -326,33 +370,31 @@ export default function SettingsPage() {
                             {sub}
                             <span className="font-normal text-slate-400 ml-1">{roles.length} role{roles.length !== 1 ? "s" : ""}</span>
                           </button>
-                          <button onClick={() => askConfirm(sub, () => removeSubDepartment(dept, sub))} className="p-0.5 text-slate-300 hover:text-red-500 transition-colors rounded">
+                          <button onClick={() => askConfirm(sub, () => handleRemoveSubDepartment(dept, sub))} className="p-0.5 text-slate-300 hover:text-red-500 transition-colors rounded">
                             <LuX size={13} strokeWidth={2.5} />
                           </button>
                         </div>
 
                         {expandedSub === subKey && (
                           <div className="px-3 py-2 space-y-2 border-t border-slate-100">
-                            {/* Add role */}
                             <div className="flex gap-2">
                               <input
                                 value={newRole[subKey] ?? ""}
                                 onChange={(e) => setNewRole({ ...newRole, [subKey]: e.target.value })}
-                                onKeyDown={(e) => e.key === "Enter" && addRole(dept, sub)}
+                                onKeyDown={(e) => e.key === "Enter" && handleAddRole(dept, sub)}
                                 placeholder="New role"
                                 className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
                               />
-                              <button onClick={() => addRole(dept, sub)}
-                                className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors">
+                              <button onClick={() => handleAddRole(dept, sub)} disabled={busy}
+                                className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-slate-700 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50">
                                 <LuPlus size={12} strokeWidth={2.5} />Role
                               </button>
                             </div>
-                            {/* Role pills */}
                             <div className="flex flex-wrap gap-1.5">
                               {roles.map((role) => (
                                 <span key={role} className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs text-slate-600">
                                   {role}
-                                  <button onClick={() => askConfirm(role, () => removeRole(dept, sub, role))} className="text-slate-300 hover:text-red-500 transition-colors">
+                                  <button onClick={() => askConfirm(role, () => handleRemoveRole(dept, sub, role))} className="text-slate-300 hover:text-red-500 transition-colors">
                                     <LuX size={11} strokeWidth={2.5} />
                                   </button>
                                 </span>
@@ -416,12 +458,6 @@ export default function SettingsPage() {
           ))}
         </div>
       </section>
-
-      <div className="flex justify-end">
-        <button className="bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold px-6 py-2.5 rounded-lg transition-colors shadow-sm">
-          Save Changes
-        </button>
-      </div>
     </div>
   );
 }
