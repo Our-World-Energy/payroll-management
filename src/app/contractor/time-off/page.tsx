@@ -13,6 +13,7 @@ import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuCalendarDays, LuDownload, LuChevronRight, LuInfo, LuX, LuCircleAlert,
 } from "react-icons/lu";
+import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
 
 function fmtDays(hrs: number) {
   return fmtBalance(hrs / HOURS_PER_DAY);
@@ -44,50 +45,50 @@ type BalanceCardProps = {
 
 function BalanceCard({
   icon, iconBg, title, badge, badgeBg, badgeText,
-  total, used, barUsed, barAvail, availColor, wide = false,
+  total, used, barUsed, barAvail, availColor,
 }: BalanceCardProps) {
   const available = Math.max(total - used, 0);
   const usedPct   = total > 0 ? Math.min((used / total) * 100, 100) : 0;
   const availPct  = 100 - usedPct;
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6 relative overflow-hidden group hover:border-emerald-200 transition-colors">
-      <div className="absolute top-0 right-0 p-4 opacity-[0.04] group-hover:opacity-[0.08] transition-opacity pointer-events-none select-none">
-        <span style={{ fontSize: 80 }}>{icon}</span>
-      </div>
-
-      <div className={`flex items-center mb-6 ${wide ? "justify-start gap-4" : "justify-between"}`}>
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className={`p-2 rounded-lg ${iconBg}`}>{icon}</div>
-          <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+          <div className={`grid place-items-center w-10 h-10 rounded-xl ${iconBg}`}>{icon}</div>
+          <h3 className="text-sm font-bold text-[#003527]">{title}</h3>
         </div>
-        <span className={`px-3 py-1 rounded-full text-xs font-bold ${badgeBg} ${badgeText}`}>{badge}</span>
+        <span className={`px-3 py-1 rounded-full text-[11px] font-bold ${badgeBg} ${badgeText}`}>{badge}</span>
       </div>
 
-      <div className={`grid gap-4 ${wide ? "grid-cols-3 lg:grid-cols-6" : "grid-cols-3"}`}>
-        <div className={wide ? "lg:col-span-2" : ""}>
-          <p className="text-slate-500 text-[10px] uppercase font-bold tracking-tight mb-1">Total Balance</p>
-          <p className="text-2xl font-bold text-[#003527]">
-            {fmtDays(total)} <span className="text-xs font-medium text-slate-400">days</span>
-          </p>
+      <div className="flex items-center gap-6">
+        <div className="relative grid place-items-center shrink-0">
+          <ProgressRing pct={availPct} size={96} stroke={8} />
+          <div className="absolute text-center leading-none">
+            <span className={`block text-lg font-bold tabular-nums ${availColor}`}>{Math.round(availPct)}%</span>
+            <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
+          </div>
         </div>
-        <div className={wide ? "lg:col-span-2" : ""}>
-          <p className="text-slate-500 text-[10px] uppercase font-bold tracking-tight mb-1">Used</p>
-          <p className="text-2xl font-bold text-slate-700">
-            {fmtDays(used)} <span className="text-xs font-medium text-slate-400">days</span>
-          </p>
-        </div>
-        <div className={wide ? "lg:col-span-2" : ""}>
-          <p className="text-slate-500 text-[10px] uppercase font-bold tracking-tight mb-1">Available</p>
-          <p className={`text-3xl font-black ${availColor}`}>
-            {fmtDays(available)} <span className="text-sm font-medium text-slate-400">days</span>
-          </p>
+
+        <div className="flex-1 grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Total</p>
+            <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(total)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
+            <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(used)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+          </div>
+          <div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
+            <p className={`text-xl font-bold tabular-nums ${availColor}`}>{fmtDays(available)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+          </div>
         </div>
       </div>
 
-      <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex">
-        <div className={`h-full ${barUsed}`}   style={{ width: `${usedPct}%`  }} />
-        <div className={`h-full ${barAvail}`}  style={{ width: `${availPct}%` }} />
+      <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
+        <div className={`h-full ${barUsed}`}  style={{ width: `${usedPct}%`  }} />
+        <div className={`h-full ${barAvail}`} style={{ width: `${availPct}%` }} />
       </div>
     </div>
   );
@@ -229,18 +230,15 @@ export default function ContractorTimeOffPage() {
   return (
     <div className="space-y-8">
       {/* Page title */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h2 className="text-4xl font-bold text-[#003527] tracking-tight" style={{ letterSpacing: "-0.02em" }}>
-            Time-Off Management
-          </h2>
-          <p className="text-slate-600 mt-1">Track and manage your leave requests and balances.</p>
-        </div>
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          <LuClock size={13} strokeWidth={2} />
-          Last updated: {now}
-        </div>
-      </div>
+      <PageHeader
+        title="Time-Off Management"
+        subtitle="Track and manage your leave requests and balances."
+        right={
+          <HeaderChip icon={<LuClock size={13} strokeWidth={2} className="text-emerald-600" />}>
+            Last updated: {now}
+          </HeaderChip>
+        }
+      />
 
       {/* Balance cards */}
       <section className={isPtoHidden ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 lg:grid-cols-2 gap-6"}>
@@ -278,7 +276,7 @@ export default function ContractorTimeOffPage() {
       {/* Request form + policy */}
       <section className="grid grid-cols-1 xl:grid-cols-3 gap-8">
         {/* Form */}
-        <div className="xl:col-span-2 bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {/* Header */}
           <div className="border-b border-slate-100 px-6 py-4">
             <h3 className="text-sm font-semibold text-slate-700">Apply for Leave</h3>
@@ -371,27 +369,30 @@ export default function ContractorTimeOffPage() {
         {/* Sidebar */}
         <div className="space-y-6">
           {/* Policy */}
-          <div className="bg-[#064e3b] text-white rounded-xl p-6 shadow-sm">
-            <h4 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <LuCircleCheck size={20} strokeWidth={1.75} />
-              Policy Reminder
-            </h4>
-            <ul className="space-y-3 text-sm opacity-90">
-              {[
-                "PTO requests must be submitted at least 2 weeks in advance.",
-                "Sick leave requires a medical certificate if longer than 3 days.",
-                "A maximum of 5 days can carry over to the next year.",
-              ].map((item) => (
-                <li key={item} className="flex gap-3">
-                  <LuCircleCheck size={13} className="shrink-0 mt-0.5 opacity-70" strokeWidth={2} />
-                  {item}
-                </li>
-              ))}
-            </ul>
+          <div className="relative overflow-hidden rounded-2xl p-6 text-white shadow-sm bg-brand-gradient">
+            <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
+            <div className="relative">
+              <h4 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <LuCircleCheck size={20} strokeWidth={1.75} className="text-emerald-300" />
+                Policy Reminder
+              </h4>
+              <ul className="space-y-3 text-sm text-emerald-50/90">
+                {[
+                  "PTO requests must be submitted at least 2 weeks in advance.",
+                  "Sick leave requires a medical certificate if longer than 3 days.",
+                  "A maximum of 5 days can carry over to the next year.",
+                ].map((item) => (
+                  <li key={item} className="flex gap-3">
+                    <LuCircleCheck size={13} className="shrink-0 mt-0.5 text-emerald-300/80" strokeWidth={2} />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
 
           {/* Quick Actions */}
-          <div className="bg-white border border-slate-200 rounded-xl p-6">
+          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6">
             <h4 className="text-xs font-bold mb-4 uppercase text-slate-400 tracking-widest">Quick Actions</h4>
             <div className="space-y-3">
               <button className="w-full flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700">
@@ -422,7 +423,7 @@ export default function ContractorTimeOffPage() {
           </button>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-left">
               <thead>
