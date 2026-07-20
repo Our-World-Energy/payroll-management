@@ -74,8 +74,10 @@ function todayPartsInTz(timeZone: string) {
   return { year: get("year"), month: get("month") - 1, day: get("day") };
 }
 
-function MiniCountryCalendar({ country, holidays, loading, todayParts, isActive, onSelect }: {
+function MiniCountryCalendar({ country, timeZone, now, holidays, loading, todayParts, isActive, onSelect }: {
   country: string;
+  timeZone: string;
+  now: Date | null;
   holidays: Holiday[];
   loading: boolean;
   todayParts?: { year: number; month: number; day: number };
@@ -84,6 +86,9 @@ function MiniCountryCalendar({ country, holidays, loading, todayParts, isActive,
 }) {
   if (!todayParts) return null;
   const { year, month, day } = todayParts;
+  const timeLabel = now?.toLocaleTimeString("en-US", {
+    timeZone, hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true,
+  });
   const cells = buildCalendar(year, month);
   const monthPrefix = `${year}-${pad(month + 1)}`;
   const monthHolidays = holidays
@@ -99,6 +104,9 @@ function MiniCountryCalendar({ country, holidays, loading, todayParts, isActive,
         isActive ? "border-[#003527] ring-2 ring-[#003527]/20 bg-teal-50/40" : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"
       }`}
     >
+      {timeLabel && (
+        <p className="text-[10px] font-mono font-bold text-slate-500 mb-1.5 tabular-nums">{timeLabel}</p>
+      )}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full ${COUNTRY_COLORS[country] ?? "bg-slate-400"}`} />
@@ -162,6 +170,7 @@ export function HolidayCalendar() {
   const [todayStr,      setTodayStr]      = useState("");
   const [isPending,     startTransition]  = useTransition();
   const [regionalToday, setRegionalToday] = useState<Record<string, { year: number; month: number; day: number }>>({});
+  const [now, setNow] = useState<Date | null>(null);
   const [mainCalendarCountry, setMainCalendarCountry] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<{ date: string; holidays: Holiday[] } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Holiday | null>(null);
@@ -178,6 +187,10 @@ export function HolidayCalendar() {
     setTodayStr(`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`);
     setRegionalToday(Object.fromEntries(REGIONAL_CALENDARS.map(r => [r.country, todayPartsInTz(r.timeZone)])));
     loadHolidays();
+
+    setNow(new Date());
+    const clockId = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(clockId);
   }, []);
 
   async function loadHolidays() {
@@ -410,6 +423,8 @@ export function HolidayCalendar() {
                   <MiniCountryCalendar
                     key={r.country}
                     country={r.country}
+                    timeZone={r.timeZone}
+                    now={now}
                     holidays={holidays}
                     loading={loading}
                     todayParts={regionalToday[r.country]}

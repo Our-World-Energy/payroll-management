@@ -10,10 +10,6 @@ import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 import { Logo } from "@/components/Logo";
 
-// No real deductions/tax data exists anywhere yet — kept as the same flat
-// placeholder ratio the old mock page used, not a real tax calculation.
-const DEDUCTION_RATE = 0.15;
-
 // Pay multipliers applied on top of Hourly Rate for each OT bucket. Regular
 // Time, US Holiday Time, and Local Holiday Time all pay at the plain hourly
 // rate (100%) and need no multiplier of their own.
@@ -263,9 +259,27 @@ export default function PayrollPage() {
             const isReviewed = saved?.requestStatus === "APPROVED" && saved.completionMinutes != null;
             const hourlyRate = parseFloat(c.hourlyRate) || 0;
             const hours = isReviewed ? (saved!.completionMinutes as number) / 60 : null;
+            const country = countryFromLocation(c.location || "");
+            const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
+            const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
+            const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(rangeFrom, rangeTo, contractorRequests);
+            const ptoHours = totalPtoHoursFor(rangeFrom, rangeTo, contractorRequests);
+
+            // Earnings and deductions both come straight from this contractor's
+            // Manual Payroll Adjustment for the week, rather than a placeholder.
+            const adjustment = adjustmentByEmail.get(email);
+            const bonus = adjustment?.bonus ?? 0;
+            const misc = adjustment?.misc ?? 0;
+            const retroPay = adjustment?.retroPay ?? 0;
+            const reim = adjustment?.reim ?? 0;
+            const cashAdvance = adjustment?.cashAdvance ?? 0;
+            const hmo = adjustment?.hmo ?? 0;
+            const tax = adjustment?.tax ?? 0;
+
             // Gross Pay is the sum of each payroll component calculated independently
-            // (its own time total × Hourly Rate × its own multiplier) — see
-            // computePayComponents — so this always matches the voucher's total.
+            // (its own time total × Hourly Rate × its own multiplier), plus PTO Pay
+            // and the Manual Payroll Adjustment earnings — see computePayComponents —
+            // so this always matches the voucher's total exactly.
             const gross = isReviewed
               ? computePayComponents(hourlyRate, {
                   totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
@@ -274,15 +288,10 @@ export default function PayrollPage() {
                   totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
                   totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
                   localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
-                }).grossPay
+                }).grossPay + ptoHours * hourlyRate + bonus + misc + retroPay + reim
               : null;
-            const deductions = gross != null ? gross * DEDUCTION_RATE : null;
+            const deductions = gross != null ? cashAdvance + hmo + tax : null;
             const net = gross != null && deductions != null ? gross - deductions : null;
-            const country = countryFromLocation(c.location || "");
-            const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
-            const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
-            const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(rangeFrom, rangeTo, contractorRequests);
-            const ptoHours = totalPtoHoursFor(rangeFrom, rangeTo, contractorRequests);
 
             return {
               email,
@@ -314,13 +323,13 @@ export default function PayrollPage() {
               net,
               status: isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
               evaluatedRegularDailyMinutes: evaluatedRegularDailyMinutesByEmail.get(email) ?? {},
-              bonus: adjustmentByEmail.get(email)?.bonus ?? 0,
-              misc: adjustmentByEmail.get(email)?.misc ?? 0,
-              retroPay: adjustmentByEmail.get(email)?.retroPay ?? 0,
-              reim: adjustmentByEmail.get(email)?.reim ?? 0,
-              cashAdvance: adjustmentByEmail.get(email)?.cashAdvance ?? 0,
-              hmo: adjustmentByEmail.get(email)?.hmo ?? 0,
-              tax: adjustmentByEmail.get(email)?.tax ?? 0,
+              bonus,
+              misc,
+              retroPay,
+              reim,
+              cashAdvance,
+              hmo,
+              tax,
             };
           });
 
