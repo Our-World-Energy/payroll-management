@@ -11,6 +11,8 @@ const COUNTRY_COLORS: Record<string, string> = {
   "India":         "bg-orange-500",
   "Mexico":        "bg-emerald-500",
   "Philippines":   "bg-teal-500",
+  "Guatemala":     "bg-amber-500",
+  "Colombia":      "bg-rose-500",
   "Global":        "bg-purple-500",
 };
 const FLAG_COLORS: Record<string, string> = {
@@ -18,6 +20,8 @@ const FLAG_COLORS: Record<string, string> = {
   "India":         "text-orange-500",
   "Mexico":        "text-emerald-500",
   "Philippines":   "text-teal-500",
+  "Guatemala":     "text-amber-500",
+  "Colombia":      "text-rose-500",
   "Global":        "text-purple-500",
 };
 const COUNTRIES = Object.keys(COUNTRY_COLORS);
@@ -60,7 +64,7 @@ function formatHourDiff(hours: number): string {
 // Regional mini-calendars: each reads "today" in its own IANA time zone rather
 // than the viewer's local time, so e.g. India's calendar can already show
 // tomorrow while it's still today in the US.
-const REGIONAL_CALENDAR_COUNTRIES = ["Philippines", "India", "Mexico", "United States"];
+const REGIONAL_CALENDAR_COUNTRIES = ["United States", "Philippines", "India", "Mexico", "Guatemala", "Colombia"];
 const REGIONAL_CALENDARS = REGIONAL_CALENDAR_COUNTRIES.map((country) => ({
   country,
   timeZone: COUNTRY_TIME_ZONES[country],

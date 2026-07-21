@@ -575,43 +575,6 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[],
   }, 0);
 }
 
-function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>) {
-  const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
-
-  if (isFixedContractor(row.payCategory)) {
-    const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
-    return Math.min(total, 2400);
-  }
-
-  const restDaysStr = restDaysForAttendanceRow(row);
-  const shiftType = shiftTypeForAttendanceRow(row);
-  return weekDates.reduce((total, date) => {
-    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-    if (worksnapTime === "-") return total;
-
-    const isRestDay = isRestDayDate(date, restDaysStr);
-
-    const timeOffRequest = TIME_OFF.find((item) =>
-      item.name === row.name && date >= item.from && date <= item.to
-    );
-    let timeOffStatus = "No Time Off";
-    if (timeOffRequest) {
-      if (timeOffRequest.type === "Sick Leave") timeOffStatus = "Sick Leave";
-      else if (timeOffRequest.type === "Unpaid Leave") timeOffStatus = "Unpaid Leave";
-      else timeOffStatus = "PTO";
-    }
-    const isFullTimeOffDay = isFullTimeOffStatus(timeOffStatus);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, "Approved", isRestDay, shiftType, isFullTimeOffDay);
-    // Approved is assumed throughout this function, so rest-day work (tracked as
-    // RD OT Time) or full-time-off-day work (tracked as Regular OT Time) —
-    // neither embedded in Evaluated Time above — always counts here.
-    const otTimeToFold = isRestDay || isFullTimeOffDay ? worksnapTime : "-";
-
-    const timeOffTime = timeOffTimeFor(timeOffStatus);
-    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, "-", otTimeToFold));
-  }, 0);
-}
-
 // Per-day attendance_day_status snapshot for a Bulk Approve save: every logged
 // day is Approved (no per-day reject/override in this flow), time off comes
 // from the row's default status, mirroring what the Review modal would save.
@@ -628,7 +591,11 @@ function buildBulkApproveDaySnapshots(
 ) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
-  const shiftType = shiftTypeForAttendanceRow(row);
+  // Same India/Fixed-contractor suppression Attendance Review applies (see
+  // evaluationShiftType in ReviewModal) — currently a no-op here since Fixed
+  // contractors are already excluded from Bulk Approve's candidate rows, but
+  // kept so this function stays correct if that filter ever changes.
+  const shiftType = isFixedContractor(row.payCategory) ? undefined : shiftTypeForAttendanceRow(row);
   const userLogs = dailyLogs.filter((l) => l.worksnapUserId === row.worksnapUserId);
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time,
@@ -673,11 +640,18 @@ function buildBulkApproveDaySnapshots(
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
     const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
-    const { rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
+    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
       timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay,
       dailyDecisionStatus === "Approved", isFullTimeOffDay
     );
     const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+    // Same week-total formula Attendance Review actually saves as
+    // completionMinutes (see completionTotalMinutes in ReviewModal) — not the
+    // weekly-reallocated allocation above, which only feeds the day snapshot's
+    // own evaluatedRegular/regularOt/rdOt breakdown fields.
+    const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
+    const otMinutesToFold = rawRdOtMinutes + (isFullTimeOffDay ? rawRegularOtMinutes : 0);
+    const completionMinutes = timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
 
     return {
       date,
@@ -691,6 +665,7 @@ function buildBulkApproveDaySnapshots(
       regularOtMinutes: allocation.regularOtMinutes,
       rdOtMinutes: allocation.rdOtMinutes,
       hoOtMinutes,
+      completionMinutes,
     };
   });
 }
@@ -716,8 +691,9 @@ function rowWeeklyTotals(
       totalEvaluatedMinutes: totals.totalEvaluatedMinutes + d.evaluatedMinutes,
       totalUsHoMinutes: totals.totalUsHoMinutes + d.holidayMinutes,
       totalHoOtMinutes: totals.totalHoOtMinutes + d.hoOtMinutes,
+      totalCompletionMinutes: totals.totalCompletionMinutes + d.completionMinutes,
     }),
-    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalEvaluatedMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0 }
+    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalEvaluatedMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0, totalCompletionMinutes: 0 }
   );
 }
 
@@ -1711,10 +1687,11 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     async function load() {
       try {
-        const [entriesResult, weekStatusResult, dailyLogResult] = await Promise.all([
+        const [entriesResult, weekStatusResult, dailyLogResult, dayStatusResult] = await Promise.all([
           fetchWithRetry(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
           fetchWithRetry(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
           fetchWithRetry(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+          fetchWithRetry(`/api/attendance/day-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { days: [] })),
         ]);
         if (isCancelled) return;
 
@@ -1735,21 +1712,24 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
 
         // Adjusted Time overrides Worksnap Time the same way an individual
-        // Attendance Review does — fetch any already-saved per-day adjustment
-        // for the contractors this bulk pass could actually approve.
+        // Attendance Review does — one bulk request covers every contractor's
+        // saved per-day adjustment instead of firing one request per candidate
+        // row (was the slow part of loading this modal).
         const candidateRows = mergedRows.filter((r) =>
           r.weeklyStatus === "For Review" && !isFixedContractor(r.payCategory) && r.worksnapUserId != null
         );
-        const adjustedEntries = await Promise.all(candidateRows.map((r) =>
-          fetchWithRetry(`/api/attendance/day-status?userId=${r.worksnapUserId}&week=${from}`)
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data: { days?: Array<{ date: string; adjustedMinutes: number | null }> } | null) => {
-              const map: Record<string, number> = {};
-              (data?.days ?? []).forEach((d) => { if (d.adjustedMinutes != null && d.adjustedMinutes > 0) map[d.date] = d.adjustedMinutes; });
-              return [r.contractorId, map] as [string, Record<string, number>];
-            })
-            .catch(() => [r.contractorId, {}] as [string, Record<string, number>])
-        ));
+        const adjustedByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
+          const email = String(d.email ?? "").trim().toLowerCase();
+          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          const map = adjustedByEmail.get(email) ?? {};
+          map[String(d.date ?? "")] = d.adjustedMinutes;
+          adjustedByEmail.set(email, map);
+        }
+        const adjustedEntries: [string, Record<string, number>][] = candidateRows.map((r) => {
+          const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+          return [r.contractorId, adjustedByEmail.get(email) ?? {}];
+        });
         if (isCancelled) return;
         setAdjustedByContractor(new Map(adjustedEntries));
       } catch {
@@ -1810,10 +1790,22 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     return totalTimeOffRequestMinutesFor(modalWeekDates, leaveRequests.filter((req) => req.email === email));
   }
 
+  // Same week-total formula Attendance Review actually saves (see
+  // rowWeeklyTotals/buildBulkApproveDaySnapshots), not the legacy
+  // computeApprovedCompletionMinutes (which never saw real leave requests
+  // or HO OT Time).
+  function bulkApproveCompletionMinutes(r: AttendanceRow) {
+    const email = r.role.includes("@") ? r.role : "";
+    return rowWeeklyTotals(
+      r, modalWeekDates, usaHolidays, dailyLogs, allHolidays,
+      adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)
+    ).totalCompletionMinutes;
+  }
+
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r));
+      map.set(r.contractorId, bulkApproveCompletionMinutes(r));
     });
     setProcessedApprovals(map);
   }
@@ -1823,30 +1815,33 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r)])
+          .map((r) => [r.contractorId, bulkApproveCompletionMinutes(r)])
         );
 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
     setIsSavingBulk(true);
     setBulkSaveError("");
-    const results = await Promise.all(rowsToSave.map((r) => {
+    // One request/transaction for every selected contractor, instead of one
+    // request per contractor racing for the same DB connection pool.
+    const items = rowsToSave.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
-      return fetch("/api/attendance/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          worksnapUserId: r.worksnapUserId,
-          email,
-          week: modalWeekDates[0],
-          requestStatus: "APPROVED",
-          completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
-          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
-        }),
-      }).then((res) => res.ok).catch(() => false);
-    }));
+      return {
+        worksnapUserId: r.worksnapUserId,
+        email,
+        week: modalWeekDates[0],
+        requestStatus: "APPROVED",
+        completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
+        days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
+      };
+    });
+    const ok = await fetch("/api/attendance/status/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    }).then((res) => res.ok).catch(() => false);
     setIsSavingBulk(false);
 
-    if (results.some((ok) => !ok)) {
+    if (!ok) {
       setBulkSaveError("Some approvals failed to save. Please try again.");
       return;
     }
@@ -1929,11 +1924,11 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const rowHolidayBonusMins = rowHolidayBonus(row);
-                const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates, adjustedByContractor.get(row.contractorId)) + rowHolidayBonusMins);
-                const isProcessed = processedMins !== undefined;
-                const localHolidayMins = rowLocalHolidayMinutes(row);
                 const rowEmailForLeave = row.role.includes("@") ? row.role : "";
                 const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId), leaveRequests.filter((req) => req.email === rowEmailForLeave));
+                const completionMins = processedMins ?? row.completionMinutes ?? weeklyTotals.totalCompletionMinutes;
+                const isProcessed = processedMins !== undefined;
+                const localHolidayMins = rowLocalHolidayMinutes(row);
                 const timeOffRequestMins = rowTimeOffRequestMinutes(row);
                 return (
                 <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">

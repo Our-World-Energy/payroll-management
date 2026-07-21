@@ -7,6 +7,8 @@ export const COUNTRY_TIME_ZONES: Record<string, string> = {
   "India": "Asia/Kolkata",
   "Mexico": "America/Mexico_City",
   "Philippines": "Asia/Manila",
+  "Guatemala": "America/Guatemala",
+  "Colombia": "America/Bogota",
 };
 
 export const ARIZONA_TIME_ZONE = "America/Phoenix";
