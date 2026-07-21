@@ -100,12 +100,12 @@ function MiniCountryCalendar({ country, timeZone, now, holidays, loading, todayP
     <button
       type="button"
       onClick={onSelect}
-      className={`flex-1 min-w-[160px] text-left rounded-lg border p-3 transition-colors cursor-pointer ${
+      className={`relative flex-1 min-w-[160px] text-left rounded-lg border pt-6 pb-3 px-3 transition-colors cursor-pointer ${
         isActive ? "border-[#003527] ring-2 ring-[#003527]/20 bg-teal-50/40" : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"
       }`}
     >
       {timeLabel && (
-        <p className="text-[10px] font-mono font-bold text-slate-500 mb-1.5 tabular-nums">{timeLabel}</p>
+        <span className="absolute top-1.5 left-3 text-[9px] font-mono font-bold text-slate-500 tabular-nums">{timeLabel}</span>
       )}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-1.5">
@@ -143,15 +143,6 @@ function MiniCountryCalendar({ country, timeZone, now, holidays, loading, todayP
               </div>
             );
           })}
-        </div>
-      )}
-      {monthHolidays.length > 0 && (
-        <div className="mt-2 pt-2 border-t border-slate-100 space-y-0.5">
-          {monthHolidays.slice(0, 2).map(h => (
-            <p key={h.id} className="text-[10px] text-slate-500 truncate">
-              <span className="font-semibold text-slate-600">{parseInt(h.date.split("-")[2])}</span> · {h.name}
-            </p>
-          ))}
         </div>
       )}
     </button>

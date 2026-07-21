@@ -4,7 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvanceSickLeaveRepayment, applyAdvancePtoRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvanceSickLeaveRepayment, applyAdvancePtoRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { fetchCutOffTime } from "../settings/actions";
 
 const TABLE = "contractor_profiles";
 
@@ -192,8 +193,9 @@ export async function fetchAllContractors(
 
 export async function createContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
-  const ptoBalance      = calculatePtoBalance(c.hireDate);
-  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
+  const cutoff = cutoffFromSaved(await fetchCutOffTime());
+  const ptoBalance      = calculatePtoBalance(c.hireDate, cutoff);
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
   const { error } = await sb.from(TABLE).insert({
     id:                crypto.randomUUID(),
     uid:               c.uid,
@@ -247,8 +249,9 @@ export async function createContractor(c: Contractor): Promise<void> {
 
 export async function updateContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
-  const ptoBalance       = calculatePtoBalance(c.hireDate);
-  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate);
+  const cutoff = cutoffFromSaved(await fetchCutOffTime());
+  const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
+  const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
 
   // Any outstanding Advance Sick Leave / Advance PTO-Birthday Leave is repaid
   // out of newly-accrued Sick Leave / PTO before it's allowed to raise the
@@ -344,11 +347,12 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
     .select("uid, hireDate, sickLeaveBalance, sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, ptoBalance, ptoUsed, birthdayLeave, birthdayLeaveUsed");
   if (error) throw new Error(error.message);
 
+  const cutoff = cutoffFromSaved(await fetchCutOffTime());
   let updated = 0;
   for (const row of data ?? []) {
     if (!row.hireDate) continue;
-    const ptoBalance       = calculatePtoBalance(row.hireDate);
-    const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate);
+    const ptoBalance       = calculatePtoBalance(row.hireDate, cutoff);
+    const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate, cutoff);
     const { sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed } = applyAdvanceSickLeaveRepayment(
       row.sickLeaveBalance ?? 0,
       sickLeaveBalance,

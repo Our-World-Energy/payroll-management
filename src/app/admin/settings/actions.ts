@@ -253,3 +253,32 @@ export async function seedOrgDefaults(
 
   return { ok: true };
 }
+
+// ── Time Off cut off date ──────────────────────────────────────────────────
+// Single-row table: month name + day number only (no year — recurs annually).
+
+export async function fetchCutOffTime(): Promise<{ monthName: string; monthNo: number } | null> {
+  const sb = getSupabase();
+  const { data } = await sb
+    .from("cut_off_time")
+    .select("cut_off_month_name, cut_off_month_no")
+    .limit(1)
+    .maybeSingle();
+  if (!data) return null;
+  return { monthName: data.cut_off_month_name, monthNo: data.cut_off_month_no };
+}
+
+export async function saveCutOffTime(monthName: string, monthNo: number): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { data: existing, error: lookupErr } = await sb.from("cut_off_time").select("id").limit(1).maybeSingle();
+  if (lookupErr) return { ok: false, error: lookupErr.message };
+
+  const payload = { cut_off_month_name: monthName, cut_off_month_no: monthNo, updatedAt: new Date().toISOString() };
+
+  const { error } = existing
+    ? await sb.from("cut_off_time").update(payload).eq("id", existing.id)
+    : await sb.from("cut_off_time").insert({ id: crypto.randomUUID(), ...payload });
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

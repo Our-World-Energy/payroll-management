@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader } from "react-icons/lu";
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
 import {
@@ -9,10 +9,22 @@ import {
   addDepartment, removeDepartment,
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
+  fetchCutOffTime, saveCutOffTime,
 } from "./actions";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer";
+
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// Month/day only (no year) — this is a recurring annual cutoff, so Feb is
+// given 29 days to allow the leap-year date rather than locking it out.
+function daysInMonth(monthIndex: number) {
+  return new Date(2000, monthIndex + 1, 0).getDate();
+}
 
 export default function SettingsPage() {
   const { officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers } = useContractorConfig();
@@ -20,6 +32,59 @@ export default function SettingsPage() {
   // ── Busy/error state ──────────────────────────────────────────────────────
   const [busy, setBusy]     = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  // ── Time Off cut off date (month + day, no year — recurs every year) ─────
+  // Local edits only take effect once "Save" is clicked, tracked against the
+  // last-saved values so the button can enable/disable and show confirmation.
+  const [cutoffMonth, setCutoffMonth] = useState(0);
+  const [cutoffDay,   setCutoffDay]   = useState(1);
+  const [savedCutoffMonth, setSavedCutoffMonth] = useState(0);
+  const [savedCutoffDay,   setSavedCutoffDay]   = useState(1);
+  const [cutoffSaving, setCutoffSaving] = useState(false);
+  const [cutoffSaved,  setCutoffSaved]  = useState(false);
+  const [cutoffError,  setCutoffError]  = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCutOffTime().then((saved) => {
+      if (!saved) return;
+      const monthIndex = MONTHS.indexOf(saved.monthName);
+      if (monthIndex >= 0) { setCutoffMonth(monthIndex); setSavedCutoffMonth(monthIndex); }
+      setCutoffDay(saved.monthNo);
+      setSavedCutoffDay(saved.monthNo);
+    });
+  }, []);
+
+  const cutoffDirty = cutoffMonth !== savedCutoffMonth || cutoffDay !== savedCutoffDay;
+
+  function handleCutoffMonthChange(monthIndex: number) {
+    setCutoffMonth(monthIndex);
+    setCutoffDay((day) => Math.min(day, daysInMonth(monthIndex)));
+    setCutoffSaved(false);
+  }
+
+  function handleCutoffDayChange(day: number) {
+    setCutoffDay(day);
+    setCutoffSaved(false);
+  }
+
+  async function handleSaveCutOff() {
+    setCutoffSaving(true);
+    setCutoffError(null);
+    try {
+      const res = await saveCutOffTime(MONTHS[cutoffMonth], cutoffDay);
+      if (!res.ok) {
+        setCutoffError(res.error ?? "Unknown error");
+      } else {
+        setSavedCutoffMonth(cutoffMonth);
+        setSavedCutoffDay(cutoffDay);
+        setCutoffSaved(true);
+      }
+    } catch (e) {
+      setCutoffError(String(e));
+    } finally {
+      setCutoffSaving(false);
+    }
+  }
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, revertFn?: () => void) {
     setBusy(true);
@@ -410,6 +475,49 @@ export default function SettingsPage() {
               )}
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Time Off Settings */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100">
+          <h4 className="text-base font-semibold text-[#003527]">Time Off Settings</h4>
+        </div>
+        <div className="px-6 py-5">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cut Off Time</label>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="grid grid-cols-2 gap-3 max-w-sm">
+                <select
+                  className={SELECT}
+                  value={cutoffMonth}
+                  onChange={(e) => handleCutoffMonthChange(Number(e.target.value))}
+                >
+                  {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                </select>
+                <select
+                  className={SELECT}
+                  value={cutoffDay}
+                  onChange={(e) => handleCutoffDayChange(Number(e.target.value))}
+                >
+                  {Array.from({ length: daysInMonth(cutoffMonth) }, (_, i) => i + 1).map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleSaveCutOff}
+                disabled={!cutoffDirty || cutoffSaving}
+                className="shrink-0 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {cutoffSaving ? "Saving…" : "Save"}
+              </button>
+              {!cutoffDirty && cutoffSaved && (
+                <span className="text-xs font-semibold text-emerald-600">Saved</span>
+              )}
+            </div>
+            {cutoffError && <p className="mt-2 text-xs font-medium text-red-600">{cutoffError}</p>}
+          </div>
         </div>
       </section>
 

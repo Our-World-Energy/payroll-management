@@ -97,6 +97,7 @@ export async function GET(request: Request) {
       location: profile?.location ?? "",
       shiftType: profile?.shiftType ?? "",
       payCategory: profile?.payCategory ?? "",
+      hasContractorProfile: profile != null,
     };
   });
 

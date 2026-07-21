@@ -1,7 +1,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { leaveTypeHours, isPtoLeaveType } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { fetchCutOffTime } from "../../admin/settings/actions";
 
 function getSupabase() {
   return createClient(
@@ -39,20 +40,28 @@ export type LeaveRequest = {
 
 export async function fetchContractorTimeOff(email: string): Promise<ContractorTimeOff | null> {
   const sb = getSupabase();
-  const { data, error } = await sb
-    .from("contractor_profiles")
-    .select("fullName, hireDate, location, ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, advanceSickLeave")
-    .eq("email", email)
-    .single();
+  const [{ data, error }, savedCutoff] = await Promise.all([
+    sb
+      .from("contractor_profiles")
+      .select("fullName, hireDate, location, ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, advanceSickLeave")
+      .eq("email", email)
+      .single(),
+    fetchCutOffTime(),
+  ]);
 
   if (error || !data) return null;
+  const hireDate = String(data.hireDate ?? "");
+  const cutoff = cutoffFromSaved(savedCutoff);
   return {
-    fullName:         String(data.fullName         ?? ""),
-    hireDate:         String(data.hireDate         ?? ""),
-    location:         String(data.location         ?? ""),
-    ptoBalance:       Number(data.ptoBalance       ?? 0),
+    fullName:         String(data.fullName ?? ""),
+    hireDate,
+    location:         String(data.location ?? ""),
+    // Live-computed from Hire Date + the current Cut Off Time, rather than
+    // trusting the stored snapshot — so a Cut Off Time change is reflected
+    // immediately without waiting for this contractor to be saved again.
+    ptoBalance:       calculatePtoBalance(hireDate, cutoff),
     ptoUsed:          Number(data.ptoUsed          ?? 0),
-    sickLeaveBalance: Number(data.sickLeaveBalance ?? 0),
+    sickLeaveBalance: calculateSickLeaveBalance(hireDate, cutoff),
     sickLeaveUsed:    Number(data.sickLeaveUsed    ?? 0),
     birthdayLeave:    Number(data.birthdayLeave    ?? 0),
     advanceSickLeave: Number(data.advanceSickLeave ?? 0),

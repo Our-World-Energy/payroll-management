@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
-import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
+import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -53,6 +53,7 @@ type ReviewModalProps = {
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
   allLeaveRequests: AdminLeaveRequest[];
+  isWeekEnded: boolean;
 };
 
 type WorksnapEntry = {
@@ -67,6 +68,7 @@ type WorksnapEntry = {
   shiftType?: string | null;
   payCategory?: string | null;
   dailyWorksnapMinutes?: Record<string, number>;
+  hasContractorProfile?: boolean;
 };
 
 const EMPTY_DAILY_WORKSNAP_MINUTES: Record<string, number> = {};
@@ -768,6 +770,7 @@ type AttendanceRow = AttendanceRecord & {
   totalRdOtMinutes?: number | null;
   totalHoOtMinutes?: number | null;
   savedDailyDecisionStatuses?: Record<string, string>;
+  hasContractorProfile?: boolean;
 };
 
 function isFixedContractor(payCategory?: string) {
@@ -817,11 +820,12 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
     shiftType,
     payCategory,
     dailyWorksnapMinutes: entry.dailyWorksnapMinutes ?? {},
+    hasContractorProfile: entry.hasContractorProfile ?? false,
   };
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number> }>();
+  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number>; hasContractorProfile: boolean }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -843,6 +847,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
       shiftType: current?.shiftType || entry.shiftType || null,
       payCategory: current?.payCategory || entry.payCategory || null,
       dailyWorksnapMinutes,
+      hasContractorProfile: current?.hasContractorProfile || entry.hasContractorProfile || false,
     });
   });
 
@@ -884,7 +889,7 @@ function payCategoryForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests, isWeekEnded }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -985,9 +990,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Shift Type", shiftType],
     ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
-    ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
+    ["Ind Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Ind Time", "Approval Status"]
     .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
@@ -1316,6 +1321,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     // half day) request for, but also logged actual Worksnap Time —
                     // i.e. they filed leave but reported to work anyway.
                     const hasLeaveWorkConflict = rawWorksnapTime !== "-" && hasApprovedLeaveRequestFor(date, leaveRequests);
+                    const conflictCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "text-slate-600";
+                    const conflictHighlightCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-red-50 text-slate-600";
                     // Effective time — Adjusted Time when present, else Worksnap Time. Every
                     // calculation below reads this instead of the raw value.
                     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1347,24 +1354,28 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {formatDayLabel(date)}
                         </td>
                         {!isIndia && (
-                          <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-2 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                          <td className={`sticky left-[156px] z-10 w-[112px] min-w-[112px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                          }`}>
                             {!isRestDay ? (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => toggleDailyDecision(date, "Approved")}
-                                  className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                                  disabled={!isWeekEnded}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                   aria-label={`Approve attendance for ${formatDayLabel(date)}`}
-                                  title="Approve"
+                                  title={isWeekEnded ? "Approve" : "Only available once the selected week has ended"}
                                 >
                                   <LuCircleCheck size={15} strokeWidth={2} />
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => toggleDailyDecision(date, "Rejected")}
-                                  className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50"
+                                  disabled={!isWeekEnded}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                   aria-label={`Reject attendance for ${formatDayLabel(date)}`}
-                                  title="Reject"
+                                  title={isWeekEnded ? "Reject" : "Only available once the selected week has ended"}
                                 >
                                   <LuX size={15} strokeWidth={2} />
                                 </button>
@@ -1374,10 +1385,14 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             )}
                           </td>
                         )}
-                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(rawWorksnapTime)}`}>
+                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${worksnapTimeClassName(rawWorksnapTime)}`
+                        }`}>
                           {rawWorksnapTime}
                         </td>
-                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] bg-white px-4 py-2 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                        }`}>
                           {isIndia ? "-" : isEditingAdjustedTime ? (
                             <input
                               autoFocus
@@ -1418,47 +1433,49 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictHighlightCellClass}`}>
                           {regularTimeMinutes > 0 ? formatMinutesAsMins(regularTimeMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {regularAllocation.evaluatedRegularTime > 0 ? formatMinutesAsMins(regularAllocation.evaluatedRegularTime) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {regularAllocation.regularOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.regularOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {regularAllocation.rdOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.rdOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictHighlightCellClass}`}>
                           {evaluatedTime}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {hoOtMinutes > 0 ? formatMinutesAsMins(hoOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {localHoliday}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
                         {!isIndia && (
-                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                             {timeOffRequestTypeFor(date, leaveRequests)}
                           </td>
                         )}
                         {!isIndia && (
-                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                             {timeOffRequestMinutesFor(date, leaveRequests)}
                           </td>
                         )}
-                        <td className="px-4 py-2 text-slate-600">
+                        <td className={`px-4 py-2 ${conflictCellClass}`}>
                           {completionTime}
                         </td>
-                        <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] bg-white px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${approvalStatusClassName(dailyDecisionStatus)}`}>
+                        <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
+                        }`}>
                           {dailyDecisionStatus}
                         </td>
                       </tr>
@@ -1599,7 +1616,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             <button
               type="button"
               onClick={applyTimeCredit}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              disabled={!isWeekEnded}
+              title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
               Apply Time Credit
@@ -1609,7 +1628,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             <button
               type="button"
               onClick={approveAllDays}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+              disabled={!isWeekEnded}
+              title={!isWeekEnded ? "Approve All is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-50"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
               Approve All
@@ -1671,6 +1692,9 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   }, []);
 
   const modalWeekDates = modalWeek ? datesBetween(modalWeek, addDaysIso(modalWeek, 6)) : [];
+  // Bulk Approve only makes sense once the selected week has fully finished —
+  // an ongoing (or future) week's daily totals are still incomplete.
+  const isModalWeekEnded = modalWeek ? arizonaTodayIso() > addDaysIso(modalWeek, 6) : false;
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
@@ -1877,7 +1901,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
                 {["Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Local HO Time", "Total Time Off Request Time", "Completion Time",
+                  "Local HO Time", "Total Time Off Request Time", "Ind Time",
                   "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
@@ -1988,7 +2012,8 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
             <button
               type="button"
               onClick={handleBulkApprovePreview}
-              disabled={selectedIds.size === 0}
+              disabled={selectedIds.size === 0 || !isModalWeekEnded}
+              title={!isModalWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
@@ -2143,6 +2168,10 @@ export default function AttendancePage() {
   // fresh reference on every render was re-triggering those fetches and
   // resetting in-progress review edits back to defaults.
   const weekDates = useMemo(() => datesBetween(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Bulk Approve / Approve All / Apply Time Credit only make sense once the
+  // selected week has fully finished — an ongoing (or future) week's daily
+  // totals are still incomplete, so bulk-approving it would lock in partial data.
+  const isSelectedWeekEnded = arizonaTodayIso() > rangeTo;
 
   useEffect(() => {
     fetch("/api/holidays")
@@ -2358,7 +2387,9 @@ export default function AttendancePage() {
           <div className="flex flex-wrap gap-2 sm:gap-3">
             <button
               onClick={() => setShowBulkApproveModal(true)}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors"
+              disabled={!isSelectedWeekEnded}
+              title={!isSelectedWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
             >
               <LuCircleCheck size={16} strokeWidth={2} />
               <span className="hidden sm:inline">Bulk Approve</span>
@@ -2522,7 +2553,7 @@ export default function AttendancePage() {
                 {[
                   "Contractor", "Department", "Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Total Local HO Time", "Total Time Off Request Time", "Completion Time",
+                  "Total Local HO Time", "Total Time Off Request Time", "Ind Time",
                   "Variance", "Status", "Actions",
                 ].map((h) => (
                   <th
@@ -2598,10 +2629,20 @@ export default function AttendancePage() {
                     : computedCompletionMins + holidayBonusMins
                 );
 
+                const missingContractorProfile = row.hasContractorProfile === false;
                 return (
-                  <tr key={row.contractorId} className="hover:bg-slate-50/80 transition-colors group">
+                  <tr
+                    key={row.contractorId}
+                    className={`transition-colors group ${missingContractorProfile ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50/80"}`}
+                  >
                     {/* Contractor */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-b border-slate-200 overflow-hidden" style={{ minWidth: 280, width: 280, maxWidth: 280 }}>
+                    <td
+                      title={missingContractorProfile ? "Not yet added in Contractor Details" : undefined}
+                      className={`px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 border-r border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 280, width: 280, maxWidth: 280 }}
+                    >
                       <div className="flex items-center gap-2 md:gap-3">
                         <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs md:text-sm font-bold shrink-0">
                           {row.avatar}
@@ -2713,7 +2754,7 @@ export default function AttendancePage() {
                       })()}
                     </td>
 
-                    {/* Completion Time */}
+                    {/* Ind Time */}
                     <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
@@ -2743,7 +2784,12 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 170, width: 170, maxWidth: 170 }}>
+                    <td
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 border-l border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 170, width: 170, maxWidth: 170 }}
+                    >
                       {isAppliedTimeCredit ? (
                         <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
                           Applied Time Credit
@@ -2776,7 +2822,12 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Actions */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 175, width: 175, maxWidth: 175 }}>
+                    <td
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 border-l border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 175, width: 175, maxWidth: 175 }}
+                    >
                       {(isStandard || isReviewed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
@@ -2834,6 +2885,7 @@ export default function AttendancePage() {
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
           allLeaveRequests={leaveRequests}
+          isWeekEnded={isSelectedWeekEnded}
         />
       )}
 

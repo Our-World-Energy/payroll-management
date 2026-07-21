@@ -8,7 +8,8 @@ import {
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
-import { fmtBalance } from "@/lib/timeOffBalances";
+import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate } from "@/lib/timeOffBalances";
+import { fetchCutOffTime } from "../../settings/actions";
 
 function roundBalance(value: number) {
   return Math.round(value * 100) / 100;
@@ -46,15 +47,18 @@ export default function ContractorTimeOffPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AdminLeaveRequest | null>(null);
   const [deleting,     setDeleting]     = useState(false);
+  const [cutoff,       setCutoff]       = useState<CutoffDate>(DEFAULT_CUTOFF);
   const [, startTransition] = useTransition();
 
   const loadData = useCallback(async () => {
-    const [all, requests] = await Promise.all([
+    const [all, requests, savedCutoff] = await Promise.all([
       fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
       fetchAllLeaveRequestsAdmin(),
+      fetchCutOffTime(),
     ]);
     const found = all.find((c) => c.uid === id) ?? null;
     setContractor(found);
+    setCutoff(cutoffFromSaved(savedCutoff));
     // filter to only this contractor's requests
     if (found) {
       setAllRequests(requests.filter((r) => r.email === found.email));
@@ -114,10 +118,13 @@ export default function ContractorTimeOffPage() {
     await loadData();
   }
 
-  const ptoBalance       = contractor?.ptoBalance        ?? 0;
+  // Live-computed from Hire Date + the current Cut Off Time, rather than
+  // trusting the stored snapshot — so a Cut Off Time change is reflected
+  // immediately without waiting for this contractor to be saved again.
+  const ptoBalance       = contractor ? calculatePtoBalance(contractor.hireDate, cutoff) : 0;
   const ptoUsed          = contractor?.ptoUsed           ?? 0;
   const ptoAvailable     = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
-  const sickBalance      = contractor?.sickLeaveBalance  ?? 0;
+  const sickBalance      = contractor ? calculateSickLeaveBalance(contractor.hireDate, cutoff) : 0;
   const sickUsed         = contractor?.sickLeaveUsed     ?? 0;
   const sickAvailable    = roundBalance(Math.max(sickBalance - sickUsed, 0));
   const ptoAvailableLow  = ptoAvailable < 8;
