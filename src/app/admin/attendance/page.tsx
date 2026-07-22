@@ -40,6 +40,12 @@ function formatDayLabel(date: string) {
   });
 }
 
+function formatElapsedSeconds(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function showDailyDecisionActions(worksnapTime: string) {
   return worksnapTime !== "-";
 }
@@ -1627,16 +1633,16 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   );
 }
 
-function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays }: {
+function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays, week, isWeekEnded }: {
   worksnapRows: AttendanceRow[];
   allLeaveRequests: AdminLeaveRequest[];
   onClose: () => void;
   onApprove: () => void;
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
+  week: string;
+  isWeekEnded: boolean;
 }) {
-  const [weeks, setWeeks] = useState<string[]>([]);
-  const [modalWeek, setModalWeek] = useState("");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
@@ -1648,9 +1654,20 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [bulkSaveError, setBulkSaveError] = useState("");
+  const [failedContractorIds, setFailedContractorIds] = useState<Map<string, string>>(new Map());
   const [loadError, setLoadError] = useState("");
   const [retryNonce, setRetryNonce] = useState(0);
   const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
+  const [savingElapsedSeconds, setSavingElapsedSeconds] = useState(0);
+
+  // Ticks once a second while a save is in flight, purely to show elapsed
+  // time in the "Saving…" overlay — resets whenever a save starts/stops.
+  useEffect(() => {
+    if (!isSavingBulk) return;
+    setSavingElapsedSeconds(0);
+    const id = setInterval(() => setSavingElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isSavingBulk]);
 
   // Approved leave requests, filtered from the parent's already-fetched list
   // rather than re-querying the whole leave_requests table again here.
@@ -1659,27 +1676,18 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     [allLeaveRequests]
   );
 
-  // Same recent-Sun→Sat-weeks list the main page uses, anchored to the current
-  // Arizona week, so the latest week is always selectable here too.
-  useEffect(() => {
-    const list = recentWeeks();
-    setWeeks(list);
-    setModalWeek((current) => current || list[0]);
-  }, []);
-
-  const modalWeekDates = modalWeek ? datesBetween(modalWeek, addDaysIso(modalWeek, 6)) : [];
-  // Bulk Approve only makes sense once the selected week has fully finished —
-  // an ongoing (or future) week's daily totals are still incomplete.
-  const isModalWeekEnded = modalWeek ? arizonaTodayIso() > addDaysIso(modalWeek, 6) : false;
+  // Uses the same week currently selected in Weekly Time Tracking (passed in
+  // via the `week` prop) rather than its own independent week picker.
+  const modalWeekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
   const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
   useEffect(() => {
-    if (!modalWeek) return;
+    if (!week) return;
     let isCancelled = false;
-    const dates = datesBetween(modalWeek, addDaysIso(modalWeek, 6));
+    const dates = datesBetween(week, addDaysIso(week, 6));
     const from = dates[0];
     const to = dates[dates.length - 1];
     setIsLoading(true);
@@ -1743,7 +1751,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     load();
     return () => { isCancelled = true; };
-  }, [modalWeek, retryNonce]);
+  }, [week, retryNonce]);
 
   const filteredRows = modalRows
     .filter((r) =>
@@ -1808,6 +1816,8 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       map.set(r.contractorId, bulkApproveCompletionMinutes(r));
     });
     setProcessedApprovals(map);
+    setFailedContractorIds(new Map());
+    setBulkSaveError("");
   }
 
   async function handleSave() {
@@ -1821,8 +1831,12 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
     setIsSavingBulk(true);
     setBulkSaveError("");
-    // One request/transaction for every selected contractor, instead of one
-    // request per contractor racing for the same DB connection pool.
+    setFailedContractorIds(new Map());
+    // One request for every selected contractor, instead of one request per
+    // contractor racing for the same DB connection pool — each contractor
+    // still gets its own transaction server-side, so one failing doesn't
+    // block the rest, and the response says exactly which ones failed.
+    const contractorIdByWorksnapUserId = new Map(rowsToSave.map((r) => [r.worksnapUserId as number, r.contractorId]));
     const items = rowsToSave.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
       return {
@@ -1834,15 +1848,35 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
       };
     });
-    const ok = await fetch("/api/attendance/status/bulk", {
+    type BulkSaveResult = { worksnapUserId: number | null; ok: boolean; error?: string };
+    const response = await fetch("/api/attendance/status/bulk", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
-    }).then((res) => res.ok).catch(() => false);
+    })
+      .then(async (res) => (res.ok ? ((await res.json()) as { results: BulkSaveResult[] }) : null))
+      .catch(() => null);
+
     setIsSavingBulk(false);
 
-    if (!ok) {
-      setBulkSaveError("Some approvals failed to save. Please try again.");
+    const results = response?.results ?? [];
+    const failedMap = new Map<string, string>();
+    for (const r of results) {
+      if (r.ok || r.worksnapUserId == null) continue;
+      const contractorId = contractorIdByWorksnapUserId.get(r.worksnapUserId);
+      if (contractorId) failedMap.set(contractorId, r.error ?? "Failed to save");
+    }
+
+    if (!response || failedMap.size > 0) {
+      setFailedContractorIds(failedMap);
+      setBulkSaveError(
+        failedMap.size > 0
+          ? `${failedMap.size} of ${results.length} approval${results.length !== 1 ? "s" : ""} failed to save — highlighted below. Please retry.`
+          : "Some approvals failed to save. Please try again."
+      );
+      // Some contractors may have saved successfully even though others
+      // failed — refresh the main table so those aren't left stale.
+      if (results.some((r) => r.ok)) onApprove();
       return;
     }
 
@@ -1857,7 +1891,9 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         <div className="px-6 py-5 border-b border-[#003527] bg-[#003527] flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold text-white">Bulk Approve</h3>
-            <p className="text-sm text-green-200 mt-0.5">Approve all selected contractors for the week</p>
+            <p className="text-sm text-green-200 mt-0.5">
+              Approve all selected contractors for {week ? weekLabel(week) : "the selected week"} (same week as Weekly Time Tracking)
+            </p>
           </div>
           <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white">
             <LuX size={18} strokeWidth={2} />
@@ -1879,9 +1915,6 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
           <select value={shiftTypeFilter} onChange={(e) => setShiftTypeFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             <option value="All">All Shift Types</option>
             {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
-            {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
           </select>
         </div>
         {/* Table */}
@@ -1930,21 +1963,28 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                 const isProcessed = processedMins !== undefined;
                 const localHolidayMins = rowLocalHolidayMinutes(row);
                 const timeOffRequestMins = rowTimeOffRequestMinutes(row);
+                const failedError = failedContractorIds.get(row.contractorId);
+                const hasFailed = failedError !== undefined;
                 return (
-                <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 bg-white px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                <tr key={row.contractorId} className={`transition-colors ${hasFailed ? "bg-red-50" : "hover:bg-slate-50"}`}>
+                  <td className={`sticky left-0 z-10 px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50" : "bg-white"}`}>
                     <input type="checkbox" checked={selectedIds.has(row.contractorId)} onChange={() => toggle(row.contractorId)} className="h-4 w-4 rounded border-slate-300 accent-[#003527] cursor-pointer" aria-label={`Select ${row.name}`} />
                   </td>
-                  <td className="sticky left-[52px] z-10 bg-white px-4 py-3 w-[220px] min-w-[220px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                  <td
+                    title={hasFailed ? `Failed to save: ${failedError}` : undefined}
+                    className={`sticky left-[52px] z-10 px-4 py-3 w-[220px] min-w-[220px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50" : "bg-white"}`}
+                  >
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs font-bold shrink-0">{row.avatar}</div>
                       <div>
-                        <p className="font-semibold text-slate-900 whitespace-nowrap">{row.name}</p>
-                        <p className="text-xs text-slate-500 whitespace-nowrap">{row.role}</p>
+                        <p className={`font-semibold whitespace-nowrap ${hasFailed ? "text-red-700" : "text-slate-900"}`}>{row.name}</p>
+                        <p className={`text-xs whitespace-nowrap ${hasFailed ? "text-red-500" : "text-slate-500"}`}>
+                          {hasFailed ? `Failed to save — ${failedError}` : row.role}
+                        </p>
                       </div>
                     </div>
                   </td>
-                  <td className="sticky left-[272px] z-10 bg-white px-4 py-3 w-[160px] min-w-[160px] text-sm text-slate-600 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{departmentForAttendanceRow(row)}</td>
+                  <td className={`sticky left-[272px] z-10 px-4 py-3 w-[160px] min-w-[160px] text-sm whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50 text-red-700" : "bg-white text-slate-600"}`}>{departmentForAttendanceRow(row)}</td>
                   <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
                     {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
@@ -2007,8 +2047,8 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
             <button
               type="button"
               onClick={handleBulkApprovePreview}
-              disabled={selectedIds.size === 0 || !isModalWeekEnded}
-              title={!isModalWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
+              disabled={selectedIds.size === 0 || !isWeekEnded}
+              title={!isWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
@@ -2027,6 +2067,18 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
           )}
         </div>
       </div>
+
+      {/* Saving overlay — blocks interaction and shows elapsed time while a
+          save is in flight (a large batch can take a little while). */}
+      {isSavingBulk && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[240px]">
+            <LuRefreshCw size={28} className="text-emerald-600 animate-spin" />
+            <p className="text-sm font-semibold text-slate-700">Saving approvals…</p>
+            <p className="text-xs text-slate-400 tabular-nums">{formatElapsedSeconds(savingElapsedSeconds)}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2893,6 +2945,8 @@ export default function AttendancePage() {
           onApprove={handleBulkApprove}
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
+          week={week}
+          isWeekEnded={isSelectedWeekEnded}
         />
       )}
 
