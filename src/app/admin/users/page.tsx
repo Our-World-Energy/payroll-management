@@ -3,13 +3,12 @@
 import { useEffect, useState, useTransition } from "react";
 import {
   LuUsers, LuPlus, LuTrash2, LuX, LuLoader, LuShieldCheck, LuUser,
-  LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuCalculator,
+  LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
 } from "react-icons/lu";
 import {
   fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword,
   backfillContractorAccounts, type AppUser,
 } from "./actions";
-import { backfillLeaveBalances } from "../contractors/actions";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 
@@ -18,9 +17,9 @@ function fmtDate(iso: string | null) {
   return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
-function initials(email: string) {
-  const name = email.split("@")[0];
-  const parts = name.split(/[.\-_]/);
+function initials(fullName: string, email: string) {
+  const source = fullName.trim() || email.split("@")[0];
+  const parts = source.split(/[\s.\-_]+/).filter(Boolean);
   return parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "U";
 }
 
@@ -43,6 +42,7 @@ type Modal =
   | { type: "create" }
   | { type: "delete"; user: AppUser }
   | { type: "reset"; user: AppUser }
+  | { type: "role"; user: AppUser; newRole: "admin" | "user" }
   | null;
 
 export default function UserManagementPage() {
@@ -53,8 +53,10 @@ export default function UserManagementPage() {
   const [isPending,     startTransition]  = useTransition();
   const [syncResult,    setSyncResult]    = useState<{ created: number; skipped: number } | null>(null);
   const [syncing,       setSyncing]       = useState(false);
-  const [recalcResult,  setRecalcResult]  = useState<{ updated: number } | null>(null);
-  const [recalculating, setRecalculating] = useState(false);
+
+  // Table filters
+  const [searchTerm, setSearchTerm] = useState("");
+  const [roleFilter, setRoleFilter] = useState<"All" | "admin" | "user">("All");
 
   // Create form
   const [newEmail,    setNewEmail]    = useState("");
@@ -89,18 +91,6 @@ export default function UserManagementPage() {
       setError(e instanceof Error ? e.message : "Sync failed.");
     } finally {
       setSyncing(false);
-    }
-  }
-
-  async function handleRecalculate() {
-    setRecalculating(true); setRecalcResult(null); setError("");
-    try {
-      const result = await backfillLeaveBalances();
-      setRecalcResult(result);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Recalculation failed.");
-    } finally {
-      setRecalculating(false);
     }
   }
 
@@ -140,12 +130,20 @@ export default function UserManagementPage() {
 
   function handleRoleToggle(user: AppUser) {
     const newRole = user.role === "admin" ? "user" : "admin";
+    setModal({ type: "role", user, newRole });
+  }
+
+  function handleConfirmRoleChange() {
+    if (modal?.type !== "role") return;
+    const { user, newRole } = modal;
     startTransition(async () => {
       try {
         await updateUserRole(user.id, newRole);
         setUsers((prev) => prev.map((u) => u.id === user.id ? { ...u, role: newRole } : u));
+        closeModal();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update role.");
+        closeModal();
       }
     });
   }
@@ -166,6 +164,11 @@ export default function UserManagementPage() {
 
   const admins = users.filter((u) => u.role === "admin").length;
   const normalUsers = users.filter((u) => u.role === "user").length;
+
+  const filteredUsers = users.filter((u) =>
+    (roleFilter === "All" || u.role === roleFilter) &&
+    (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
+  );
 
   return (
     <div className="p-6 md:p-8 max-w-full">
@@ -199,15 +202,6 @@ export default function UserManagementPage() {
           >
             {syncing ? <LuLoader size={15} className="animate-spin" /> : <LuUserCheck size={15} strokeWidth={2} />}
             {syncing ? "Syncing…" : "Sync Contractors"}
-          </button>
-          <button
-            onClick={handleRecalculate}
-            disabled={recalculating}
-            title="Recalculate PTO & Sick Leave balances for all existing contractors"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60"
-          >
-            {recalculating ? <LuLoader size={15} className="animate-spin" /> : <LuCalculator size={15} strokeWidth={2} />}
-            {recalculating ? "Recalculating…" : "Recalculate Balances"}
           </button>
           <button
             onClick={() => setModal({ type: "create" })}
@@ -266,15 +260,37 @@ export default function UserManagementPage() {
         </div>
       )}
 
-      {recalcResult && (
-        <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 text-blue-700 text-sm rounded-xl flex items-center gap-2">
-          <LuCircleCheck size={15} />
-          Recalculation complete — <strong>{recalcResult.updated}</strong> contractor{recalcResult.updated !== 1 ? "s" : ""} updated.
-          <button onClick={() => setRecalcResult(null)} className="ml-auto text-blue-500 hover:text-blue-700">
-            <LuX size={14} />
-          </button>
+      {/* Filters */}
+      <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-wrap gap-3 items-center mb-4">
+        <span className="text-sm font-semibold text-slate-500 mr-1">Filters:</span>
+        <div className="relative">
+          <LuSearch size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search name..."
+            className="text-sm border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 w-56"
+          />
         </div>
-      )}
+        <select
+          value={roleFilter}
+          onChange={(e) => setRoleFilter(e.target.value as "All" | "admin" | "user")}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="user">Contractor</option>
+        </select>
+        {(searchTerm !== "" || roleFilter !== "All") && (
+          <button
+            onClick={() => { setSearchTerm(""); setRoleFilter("All"); }}
+            className="text-sm font-semibold text-teal-600 hover:text-teal-700"
+          >
+            Clear
+          </button>
+        )}
+      </div>
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -282,7 +298,7 @@ export default function UserManagementPage() {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr style={{ background: "#003527" }}>
-                {["User", "Role", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
+                {["Full Name", "Email", "Role", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -294,26 +310,27 @@ export default function UserManagementPage() {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="px-5 py-4"><div className="flex items-center gap-3"><div className="size-8 rounded-full bg-slate-100" /><div className="h-3 bg-slate-100 rounded w-36" /></div></td>
-                    {[1,2,3,4,5].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
+                    {[1,2,3,4,5,6].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
                   </tr>
                 ))
-              ) : users.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={7} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuUsers size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
-                    No users found.
+                    {users.length === 0 ? "No users found." : "No users match your search or filter."}
                   </td>
                 </tr>
-              ) : users.map((user) => (
+              ) : filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50 transition-colors group">
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-3">
                       <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColor(user.id)}`}>
-                        {initials(user.email)}
+                        {initials(user.fullName, user.email)}
                       </div>
-                      <span className="text-sm font-semibold text-slate-700 truncate max-w-xs">{user.email}</span>
+                      <span className="text-sm font-semibold text-slate-700 truncate max-w-xs">{user.fullName || "—"}</span>
                     </div>
                   </td>
+                  <td className="px-5 py-4 text-sm text-slate-500 truncate max-w-xs">{user.email}</td>
                   <td className="px-5 py-4">
                     <button
                       onClick={() => handleRoleToggle(user)}
@@ -366,7 +383,9 @@ export default function UserManagementPage() {
           </table>
         </div>
         <div className="px-5 py-3 bg-slate-50 border-t border-slate-200">
-          <p className="text-xs text-slate-400 font-medium">{users.length} total accounts</p>
+          <p className="text-xs text-slate-400 font-medium">
+            {filteredUsers.length === users.length ? `${users.length} total accounts` : `${filteredUsers.length} of ${users.length} accounts`}
+          </p>
         </div>
       </div>
 
@@ -445,6 +464,37 @@ export default function UserManagementPage() {
               >
                 {isPending ? <LuLoader size={15} className="animate-spin" /> : <LuTrash2 size={15} />}
                 {isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Role Change Confirm Modal ── */}
+      {modal?.type === "role" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="px-6 py-5">
+              <div className={`size-12 rounded-full flex items-center justify-center mx-auto mb-4 ${modal.newRole === "admin" ? "bg-purple-100" : "bg-blue-100"}`}>
+                {modal.newRole === "admin" ? <LuShieldCheck size={22} className="text-purple-600" /> : <LuUser size={22} className="text-blue-600" />}
+              </div>
+              <h3 className="text-base font-bold text-slate-800 text-center">Change Role?</h3>
+              <p className="text-sm text-slate-500 text-center mt-1">
+                <span className="font-semibold text-slate-700">{modal.user.email}</span> will be changed from{" "}
+                <span className="font-semibold text-slate-700">{modal.user.role === "admin" ? "Admin" : "Contractor"}</span> to{" "}
+                <span className="font-semibold text-slate-700">{modal.newRole === "admin" ? "Admin" : "Contractor"}</span>.
+              </p>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
+              <button onClick={closeModal} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+              <button
+                onClick={handleConfirmRoleChange}
+                disabled={isPending}
+                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60"
+              >
+                {isPending ? <LuLoader size={15} className="animate-spin" /> : (modal.newRole === "admin" ? <LuShieldCheck size={15} /> : <LuUser size={15} />)}
+                {isPending ? "Updating…" : "Change Role"}
               </button>
             </div>
           </div>
