@@ -5,15 +5,16 @@ import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import Image from "next/image";
 import Link from "next/link";
-import { LuLogOut, LuCalendarDays, LuMenu, LuBell, LuUser, LuUmbrella, LuLayoutDashboard } from "react-icons/lu";
+import { LuLogOut, LuCalendarDays, LuMenu, LuBell, LuUser, LuUmbrella, LuClipboardCheck, LuLayoutDashboard } from "react-icons/lu";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/contractor/dashboard", label: "Dashboard",        Icon: LuLayoutDashboard },
-  { href: "/contractor/profile",   label: "Profile",          Icon: LuUser },
-  { href: "/contractor/holidays",  label: "Holiday Calendar", Icon: LuCalendarDays },
-  { href: "/contractor/time-off",  label: "Time-Off",         Icon: LuUmbrella },
+  { href: "/contractor/dashboard",  label: "Dashboard",        Icon: LuLayoutDashboard },
+  { href: "/contractor/profile",    label: "Profile",          Icon: LuUser },
+  { href: "/contractor/attendance", label: "Attendance",       Icon: LuClipboardCheck },
+  { href: "/contractor/holidays",   label: "Holiday Calendar", Icon: LuCalendarDays },
+  { href: "/contractor/time-off",   label: "Time-Off",         Icon: LuUmbrella },
 ];
 
 export default function ContractorLayout({ children }: { children: React.ReactNode }) {

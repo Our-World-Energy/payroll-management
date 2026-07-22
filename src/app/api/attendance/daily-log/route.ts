@@ -22,6 +22,7 @@ export async function GET(request: Request) {
   const from = searchParams.get("from") ?? date;
   const to = searchParams.get("to") ?? date;
   const userId = searchParams.get("userId");
+  const email = searchParams.get("email");
 
   if (!from || !to) {
     return Response.json({ error: "Missing date (or from/to)." }, { status: 400 });
@@ -30,10 +31,16 @@ export async function GET(request: Request) {
   const where: {
     entryDate: { gte: Date; lte: Date };
     worksnapUserId?: number;
+    email?: { equals: string; mode: "insensitive" };
   } = {
     entryDate: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) },
   };
+  // Scope by worksnapUserId when known; otherwise by email — contractor_profiles
+  // .worksnapId is frequently blank, but worksnap_daily_log.email is populated
+  // (and indexed on [email, entryDate]), so email is the reliable key for the
+  // contractor-facing view.
   if (userId) where.worksnapUserId = Number(userId);
+  else if (email) where.email = { equals: email, mode: "insensitive" };
 
   const logs = await prisma.worksnapDailyLog.findMany({
     where,
