@@ -2033,6 +2033,11 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
         <div className="px-5 py-4 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
           {bulkSaveError && <p className="mr-auto text-sm font-medium text-red-600">{bulkSaveError}</p>}
+          {!bulkSaveError && selectedIds.size > 0 && (
+            <p className="mr-auto text-sm text-slate-500">
+              <span className="font-bold text-slate-700">{selectedIds.size}</span> contractor{selectedIds.size !== 1 ? "s" : ""} selected
+            </p>
+          )}
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
             Close
           </button>
