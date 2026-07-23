@@ -477,6 +477,17 @@ model OrgRole {
   @@map("org_roles")
 }
 
+/// Org-wide settings: Time Off cut off date — month name + day number (no
+/// year, recurs annually). Single-row table.
+model CutOffTime {
+  id              String   @id @default(uuid()) @db.Uuid
+  cutOffMonthName String   @map("cut_off_month_name")
+  cutOffMonthNo   Int      @map("cut_off_month_no")
+  updatedAt       DateTime @updatedAt
+
+  @@map("cut_off_time")
+}
+
 /// Per-employee per-DAY attendance review snapshot (admin picks the date) —
 /// mirrors every column of the Attendance Review modal's daily table so a
 /// reopened review always matches exactly what was last saved.

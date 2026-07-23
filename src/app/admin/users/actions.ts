@@ -11,17 +11,20 @@ function getSupabase() {
 export type AppUser = {
   id: string;
   email: string;
+  fullName: string;
   role: "admin" | "user";
   createdAt: string;
   lastSignIn: string | null;
   confirmed: boolean;
 };
 
-function toAppUser(u: Record<string, unknown>): AppUser {
+function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
+  const metadata = u.user_metadata as Record<string, unknown> | undefined;
   return {
     id:          String(u.id          ?? ""),
     email:       String(u.email       ?? ""),
-    role:        (u.user_metadata as Record<string, unknown>)?.role === "user" ? "user" : "admin",
+    fullName:    fullName || String(metadata?.fullName ?? ""),
+    role:        metadata?.role === "user" ? "user" : "admin",
     createdAt:   String(u.created_at  ?? ""),
     lastSignIn:  u.last_sign_in_at ? String(u.last_sign_in_at) : null,
     confirmed:   Boolean(u.email_confirmed_at),
@@ -30,9 +33,33 @@ function toAppUser(u: Record<string, unknown>): AppUser {
 
 export async function fetchUsers(): Promise<AppUser[]> {
   const sb = getSupabase();
-  const { data, error } = await sb.auth.admin.listUsers({ perPage: 200 });
+  const [{ data, error }, contractorsRes] = await Promise.all([
+    sb.auth.admin.listUsers({ perPage: 200 }),
+    sb.from("contractor_profiles").select("email, status, fullName"),
+  ]);
   if (error) throw new Error(error.message);
-  return (data.users ?? []).map((u) => toAppUser(u as unknown as Record<string, unknown>));
+
+  // Only show Active contractors — accounts with no matching contractor
+  // record (e.g. admin-only accounts) always show, since there's no status
+  // to check for them. Full name is also sourced from here when available,
+  // falling back to whatever's in the auth account's own metadata.
+  const profileByEmail = new Map(
+    (contractorsRes.data ?? []).map((c) => [
+      String(c.email ?? "").trim().toLowerCase(),
+      { status: String(c.status ?? ""), fullName: String(c.fullName ?? "") },
+    ])
+  );
+
+  return (data.users ?? [])
+    .map((u) => {
+      const raw = u as unknown as Record<string, unknown>;
+      const profile = profileByEmail.get(String(raw.email ?? "").trim().toLowerCase());
+      return toAppUser(raw, profile?.fullName);
+    })
+    .filter((u) => {
+      const status = profileByEmail.get(u.email.trim().toLowerCase())?.status;
+      return status == null || status === "Active";
+    });
 }
 
 export async function createUser(email: string, password: string, role: "admin" | "user"): Promise<AppUser> {

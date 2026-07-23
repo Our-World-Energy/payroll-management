@@ -11,8 +11,9 @@ import {
   fetchAllContractors, updateTimeOffUsage,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, type AdminLeaveRequest,
 } from "../contractors/actions";
+import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -45,11 +46,11 @@ function calendarMonthDiff(start: Date, end: Date) {
   );
 }
 
-function sickLeaveYearStart(date: Date): Date {
-  const marchFirst = new Date(date.getFullYear(), 2, 1);
-  return date >= marchFirst
-    ? new Date(date.getFullYear(), 2, 1)
-    : new Date(date.getFullYear() - 1, 2, 1);
+function sickLeaveYearStart(date: Date, cutoff: CutoffDate): Date {
+  const cutoffThisYear = new Date(date.getFullYear(), cutoff.month, cutoff.day);
+  return date >= cutoffThisYear
+    ? cutoffThisYear
+    : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
 }
 
 function roundBalance(value: number) {
@@ -63,14 +64,14 @@ function fmtBalance(value: number) {
   });
 }
 
-function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number): number {
+function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number, cutoff: CutoffDate): number {
   const startDate = parseDate(hireDate);
   if (!startDate) return 0;
   const eligibilityDate = addMonths(startDate, 6);
   const accrualStart = firstOfNextMonth(eligibilityDate);
-  const currentYearStart = sickLeaveYearStart(TODAY);
+  const currentYearStart = sickLeaveYearStart(TODAY, cutoff);
   const prevYearEnd = new Date(currentYearStart.getTime() - 86400000);
-  const prevYearStart = new Date(currentYearStart.getFullYear() - 1, 2, 1);
+  const prevYearStart = new Date(currentYearStart.getFullYear() - 1, cutoff.month, cutoff.day);
   const effectiveStart = accrualStart > prevYearStart ? accrualStart : prevYearStart;
   if (effectiveStart >= currentYearStart) return 0;
   const prevYearEndFirst = new Date(prevYearEnd.getFullYear(), prevYearEnd.getMonth(), 1);
@@ -192,17 +193,19 @@ export default function TimeOffPage() {
   const [overrideBlocked,    setOverrideBlocked]    = useState("");
   const [overrideDuplicateWarning, setOverrideDuplicateWarning] = useState("");
   const [confirmOverrideAnyway, setConfirmOverrideAnyway] = useState<(() => void) | null>(null);
+  const [cutoff, setCutoff] = useState<CutoffDate>(DEFAULT_CUTOFF);
 
   useEffect(() => {
     let active = true;
     async function load() {
       setLoading(true); setLoadError("");
       try {
-        const [all, requests] = await Promise.all([
+        const [all, requests, savedCutoff] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
           fetchAllLeaveRequestsAdmin(),
+          fetchCutOffTime(),
         ]);
-        if (active) { setContractors(all); setLeaveRequests(requests); }
+        if (active) { setContractors(all); setLeaveRequests(requests); setCutoff(cutoffFromSaved(savedCutoff)); }
       } catch (err) {
         if (active) setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
       } finally {
@@ -224,8 +227,11 @@ export default function TimeOffPage() {
 
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
-    const ptoBalance       = c.ptoBalance;
-    const sickLeaveBalance = c.sickLeaveBalance;
+    // Live-computed from Hire Date + the current Cut Off Time, rather than
+    // trusting the stored snapshot — so a Cut Off Time change is reflected
+    // immediately without waiting for this contractor to be saved again.
+    const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
+    const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
     const ptoUsed          = c.ptoUsed;
     const sickLeaveUsed    = c.sickLeaveUsed;
     const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
@@ -244,10 +250,10 @@ export default function TimeOffPage() {
       specialLeaveCredits: c.specialLeaveCredits,
       specialLeaveUsed:    c.specialLeaveUsed,
       specialLeaveAvailable,
-      unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed),
+      unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed, cutoff),
       latestRequest:    latestByEmail[c.email] ?? null,
     };
-  }), [contractors, latestByEmail]);
+  }), [contractors, latestByEmail, cutoff]);
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
@@ -279,7 +285,7 @@ export default function TimeOffPage() {
   const isIndia = countryFilter === "India";
 
   const COLS = [
-    "Employee", "Country", "Department", "Hire Date",
+    "Contractor", "Country", "Department", "Hire Date",
     ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
     "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
@@ -1074,7 +1080,7 @@ export default function TimeOffPage() {
             <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                  style={{ minWidth: 210, background: "#003527" }}>Employee</th>
+                  style={{ minWidth: 210, background: "#003527" }}>Contractor</th>
                 {COLS.slice(1, -1).map((h) => (
                   <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20">{h}</th>
                 ))}

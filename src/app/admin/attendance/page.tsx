@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
-import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel } from "@/lib/weekUtils";
+import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -40,6 +40,12 @@ function formatDayLabel(date: string) {
   });
 }
 
+function formatElapsedSeconds(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 function showDailyDecisionActions(worksnapTime: string) {
   return worksnapTime !== "-";
 }
@@ -53,6 +59,7 @@ type ReviewModalProps = {
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
   allLeaveRequests: AdminLeaveRequest[];
+  isWeekEnded: boolean;
 };
 
 type WorksnapEntry = {
@@ -67,6 +74,7 @@ type WorksnapEntry = {
   shiftType?: string | null;
   payCategory?: string | null;
   dailyWorksnapMinutes?: Record<string, number>;
+  hasContractorProfile?: boolean;
 };
 
 const EMPTY_DAILY_WORKSNAP_MINUTES: Record<string, number> = {};
@@ -573,43 +581,6 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[],
   }, 0);
 }
 
-function computeApprovedCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>) {
-  const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
-
-  if (isFixedContractor(row.payCategory)) {
-    const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
-    return Math.min(total, 2400);
-  }
-
-  const restDaysStr = restDaysForAttendanceRow(row);
-  const shiftType = shiftTypeForAttendanceRow(row);
-  return weekDates.reduce((total, date) => {
-    const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-    if (worksnapTime === "-") return total;
-
-    const isRestDay = isRestDayDate(date, restDaysStr);
-
-    const timeOffRequest = TIME_OFF.find((item) =>
-      item.name === row.name && date >= item.from && date <= item.to
-    );
-    let timeOffStatus = "No Time Off";
-    if (timeOffRequest) {
-      if (timeOffRequest.type === "Sick Leave") timeOffStatus = "Sick Leave";
-      else if (timeOffRequest.type === "Unpaid Leave") timeOffStatus = "Unpaid Leave";
-      else timeOffStatus = "PTO";
-    }
-    const isFullTimeOffDay = isFullTimeOffStatus(timeOffStatus);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, "Approved", isRestDay, shiftType, isFullTimeOffDay);
-    // Approved is assumed throughout this function, so rest-day work (tracked as
-    // RD OT Time) or full-time-off-day work (tracked as Regular OT Time) —
-    // neither embedded in Evaluated Time above — always counts here.
-    const otTimeToFold = isRestDay || isFullTimeOffDay ? worksnapTime : "-";
-
-    const timeOffTime = timeOffTimeFor(timeOffStatus);
-    return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, "-", otTimeToFold));
-  }, 0);
-}
-
 // Per-day attendance_day_status snapshot for a Bulk Approve save: every logged
 // day is Approved (no per-day reject/override in this flow), time off comes
 // from the row's default status, mirroring what the Review modal would save.
@@ -626,7 +597,11 @@ function buildBulkApproveDaySnapshots(
 ) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
-  const shiftType = shiftTypeForAttendanceRow(row);
+  // Same India/Fixed-contractor suppression Attendance Review applies (see
+  // evaluationShiftType in ReviewModal) — currently a no-op here since Fixed
+  // contractors are already excluded from Bulk Approve's candidate rows, but
+  // kept so this function stays correct if that filter ever changes.
+  const shiftType = isFixedContractor(row.payCategory) ? undefined : shiftTypeForAttendanceRow(row);
   const userLogs = dailyLogs.filter((l) => l.worksnapUserId === row.worksnapUserId);
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time,
@@ -671,11 +646,18 @@ function buildBulkApproveDaySnapshots(
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
     const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
-    const { rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
+    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
       timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay,
       dailyDecisionStatus === "Approved", isFullTimeOffDay
     );
     const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+    // Same week-total formula Attendance Review actually saves as
+    // completionMinutes (see completionTotalMinutes in ReviewModal) — not the
+    // weekly-reallocated allocation above, which only feeds the day snapshot's
+    // own evaluatedRegular/regularOt/rdOt breakdown fields.
+    const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
+    const otMinutesToFold = rawRdOtMinutes + (isFullTimeOffDay ? rawRegularOtMinutes : 0);
+    const completionMinutes = timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
 
     return {
       date,
@@ -689,6 +671,7 @@ function buildBulkApproveDaySnapshots(
       regularOtMinutes: allocation.regularOtMinutes,
       rdOtMinutes: allocation.rdOtMinutes,
       hoOtMinutes,
+      completionMinutes,
     };
   });
 }
@@ -714,8 +697,9 @@ function rowWeeklyTotals(
       totalEvaluatedMinutes: totals.totalEvaluatedMinutes + d.evaluatedMinutes,
       totalUsHoMinutes: totals.totalUsHoMinutes + d.holidayMinutes,
       totalHoOtMinutes: totals.totalHoOtMinutes + d.hoOtMinutes,
+      totalCompletionMinutes: totals.totalCompletionMinutes + d.completionMinutes,
     }),
-    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalEvaluatedMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0 }
+    { totalEvaluatedRegularMinutes: 0, totalRegularOtMinutes: 0, totalRdOtMinutes: 0, totalEvaluatedMinutes: 0, totalUsHoMinutes: 0, totalHoOtMinutes: 0, totalCompletionMinutes: 0 }
   );
 }
 
@@ -768,6 +752,7 @@ type AttendanceRow = AttendanceRecord & {
   totalRdOtMinutes?: number | null;
   totalHoOtMinutes?: number | null;
   savedDailyDecisionStatuses?: Record<string, string>;
+  hasContractorProfile?: boolean;
 };
 
 function isFixedContractor(payCategory?: string) {
@@ -817,11 +802,12 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
     shiftType,
     payCategory,
     dailyWorksnapMinutes: entry.dailyWorksnapMinutes ?? {},
+    hasContractorProfile: entry.hasContractorProfile ?? false,
   };
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number> }>();
+  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; dailyWorksnapMinutes: Record<string, number>; hasContractorProfile: boolean }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -843,6 +829,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
       shiftType: current?.shiftType || entry.shiftType || null,
       payCategory: current?.payCategory || entry.payCategory || null,
       dailyWorksnapMinutes,
+      hasContractorProfile: current?.hasContractorProfile || entry.hasContractorProfile || false,
     });
   });
 
@@ -884,7 +871,7 @@ function payCategoryForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests, isWeekEnded }: ReviewModalProps) {
   const name = record.name;
   const role = record.role;
   const actual = record.actualMinutes;
@@ -985,9 +972,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Shift Type", shiftType],
     ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
-    ["Completion Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
+    ["Ind Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Completion Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Ind Time", "Approval Status"]
     .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
@@ -1139,7 +1126,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   }
 
   function approveAllDays() {
-    const applicableDates = weekDates.filter((date) => !isRestDayDate(date, restDaysStr));
+    // Matches exactly which days show the per-day Decision check/x icons —
+    // every non-rest day, plus any rest day that still has Worksnap Time logged.
+    const applicableDates = weekDates.filter((date) =>
+      !isRestDayDate(date, restDaysStr) || worksnapTimeForDate(dailyWorksnapMinutes, date) !== "-"
+    );
     const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
     setDailyDecisionStatuses((current) => {
       const next = { ...current };
@@ -1316,6 +1307,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     // half day) request for, but also logged actual Worksnap Time —
                     // i.e. they filed leave but reported to work anyway.
                     const hasLeaveWorkConflict = rawWorksnapTime !== "-" && hasApprovedLeaveRequestFor(date, leaveRequests);
+                    const conflictCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "text-slate-600";
+                    const conflictHighlightCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-red-50 text-slate-600";
                     // Effective time — Adjusted Time when present, else Worksnap Time. Every
                     // calculation below reads this instead of the raw value.
                     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1347,24 +1340,28 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {formatDayLabel(date)}
                         </td>
                         {!isIndia && (
-                          <td className="sticky left-[156px] z-10 w-[112px] min-w-[112px] bg-white px-4 py-2 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
-                            {!isRestDay ? (
+                          <td className={`sticky left-[156px] z-10 w-[112px] min-w-[112px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                          }`}>
+                            {!isRestDay || rawWorksnapTime !== "-" ? (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
                                   onClick={() => toggleDailyDecision(date, "Approved")}
-                                  className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                                  disabled={!isWeekEnded}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                   aria-label={`Approve attendance for ${formatDayLabel(date)}`}
-                                  title="Approve"
+                                  title={isWeekEnded ? "Approve" : "Only available once the selected week has ended"}
                                 >
                                   <LuCircleCheck size={15} strokeWidth={2} />
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => toggleDailyDecision(date, "Rejected")}
-                                  className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50"
+                                  disabled={!isWeekEnded}
+                                  className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
                                   aria-label={`Reject attendance for ${formatDayLabel(date)}`}
-                                  title="Reject"
+                                  title={isWeekEnded ? "Reject" : "Only available once the selected week has ended"}
                                 >
                                   <LuX size={15} strokeWidth={2} />
                                 </button>
@@ -1374,10 +1371,14 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             )}
                           </td>
                         )}
-                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] bg-white px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${worksnapTimeClassName(rawWorksnapTime)}`}>
+                        <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${worksnapTimeClassName(rawWorksnapTime)}`
+                        }`}>
                           {rawWorksnapTime}
                         </td>
-                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] bg-white px-4 py-2 text-slate-600 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                        }`}>
                           {isIndia ? "-" : isEditingAdjustedTime ? (
                             <input
                               autoFocus
@@ -1418,47 +1419,49 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictHighlightCellClass}`}>
                           {regularTimeMinutes > 0 ? formatMinutesAsMins(regularTimeMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {regularAllocation.evaluatedRegularTime > 0 ? formatMinutesAsMins(regularAllocation.evaluatedRegularTime) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {regularAllocation.regularOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.regularOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {regularAllocation.rdOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.rdOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 bg-red-50">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictHighlightCellClass}`}>
                           {evaluatedTime}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {hoOtMinutes > 0 ? formatMinutesAsMins(hoOtMinutes) : "-"}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100">
+                        <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {localHoliday}
                         </td>
-                        <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
                         {!isIndia && (
-                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                             {timeOffRequestTypeFor(date, leaveRequests)}
                           </td>
                         )}
                         {!isIndia && (
-                          <td className="px-4 py-2 text-slate-600 border-r border-slate-100 whitespace-nowrap">
+                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                             {timeOffRequestMinutesFor(date, leaveRequests)}
                           </td>
                         )}
-                        <td className="px-4 py-2 text-slate-600">
+                        <td className={`px-4 py-2 ${conflictCellClass}`}>
                           {completionTime}
                         </td>
-                        <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] bg-white px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${approvalStatusClassName(dailyDecisionStatus)}`}>
+                        <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
+                        }`}>
                           {dailyDecisionStatus}
                         </td>
                       </tr>
@@ -1599,7 +1602,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             <button
               type="button"
               onClick={applyTimeCredit}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+              disabled={!isWeekEnded}
+              title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
               Apply Time Credit
@@ -1609,7 +1614,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             <button
               type="button"
               onClick={approveAllDays}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+              disabled={!isWeekEnded}
+              title={!isWeekEnded ? "Approve All is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-50"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
               Approve All
@@ -1630,16 +1637,16 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   );
 }
 
-function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays }: {
+function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays, week, isWeekEnded }: {
   worksnapRows: AttendanceRow[];
   allLeaveRequests: AdminLeaveRequest[];
   onClose: () => void;
   onApprove: () => void;
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
+  week: string;
+  isWeekEnded: boolean;
 }) {
-  const [weeks, setWeeks] = useState<string[]>([]);
-  const [modalWeek, setModalWeek] = useState("");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
@@ -1651,9 +1658,20 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [bulkSaveError, setBulkSaveError] = useState("");
+  const [failedContractorIds, setFailedContractorIds] = useState<Map<string, string>>(new Map());
   const [loadError, setLoadError] = useState("");
   const [retryNonce, setRetryNonce] = useState(0);
   const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
+  const [savingElapsedSeconds, setSavingElapsedSeconds] = useState(0);
+
+  // Ticks once a second while a save is in flight, purely to show elapsed
+  // time in the "Saving…" overlay — resets whenever a save starts/stops.
+  useEffect(() => {
+    if (!isSavingBulk) return;
+    setSavingElapsedSeconds(0);
+    const id = setInterval(() => setSavingElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isSavingBulk]);
 
   // Approved leave requests, filtered from the parent's already-fetched list
   // rather than re-querying the whole leave_requests table again here.
@@ -1662,24 +1680,18 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     [allLeaveRequests]
   );
 
-  // Same recent-Sun→Sat-weeks list the main page uses, anchored to the current
-  // Arizona week, so the latest week is always selectable here too.
-  useEffect(() => {
-    const list = recentWeeks();
-    setWeeks(list);
-    setModalWeek((current) => current || list[0]);
-  }, []);
-
-  const modalWeekDates = modalWeek ? datesBetween(modalWeek, addDaysIso(modalWeek, 6)) : [];
+  // Uses the same week currently selected in Weekly Time Tracking (passed in
+  // via the `week` prop) rather than its own independent week picker.
+  const modalWeekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
   const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
   const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
   const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
   useEffect(() => {
-    if (!modalWeek) return;
+    if (!week) return;
     let isCancelled = false;
-    const dates = datesBetween(modalWeek, addDaysIso(modalWeek, 6));
+    const dates = datesBetween(week, addDaysIso(week, 6));
     const from = dates[0];
     const to = dates[dates.length - 1];
     setIsLoading(true);
@@ -1687,10 +1699,11 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     async function load() {
       try {
-        const [entriesResult, weekStatusResult, dailyLogResult] = await Promise.all([
+        const [entriesResult, weekStatusResult, dailyLogResult, dayStatusResult] = await Promise.all([
           fetchWithRetry(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
           fetchWithRetry(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
           fetchWithRetry(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+          fetchWithRetry(`/api/attendance/day-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { days: [] })),
         ]);
         if (isCancelled) return;
 
@@ -1711,21 +1724,24 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
 
         // Adjusted Time overrides Worksnap Time the same way an individual
-        // Attendance Review does — fetch any already-saved per-day adjustment
-        // for the contractors this bulk pass could actually approve.
+        // Attendance Review does — one bulk request covers every contractor's
+        // saved per-day adjustment instead of firing one request per candidate
+        // row (was the slow part of loading this modal).
         const candidateRows = mergedRows.filter((r) =>
           r.weeklyStatus === "For Review" && !isFixedContractor(r.payCategory) && r.worksnapUserId != null
         );
-        const adjustedEntries = await Promise.all(candidateRows.map((r) =>
-          fetchWithRetry(`/api/attendance/day-status?userId=${r.worksnapUserId}&week=${from}`)
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data: { days?: Array<{ date: string; adjustedMinutes: number | null }> } | null) => {
-              const map: Record<string, number> = {};
-              (data?.days ?? []).forEach((d) => { if (d.adjustedMinutes != null && d.adjustedMinutes > 0) map[d.date] = d.adjustedMinutes; });
-              return [r.contractorId, map] as [string, Record<string, number>];
-            })
-            .catch(() => [r.contractorId, {}] as [string, Record<string, number>])
-        ));
+        const adjustedByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
+          const email = String(d.email ?? "").trim().toLowerCase();
+          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          const map = adjustedByEmail.get(email) ?? {};
+          map[String(d.date ?? "")] = d.adjustedMinutes;
+          adjustedByEmail.set(email, map);
+        }
+        const adjustedEntries: [string, Record<string, number>][] = candidateRows.map((r) => {
+          const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+          return [r.contractorId, adjustedByEmail.get(email) ?? {}];
+        });
         if (isCancelled) return;
         setAdjustedByContractor(new Map(adjustedEntries));
       } catch {
@@ -1739,7 +1755,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     load();
     return () => { isCancelled = true; };
-  }, [modalWeek, retryNonce]);
+  }, [week, retryNonce]);
 
   const filteredRows = modalRows
     .filter((r) =>
@@ -1786,12 +1802,26 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     return totalTimeOffRequestMinutesFor(modalWeekDates, leaveRequests.filter((req) => req.email === email));
   }
 
+  // Same week-total formula Attendance Review actually saves (see
+  // rowWeeklyTotals/buildBulkApproveDaySnapshots), not the legacy
+  // computeApprovedCompletionMinutes (which never saw real leave requests
+  // or HO OT Time).
+  function bulkApproveCompletionMinutes(r: AttendanceRow) {
+    const email = r.role.includes("@") ? r.role : "";
+    return rowWeeklyTotals(
+      r, modalWeekDates, usaHolidays, dailyLogs, allHolidays,
+      adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)
+    ).totalCompletionMinutes;
+  }
+
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r));
+      map.set(r.contractorId, bulkApproveCompletionMinutes(r));
     });
     setProcessedApprovals(map);
+    setFailedContractorIds(new Map());
+    setBulkSaveError("");
   }
 
   async function handleSave() {
@@ -1799,31 +1829,58 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, computeApprovedCompletionMinutes(r, modalWeekDates, adjustedByContractor.get(r.contractorId)) + rowHolidayBonus(r)])
+          .map((r) => [r.contractorId, bulkApproveCompletionMinutes(r)])
         );
 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
     setIsSavingBulk(true);
     setBulkSaveError("");
-    const results = await Promise.all(rowsToSave.map((r) => {
+    setFailedContractorIds(new Map());
+    // One request for every selected contractor, instead of one request per
+    // contractor racing for the same DB connection pool — each contractor
+    // still gets its own transaction server-side, so one failing doesn't
+    // block the rest, and the response says exactly which ones failed.
+    const contractorIdByWorksnapUserId = new Map(rowsToSave.map((r) => [r.worksnapUserId as number, r.contractorId]));
+    const items = rowsToSave.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
-      return fetch("/api/attendance/status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          worksnapUserId: r.worksnapUserId,
-          email,
-          week: modalWeekDates[0],
-          requestStatus: "APPROVED",
-          completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
-          days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
-        }),
-      }).then((res) => res.ok).catch(() => false);
-    }));
+      return {
+        worksnapUserId: r.worksnapUserId,
+        email,
+        week: modalWeekDates[0],
+        requestStatus: "APPROVED",
+        completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
+        days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
+      };
+    });
+    type BulkSaveResult = { worksnapUserId: number | null; ok: boolean; error?: string };
+    const response = await fetch("/api/attendance/status/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    })
+      .then(async (res) => (res.ok ? ((await res.json()) as { results: BulkSaveResult[] }) : null))
+      .catch(() => null);
+
     setIsSavingBulk(false);
 
-    if (results.some((ok) => !ok)) {
-      setBulkSaveError("Some approvals failed to save. Please try again.");
+    const results = response?.results ?? [];
+    const failedMap = new Map<string, string>();
+    for (const r of results) {
+      if (r.ok || r.worksnapUserId == null) continue;
+      const contractorId = contractorIdByWorksnapUserId.get(r.worksnapUserId);
+      if (contractorId) failedMap.set(contractorId, r.error ?? "Failed to save");
+    }
+
+    if (!response || failedMap.size > 0) {
+      setFailedContractorIds(failedMap);
+      setBulkSaveError(
+        failedMap.size > 0
+          ? `${failedMap.size} of ${results.length} approval${results.length !== 1 ? "s" : ""} failed to save — highlighted below. Please retry.`
+          : "Some approvals failed to save. Please try again."
+      );
+      // Some contractors may have saved successfully even though others
+      // failed — refresh the main table so those aren't left stale.
+      if (results.some((r) => r.ok)) onApprove();
       return;
     }
 
@@ -1838,7 +1895,9 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         <div className="px-6 py-5 border-b border-[#003527] bg-[#003527] flex items-start justify-between">
           <div>
             <h3 className="text-lg font-bold text-white">Bulk Approve</h3>
-            <p className="text-sm text-green-200 mt-0.5">Approve all selected contractors for the week</p>
+            <p className="text-sm text-green-200 mt-0.5">
+              Approve all selected contractors for {week ? weekLabel(week) : "the selected week"} (same week as Weekly Time Tracking)
+            </p>
           </div>
           <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white">
             <LuX size={18} strokeWidth={2} />
@@ -1861,9 +1920,6 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
             <option value="All">All Shift Types</option>
             {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select value={modalWeek} onChange={(e) => setModalWeek(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
-            {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
-          </select>
         </div>
         {/* Table */}
         <div className="min-h-0 overflow-x-auto overflow-y-auto">
@@ -1877,7 +1933,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
                 {["Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Local HO Time", "Total Time Off Request Time", "Completion Time",
+                  "Local HO Time", "Total Time Off Request Time", "Ind Time",
                   "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
@@ -1905,27 +1961,34 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
                 const rowHolidayBonusMins = rowHolidayBonus(row);
-                const completionMins = processedMins ?? row.completionMinutes ?? (computeWeeklyCompletionMinutes(row, modalWeekDates, adjustedByContractor.get(row.contractorId)) + rowHolidayBonusMins);
-                const isProcessed = processedMins !== undefined;
-                const localHolidayMins = rowLocalHolidayMinutes(row);
                 const rowEmailForLeave = row.role.includes("@") ? row.role : "";
                 const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId), leaveRequests.filter((req) => req.email === rowEmailForLeave));
+                const completionMins = processedMins ?? row.completionMinutes ?? weeklyTotals.totalCompletionMinutes;
+                const isProcessed = processedMins !== undefined;
+                const localHolidayMins = rowLocalHolidayMinutes(row);
                 const timeOffRequestMins = rowTimeOffRequestMinutes(row);
+                const failedError = failedContractorIds.get(row.contractorId);
+                const hasFailed = failedError !== undefined;
                 return (
-                <tr key={row.contractorId} className="hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 bg-white px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                <tr key={row.contractorId} className={`transition-colors ${hasFailed ? "bg-red-50" : "hover:bg-slate-50"}`}>
+                  <td className={`sticky left-0 z-10 px-4 py-3 w-[52px] min-w-[52px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50" : "bg-white"}`}>
                     <input type="checkbox" checked={selectedIds.has(row.contractorId)} onChange={() => toggle(row.contractorId)} className="h-4 w-4 rounded border-slate-300 accent-[#003527] cursor-pointer" aria-label={`Select ${row.name}`} />
                   </td>
-                  <td className="sticky left-[52px] z-10 bg-white px-4 py-3 w-[220px] min-w-[220px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                  <td
+                    title={hasFailed ? `Failed to save: ${failedError}` : undefined}
+                    className={`sticky left-[52px] z-10 px-4 py-3 w-[220px] min-w-[220px] border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50" : "bg-white"}`}
+                  >
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs font-bold shrink-0">{row.avatar}</div>
                       <div>
-                        <p className="font-semibold text-slate-900 whitespace-nowrap">{row.name}</p>
-                        <p className="text-xs text-slate-500 whitespace-nowrap">{row.role}</p>
+                        <p className={`font-semibold whitespace-nowrap ${hasFailed ? "text-red-700" : "text-slate-900"}`}>{row.name}</p>
+                        <p className={`text-xs whitespace-nowrap ${hasFailed ? "text-red-500" : "text-slate-500"}`}>
+                          {hasFailed ? `Failed to save — ${failedError}` : row.role}
+                        </p>
                       </div>
                     </div>
                   </td>
-                  <td className="sticky left-[272px] z-10 bg-white px-4 py-3 w-[160px] min-w-[160px] text-sm text-slate-600 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{departmentForAttendanceRow(row)}</td>
+                  <td className={`sticky left-[272px] z-10 px-4 py-3 w-[160px] min-w-[160px] text-sm whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50 text-red-700" : "bg-white text-slate-600"}`}>{departmentForAttendanceRow(row)}</td>
                   <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
                     {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
@@ -1988,7 +2051,8 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
             <button
               type="button"
               onClick={handleBulkApprovePreview}
-              disabled={selectedIds.size === 0}
+              disabled={selectedIds.size === 0 || !isWeekEnded}
+              title={!isWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
               className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               <LuCircleCheck size={15} strokeWidth={2} />
@@ -2007,6 +2071,18 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
           )}
         </div>
       </div>
+
+      {/* Saving overlay — blocks interaction and shows elapsed time while a
+          save is in flight (a large batch can take a little while). */}
+      {isSavingBulk && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[240px]">
+            <LuRefreshCw size={28} className="text-emerald-600 animate-spin" />
+            <p className="text-sm font-semibold text-slate-700">Saving approvals…</p>
+            <p className="text-xs text-slate-400 tabular-nums">{formatElapsedSeconds(savingElapsedSeconds)}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2143,6 +2219,10 @@ export default function AttendancePage() {
   // fresh reference on every render was re-triggering those fetches and
   // resetting in-progress review edits back to defaults.
   const weekDates = useMemo(() => datesBetween(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Bulk Approve / Approve All / Apply Time Credit only make sense once the
+  // selected week has fully finished — an ongoing (or future) week's daily
+  // totals are still incomplete, so bulk-approving it would lock in partial data.
+  const isSelectedWeekEnded = arizonaTodayIso() > rangeTo;
 
   useEffect(() => {
     fetch("/api/holidays")
@@ -2358,7 +2438,9 @@ export default function AttendancePage() {
           <div className="flex flex-wrap gap-2 sm:gap-3">
             <button
               onClick={() => setShowBulkApproveModal(true)}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors"
+              disabled={!isSelectedWeekEnded}
+              title={!isSelectedWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
             >
               <LuCircleCheck size={16} strokeWidth={2} />
               <span className="hidden sm:inline">Bulk Approve</span>
@@ -2522,7 +2604,7 @@ export default function AttendancePage() {
                 {[
                   "Contractor", "Department", "Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Total Local HO Time", "Total Time Off Request Time", "Completion Time",
+                  "Total Local HO Time", "Total Time Off Request Time", "Ind Time",
                   "Variance", "Status", "Actions",
                 ].map((h) => (
                   <th
@@ -2598,10 +2680,20 @@ export default function AttendancePage() {
                     : computedCompletionMins + holidayBonusMins
                 );
 
+                const missingContractorProfile = row.hasContractorProfile === false;
                 return (
-                  <tr key={row.contractorId} className="hover:bg-slate-50/80 transition-colors group">
+                  <tr
+                    key={row.contractorId}
+                    className={`transition-colors group ${missingContractorProfile ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50/80"}`}
+                  >
                     {/* Contractor */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-b border-slate-200 overflow-hidden" style={{ minWidth: 280, width: 280, maxWidth: 280 }}>
+                    <td
+                      title={missingContractorProfile ? "Not yet added in Contractor Details" : undefined}
+                      className={`px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 border-r border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 280, width: 280, maxWidth: 280 }}
+                    >
                       <div className="flex items-center gap-2 md:gap-3">
                         <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-[#003527] text-white flex items-center justify-center text-xs md:text-sm font-bold shrink-0">
                           {row.avatar}
@@ -2713,7 +2805,7 @@ export default function AttendancePage() {
                       })()}
                     </td>
 
-                    {/* Completion Time */}
+                    {/* Ind Time */}
                     <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
                       {isOnLeave ? (
                         <span className="text-sm text-slate-400">—</span>
@@ -2743,7 +2835,12 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Status */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 170, width: 170, maxWidth: 170 }}>
+                    <td
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 border-l border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 170, width: 170, maxWidth: 170 }}
+                    >
                       {isAppliedTimeCredit ? (
                         <span className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
                           Applied Time Credit
@@ -2776,7 +2873,12 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Actions */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-b border-slate-200 overflow-hidden" style={{ minWidth: 175, width: 175, maxWidth: 175 }}>
+                    <td
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 border-l border-b border-slate-200 overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      }`}
+                      style={{ minWidth: 175, width: 175, maxWidth: 175 }}
+                    >
                       {(isStandard || isReviewed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
@@ -2834,6 +2936,7 @@ export default function AttendancePage() {
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
           allLeaveRequests={leaveRequests}
+          isWeekEnded={isSelectedWeekEnded}
         />
       )}
 
@@ -2846,6 +2949,8 @@ export default function AttendancePage() {
           onApprove={handleBulkApprove}
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
+          week={week}
+          isWeekEnded={isSelectedWeekEnded}
         />
       )}
 

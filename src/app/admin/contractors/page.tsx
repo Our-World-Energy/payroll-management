@@ -8,7 +8,8 @@ import {
   LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle, LuSearch,
 } from "react-icons/lu";
 import type { Contractor, FilterRule } from "./types";
-import { fmtBalance } from "@/lib/timeOffBalances";
+import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, type CutoffDate } from "@/lib/timeOffBalances";
+import { fetchCutOffTime } from "../settings/actions";
 import { AddContractorModal } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
@@ -63,17 +64,20 @@ function contractorFullName(contractor: Contractor) {
   return contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ");
 }
 
-function getContractorTimeOff(contractor: Contractor) {
+// Live-computed from Hire Date + the current Cut Off Time, rather than
+// trusting the stored snapshot — so a Cut Off Time change is reflected
+// immediately without waiting for each contractor to be saved again.
+function getContractorTimeOff(contractor: Contractor, cutoff: CutoffDate) {
   return {
-    ptoBalance:       contractor.ptoBalance,
+    ptoBalance:       calculatePtoBalance(contractor.hireDate, cutoff),
     ptoUsed:          contractor.ptoUsed,
-    sickLeaveBalance: contractor.sickLeaveBalance,
+    sickLeaveBalance: calculateSickLeaveBalance(contractor.hireDate, cutoff),
     sickLeaveUsed:    contractor.sickLeaveUsed,
   };
 }
 
 // Export all filtered rows as CSV
-function exportCSV(rows: Contractor[]) {
+function exportCSV(rows: Contractor[], cutoff: CutoffDate) {
   const headers = [
     "Unique ID","First Name","Middle Name","Surname","Full Name","DOB","Gender",
     "Contractor ID","Department","Sub-Department","Role","Location","Status",
@@ -86,7 +90,7 @@ function exportCSV(rows: Contractor[]) {
   const lines = [
     headers.join(","),
     ...rows.map((c) => {
-      const timeOff = getContractorTimeOff(c);
+      const timeOff = getContractorTimeOff(c, cutoff);
 
       return [
         c.uid, c.firstName, c.middleName, c.surname, c.fullName, c.dob, c.gender,
@@ -225,8 +229,11 @@ export default function ContractorsPage() {
   async function handleExport() {
     setExporting(true);
     try {
-      const all = await fetchAllContractors({ country, status, rules: activeRules, search: nameSearch });
-      exportCSV(all);
+      const [all, savedCutoff] = await Promise.all([
+        fetchAllContractors({ country, status, rules: activeRules, search: nameSearch }),
+        fetchCutOffTime(),
+      ]);
+      exportCSV(all, cutoffFromSaved(savedCutoff));
     } finally {
       setExporting(false);
     }

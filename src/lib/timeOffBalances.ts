@@ -7,6 +7,26 @@ const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 
 export const HOURS_PER_DAY = 8;
 
+// The PTO/Sick Leave accrual "year" resets on a cut off date (month + day,
+// no year) configured under Settings → Time Off Settings → Cut Off Time,
+// rather than being hardcoded to March 1st.
+export type CutoffDate = { month: number; day: number }; // month is 0-indexed (Date()-compatible)
+
+export const CUTOFF_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+// Falls back to March 1st (the previously-hardcoded date) until a Cut Off
+// Time has actually been saved in Settings.
+export const DEFAULT_CUTOFF: CutoffDate = { month: 2, day: 1 };
+
+export function cutoffFromSaved(saved: { monthName: string; monthNo: number } | null): CutoffDate {
+  if (!saved) return DEFAULT_CUTOFF;
+  const month = CUTOFF_MONTHS.indexOf(saved.monthName);
+  return month >= 0 ? { month, day: saved.monthNo } : DEFAULT_CUTOFF;
+}
+
 // Fixed deduction per leave request, independent of the date range selected —
 // "PTO"/"Sick Leave" = 1 full day, "* Half Day" = half a day. Not scaled by
 // durationDays. Shared by the contractor submission flow (to stamp a request
@@ -85,14 +105,14 @@ function calendarMonthDiff(start: Date, end: Date) {
   );
 }
 
-function accrualPeriodStartFor(date: Date) {
-  const marchFirst = new Date(date.getFullYear(), 2, 1);
-  return date >= marchFirst ? new Date(date.getFullYear(), 0, 1) : new Date(date.getFullYear() - 1, 2, 1);
+function accrualPeriodStartFor(date: Date, cutoff: CutoffDate) {
+  const cutoffThisYear = new Date(date.getFullYear(), cutoff.month, cutoff.day);
+  return date >= cutoffThisYear ? new Date(date.getFullYear(), 0, 1) : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
 }
 
-function latestResetDateFor(date: Date) {
-  const marchFirst = new Date(date.getFullYear(), 2, 1);
-  return date >= marchFirst ? marchFirst : new Date(date.getFullYear() - 1, 2, 1);
+function latestResetDateFor(date: Date, cutoff: CutoffDate) {
+  const cutoffThisYear = new Date(date.getFullYear(), cutoff.month, cutoff.day);
+  return date >= cutoffThisYear ? cutoffThisYear : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
 }
 
 export function roundBalance(value: number) {
@@ -114,7 +134,8 @@ function calculatePolicyBalanceAsOf(
   hireDate: string,
   monthlyAccrual: number,
   halfMonthAccrual: number,
-  asOfDate: Date
+  asOfDate: Date,
+  cutoff: CutoffDate
 ) {
   const startDate = parseDate(hireDate);
 
@@ -133,7 +154,7 @@ function calculatePolicyBalanceAsOf(
     return roundBalance(firstYearAccrual + firstYearAdditionalMonths * monthlyAccrual);
   }
 
-  const currentPeriodStart = accrualPeriodStartFor(asOfDate);
+  const currentPeriodStart = accrualPeriodStartFor(asOfDate, cutoff);
   const effectiveStartDate = accrualStartDate > currentPeriodStart ? accrualStartDate : currentPeriodStart;
   const prorationDate = effectiveStartDate.getTime() === accrualStartDate.getTime() ? eligibilityDate : effectiveStartDate;
   const firstAccrual = prorationDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
@@ -143,16 +164,16 @@ function calculatePolicyBalanceAsOf(
   return roundBalance(firstAccrual + (completedMonths - 1) * monthlyAccrual);
 }
 
-function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number) {
-  return calculatePolicyBalanceAsOf(hireDate, monthlyAccrual, halfMonthAccrual, new Date());
+function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number, cutoff: CutoffDate) {
+  return calculatePolicyBalanceAsOf(hireDate, monthlyAccrual, halfMonthAccrual, new Date(), cutoff);
 }
 
-export function calculatePtoBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, PTO_MONTHLY_ACCRUAL, PTO_HALF_MONTH_ACCRUAL);
+export function calculatePtoBalance(hireDate: string, cutoff: CutoffDate = DEFAULT_CUTOFF) {
+  return calculatePolicyBalance(hireDate, PTO_MONTHLY_ACCRUAL, PTO_HALF_MONTH_ACCRUAL, cutoff);
 }
 
-export function calculateSickLeaveBalance(hireDate: string) {
-  return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL);
+export function calculateSickLeaveBalance(hireDate: string, cutoff: CutoffDate = DEFAULT_CUTOFF) {
+  return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL, cutoff);
 }
 
 // Whenever newly-accrued Sick Leave becomes available, any outstanding
@@ -210,16 +231,18 @@ export function applyAdvancePtoRepayment(
 export function calculateUnusedSickLeaveBalance(
   name: string,
   hireDate: string,
-  decisions: RequestDecisionMap = {}
+  decisions: RequestDecisionMap = {},
+  cutoff: CutoffDate = DEFAULT_CUTOFF
 ) {
-  const resetDate = latestResetDateFor(new Date());
-  const priorPeriodStart = new Date(resetDate.getFullYear() - 1, 2, 1);
-  const priorPeriodEnd = new Date(resetDate.getFullYear(), 2, 0);
+  const resetDate = latestResetDateFor(new Date(), cutoff);
+  const priorPeriodStart = new Date(resetDate.getFullYear() - 1, cutoff.month, cutoff.day);
+  const priorPeriodEnd = new Date(resetDate.getFullYear(), cutoff.month, cutoff.day - 1);
   const priorBalance = calculatePolicyBalanceAsOf(
     hireDate,
     SICK_LEAVE_MONTHLY_ACCRUAL,
     SICK_LEAVE_HALF_MONTH_ACCRUAL,
-    priorPeriodEnd
+    priorPeriodEnd,
+    cutoff
   );
   const priorUsed = TIME_OFF
     .filter((request) => {
