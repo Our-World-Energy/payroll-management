@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronRight, LuDownload, LuCalendarPlus, LuUmbrella, LuStethoscope,
+  LuShieldCheck, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil,
 } from "react-icons/lu";
 import {
@@ -14,6 +14,7 @@ import {
 import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
+import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -138,9 +139,11 @@ type TimeOffRow = {
   hireDate: string;
   ptoBalance: number;
   ptoUsed: number;
+  ptoUsedImport: number;
   ptoAvailable: number;
   sickLeaveBalance: number;
   sickLeaveUsed: number;
+  sickUsedImport: number;
   sickLeaveAvailable: number;
   birthdayLeave: number;
   birthdayLeaveUsed: number;
@@ -195,26 +198,25 @@ export default function TimeOffPage() {
   const [confirmOverrideAnyway, setConfirmOverrideAnyway] = useState<(() => void) | null>(null);
   const [cutoff, setCutoff] = useState<CutoffDate>(DEFAULT_CUTOFF);
 
-  useEffect(() => {
-    let active = true;
-    async function load() {
-      setLoading(true); setLoadError("");
-      try {
-        const [all, requests, savedCutoff] = await Promise.all([
-          fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
-          fetchAllLeaveRequestsAdmin(),
-          fetchCutOffTime(),
-        ]);
-        if (active) { setContractors(all); setLeaveRequests(requests); setCutoff(cutoffFromSaved(savedCutoff)); }
-      } catch (err) {
-        if (active) setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
-      } finally {
-        if (active) setLoading(false);
-      }
+  const [showUsedImportModal, setShowUsedImportModal] = useState(false);
+
+  const reloadData = useCallback(async () => {
+    setLoading(true); setLoadError("");
+    try {
+      const [all, requests, savedCutoff] = await Promise.all([
+        fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
+        fetchAllLeaveRequestsAdmin(),
+        fetchCutOffTime(),
+      ]);
+      setContractors(all); setLeaveRequests(requests); setCutoff(cutoffFromSaved(savedCutoff));
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
+    } finally {
+      setLoading(false);
     }
-    load();
-    return () => { active = false; };
   }, []);
+
+  useEffect(() => { reloadData(); }, [reloadData]);
 
   // Map email → latest leave request (already sorted newest-first)
   const latestByEmail = useMemo<Record<string, AdminLeaveRequest>>(() => {
@@ -232,8 +234,12 @@ export default function TimeOffPage() {
     // immediately without waiting for this contractor to be saved again.
     const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
     const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
-    const ptoUsed          = c.ptoUsed;
-    const sickLeaveUsed    = c.sickLeaveUsed;
+    // An imported/legacy baseline (pto_used_import / sick_used_import) takes
+    // over as the effective Used value wherever it's set — it's meant to
+    // supersede the in-app-computed total, not sit alongside it. Falls back
+    // to the normal computed value when the import field is blank (0).
+    const ptoUsed          = c.ptoUsedImport > 0  ? c.ptoUsedImport  : c.ptoUsed;
+    const sickLeaveUsed    = c.sickUsedImport > 0 ? c.sickUsedImport : c.sickLeaveUsed;
     const ptoAvailable       = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
     const sickLeaveAvailable = roundBalance(Math.max(sickLeaveBalance - sickLeaveUsed, 0));
     const specialLeaveAvailable = roundBalance(Math.max(c.specialLeaveCredits - c.specialLeaveUsed, 0));
@@ -241,8 +247,8 @@ export default function TimeOffPage() {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, role: c.role, hireDate: c.hireDate,
-      ptoBalance, ptoUsed, ptoAvailable,
-      sickLeaveBalance, sickLeaveUsed, sickLeaveAvailable,
+      ptoBalance, ptoUsed, ptoUsedImport: c.ptoUsedImport, ptoAvailable,
+      sickLeaveBalance, sickLeaveUsed, sickUsedImport: c.sickUsedImport, sickLeaveAvailable,
       birthdayLeave:    c.birthdayLeave,
       birthdayLeaveUsed: c.birthdayLeaveUsed,
       advanceSickLeave: c.advanceSickLeave,
@@ -286,8 +292,8 @@ export default function TimeOffPage() {
 
   const COLS = [
     "Contractor", "Country", "Department", "Hire Date",
-    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
-    "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
+    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Used Import", "PTO Accrual Available"] : []),
+    "Sick Leave Accrual", "Sick Used", "Sick Used Import", "Sick Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
     "Advance Sick Leave", "Status", "Action",
   ];
@@ -295,8 +301,8 @@ export default function TimeOffPage() {
   function exportCSV() {
     const headers = [
       "Name", "Country", "Department", "Hire Date",
-      "PTO Accrual (h)", "PTO Used (h)", "PTO Available (h)",
-      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Available (h)",
+      "PTO Accrual (h)", "PTO Used (h)", "PTO Used Import (h)", "PTO Available (h)",
+      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Used Import (h)", "Sick Available (h)",
       "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
       "Special Leave Credits (h)", "Special Leave Used (h)", "Special Leave Available (h)", "Status",
     ];
@@ -305,8 +311,8 @@ export default function TimeOffPage() {
       ...filteredRows.map((r) =>
         [
           `"${r.fullName}"`, `"${r.country}"`, `"${r.department || "Unassigned"}"`, r.hireDate,
-          r.ptoBalance, r.ptoUsed, r.ptoAvailable,
-          r.sickLeaveBalance, r.sickLeaveUsed, r.sickLeaveAvailable,
+          r.ptoBalance, r.ptoUsed, r.ptoUsedImport, r.ptoAvailable,
+          r.sickLeaveBalance, r.sickLeaveUsed, r.sickUsedImport, r.sickLeaveAvailable,
           r.birthdayLeave, r.advanceSickLeave,
           r.specialLeaveCredits, r.specialLeaveUsed, r.specialLeaveAvailable,
           `"${r.latestRequest?.status ?? "No Request"}"`,
@@ -982,7 +988,20 @@ export default function TimeOffPage() {
           <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
           <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
         </div>
+        <button
+          onClick={() => setShowUsedImportModal(true)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors shrink-0"
+        >
+          <LuUpload size={13} strokeWidth={2} /> PTO / SICK Used Import
+        </button>
       </div>
+
+      {showUsedImportModal && (
+        <PtoSickUsedImportModal
+          onClose={() => setShowUsedImportModal(false)}
+          onImported={reloadData}
+        />
+      )}
 
       {/* ── Stat cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-3">
@@ -1142,6 +1161,9 @@ export default function TimeOffPage() {
                       <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
                       </td>
+                      <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsedImport)}h`}
+                      </td>
                       <td className="px-4 py-2.5 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : (
                           <div className="flex items-center gap-2">
@@ -1153,6 +1175,7 @@ export default function TimeOffPage() {
                     </>}
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
+                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickUsedImport)}h</td>
                     <td className="px-4 py-2.5 border-r border-slate-100">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold tabular-nums text-orange-600">{fmtBalance(row.sickLeaveAvailable)}h</span>

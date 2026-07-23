@@ -33,8 +33,10 @@ export type Contractor = {
   worksnapId: string;
   ptoBalance: number;
   ptoUsed: number;
+  ptoUsedImport: number;
   sickLeaveBalance: number;
   sickLeaveUsed: number;
+  sickUsedImport: number;
   birthdayLeave: number;
   birthdayLeaveUsed: number;
   advanceSickLeave: number;

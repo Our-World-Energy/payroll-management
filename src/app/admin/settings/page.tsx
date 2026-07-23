@@ -6,6 +6,7 @@ import { useContractorConfig, type DeptTree } from "@/components/ContractorConfi
 import {
   addOfficeLocation, removeOfficeLocation,
   addManager, removeManager,
+  addCountryLocation, removeCountryLocation,
   addDepartment, removeDepartment,
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
@@ -27,11 +28,30 @@ function daysInMonth(monthIndex: number) {
 }
 
 export default function SettingsPage() {
-  const { officeLocations, setOfficeLocations, deptTree, setDeptTree, managers, setManagers } = useContractorConfig();
+  const {
+    officeLocations, setOfficeLocations,
+    deptTree, setDeptTree,
+    managers, setManagers,
+    countryLocations, setCountryLocations,
+  } = useContractorConfig();
 
   // ── Busy/error state ──────────────────────────────────────────────────────
   const [busy, setBusy]     = useState(false);
   const [errMsg, setErrMsg] = useState<string | null>(null);
+
+  // ── Section collapse state (all collapsed by default) ────────────────────
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    organisation: false,
+    officeLocations: false,
+    managers: false,
+    countryLocations: false,
+    departments: false,
+    timeOff: false,
+    notifications: false,
+  });
+  function toggleSection(key: string) {
+    setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   // ── Time Off cut off date (month + day, no year — recurs every year) ─────
   // Local edits only take effect once "Save" is clicked, tracked against the
@@ -145,6 +165,24 @@ export default function SettingsPage() {
     const prev = managers;
     setManagers(managers.filter((x) => x !== m));
     await run(() => removeManager(m), () => setManagers(prev));
+  }
+
+  // ── Country location handlers ─────────────────────────────────────────────
+  const [newCountry, setNewCountry] = useState("");
+
+  async function handleAddCountry() {
+    const v = newCountry.trim();
+    if (!v || countryLocations.includes(v)) return;
+    const prev = countryLocations;
+    setCountryLocations([...countryLocations, v]);
+    setNewCountry("");
+    await run(() => addCountryLocation(v), () => setCountryLocations(prev));
+  }
+
+  async function handleRemoveCountry(c: string) {
+    const prev = countryLocations;
+    setCountryLocations(countryLocations.filter((x) => x !== c));
+    await run(() => removeCountryLocation(c), () => setCountryLocations(prev));
   }
 
   // ── Dept/sub/role state ───────────────────────────────────────────────────
@@ -268,113 +306,174 @@ export default function SettingsPage() {
 
       {/* Organisation */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
+        <button
+          onClick={() => toggleSection("organisation")}
+          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
+        >
+          {openSections.organisation ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
           <h4 className="text-base font-semibold text-[#003527]">Organisation</h4>
-        </div>
-        <div className="px-6 py-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Default Timezone</label>
-              <select className={SELECT}>
-                <option>UTC (Coordinated Universal Time)</option>
-                <option>UTC−5 (Eastern Time)</option>
-                <option>UTC+5:30 (India)</option>
-                <option>UTC−6 (Central Time)</option>
-                <option>UTC+8 (Philippines)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Fiscal Year Start</label>
-              <select className={SELECT}>
-                <option>January</option><option>April</option>
-                <option>July</option><option>October</option>
-              </select>
+        </button>
+        {openSections.organisation && (
+          <div className="px-6 py-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Default Timezone</label>
+                <select className={SELECT}>
+                  <option>UTC (Coordinated Universal Time)</option>
+                  <option>UTC−5 (Eastern Time)</option>
+                  <option>UTC+5:30 (India)</option>
+                  <option>UTC−6 (Central Time)</option>
+                  <option>UTC+8 (Philippines)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Fiscal Year Start</label>
+                <select className={SELECT}>
+                  <option>January</option><option>April</option>
+                  <option>July</option><option>October</option>
+                </select>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Office Locations */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h4 className="text-base font-semibold text-[#003527]">Office Locations</h4>
-            <p className="text-xs text-slate-400 mt-0.5">These appear in the Office Location dropdown when adding a contractor.</p>
-          </div>
+          <button onClick={() => toggleSection("officeLocations")} className="flex items-start gap-2 text-left flex-1">
+            {openSections.officeLocations ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
+            <div>
+              <h4 className="text-base font-semibold text-[#003527]">Office Locations</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the Office Location dropdown when adding a contractor.</p>
+            </div>
+          </button>
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{officeLocations.length} locations</span>
         </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="flex gap-2">
-            <input
-              value={newLocation}
-              onChange={(e) => setNewLocation(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddLocation()}
-              placeholder="e.g. OWE [NY, New York]"
-              className={INPUT}
-            />
-            <button onClick={handleAddLocation} disabled={busy}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
-              <LuPlus size={15} strokeWidth={2.5} />Add
-            </button>
+        {openSections.officeLocations && (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex gap-2">
+              <input
+                value={newLocation}
+                onChange={(e) => setNewLocation(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddLocation()}
+                placeholder="e.g. OWE [NY, New York]"
+                className={INPUT}
+              />
+              <button onClick={handleAddLocation} disabled={busy}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+                <LuPlus size={15} strokeWidth={2.5} />Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
+              {officeLocations.map((loc) => (
+                <span key={loc} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+                  {loc}
+                  <button onClick={() => askConfirm(loc, () => handleRemoveLocation(loc))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                    <LuX size={13} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto">
-            {officeLocations.map((loc) => (
-              <span key={loc} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
-                {loc}
-                <button onClick={() => askConfirm(loc, () => handleRemoveLocation(loc))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
-                  <LuX size={13} strokeWidth={2.5} />
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
+        )}
       </section>
 
       {/* Managers */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h4 className="text-base font-semibold text-[#003527]">Managers</h4>
-            <p className="text-xs text-slate-400 mt-0.5">These appear in the Manager dropdown when adding a contractor.</p>
-          </div>
+          <button onClick={() => toggleSection("managers")} className="flex items-start gap-2 text-left flex-1">
+            {openSections.managers ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
+            <div>
+              <h4 className="text-base font-semibold text-[#003527]">Managers</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the Manager dropdown when adding a contractor.</p>
+            </div>
+          </button>
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{managers.length} managers</span>
         </div>
-        <div className="px-6 py-5 space-y-4">
-          <div className="flex gap-2">
-            <input
-              value={newManager}
-              onChange={(e) => setNewManager(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
-              placeholder="e.g. Jane Smith"
-              className={INPUT}
-            />
-            <button onClick={handleAddManager} disabled={busy}
-              className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
-              <LuPlus size={15} strokeWidth={2.5} />Add
-            </button>
+        {openSections.managers && (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex gap-2">
+              <input
+                value={newManager}
+                onChange={(e) => setNewManager(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
+                placeholder="e.g. Jane Smith"
+                className={INPUT}
+              />
+              <button onClick={handleAddManager} disabled={busy}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+                <LuPlus size={15} strokeWidth={2.5} />Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+              {managers.map((m) => (
+                <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+                  {m}
+                  <button onClick={() => askConfirm(m, () => handleRemoveManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                    <LuX size={13} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
-            {managers.map((m) => (
-              <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
-                {m}
-                <button onClick={() => askConfirm(m, () => handleRemoveManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
-                  <LuX size={13} strokeWidth={2.5} />
-                </button>
-              </span>
-            ))}
-          </div>
+        )}
+      </section>
+
+      {/* Country Locations */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <button onClick={() => toggleSection("countryLocations")} className="flex items-start gap-2 text-left flex-1">
+            {openSections.countryLocations ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
+            <div>
+              <h4 className="text-base font-semibold text-[#003527]">Country Locations</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the Country dropdown when adding a contractor.</p>
+            </div>
+          </button>
+          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{countryLocations.length} countries</span>
         </div>
+        {openSections.countryLocations && (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex gap-2">
+              <input
+                value={newCountry}
+                onChange={(e) => setNewCountry(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCountry()}
+                placeholder="e.g. Colombia"
+                className={INPUT}
+              />
+              <button onClick={handleAddCountry} disabled={busy}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+                <LuPlus size={15} strokeWidth={2.5} />Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+              {countryLocations.map((c) => (
+                <span key={c} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+                  {c}
+                  <button onClick={() => askConfirm(c, () => handleRemoveCountry(c))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                    <LuX size={13} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Department / Sub-department / Roles */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h4 className="text-base font-semibold text-[#003527]">Departments, Sub-departments & Roles</h4>
-            <p className="text-xs text-slate-400 mt-0.5">Manage the interconnected dropdowns shown in the Add Contractor form.</p>
-          </div>
+          <button onClick={() => toggleSection("departments")} className="flex items-start gap-2 text-left flex-1">
+            {openSections.departments ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
+            <div>
+              <h4 className="text-base font-semibold text-[#003527]">Departments, Sub-departments & Roles</h4>
+              <p className="text-xs text-slate-400 mt-0.5">Manage the interconnected dropdowns shown in the Add Contractor form.</p>
+            </div>
+          </button>
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{Object.keys(deptTree).length} departments</span>
         </div>
+        {openSections.departments && (
         <div className="px-6 py-5 space-y-3">
           <div className="flex gap-2 mb-4">
             <input
@@ -476,73 +575,86 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
+        )}
       </section>
 
       {/* Time Off Settings */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
+        <button
+          onClick={() => toggleSection("timeOff")}
+          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
+        >
+          {openSections.timeOff ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
           <h4 className="text-base font-semibold text-[#003527]">Time Off Settings</h4>
-        </div>
-        <div className="px-6 py-5">
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cut Off Time</label>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="grid grid-cols-2 gap-3 max-w-sm">
-                <select
-                  className={SELECT}
-                  value={cutoffMonth}
-                  onChange={(e) => handleCutoffMonthChange(Number(e.target.value))}
+        </button>
+        {openSections.timeOff && (
+          <div className="px-6 py-5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cut Off Time</label>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="grid grid-cols-2 gap-3 max-w-sm">
+                  <select
+                    className={SELECT}
+                    value={cutoffMonth}
+                    onChange={(e) => handleCutoffMonthChange(Number(e.target.value))}
+                  >
+                    {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
+                  </select>
+                  <select
+                    className={SELECT}
+                    value={cutoffDay}
+                    onChange={(e) => handleCutoffDayChange(Number(e.target.value))}
+                  >
+                    {Array.from({ length: daysInMonth(cutoffMonth) }, (_, i) => i + 1).map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  onClick={handleSaveCutOff}
+                  disabled={!cutoffDirty || cutoffSaving}
+                  className="shrink-0 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {MONTHS.map((m, i) => <option key={m} value={i}>{m}</option>)}
-                </select>
-                <select
-                  className={SELECT}
-                  value={cutoffDay}
-                  onChange={(e) => handleCutoffDayChange(Number(e.target.value))}
-                >
-                  {Array.from({ length: daysInMonth(cutoffMonth) }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                  {cutoffSaving ? "Saving…" : "Save"}
+                </button>
+                {!cutoffDirty && cutoffSaved && (
+                  <span className="text-xs font-semibold text-emerald-600">Saved</span>
+                )}
               </div>
-              <button
-                onClick={handleSaveCutOff}
-                disabled={!cutoffDirty || cutoffSaving}
-                className="shrink-0 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {cutoffSaving ? "Saving…" : "Save"}
-              </button>
-              {!cutoffDirty && cutoffSaved && (
-                <span className="text-xs font-semibold text-emerald-600">Saved</span>
-              )}
+              {cutoffError && <p className="mt-2 text-xs font-medium text-red-600">{cutoffError}</p>}
             </div>
-            {cutoffError && <p className="mt-2 text-xs font-medium text-red-600">{cutoffError}</p>}
           </div>
-        </div>
+        )}
       </section>
 
       {/* Notifications */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
+        <button
+          onClick={() => toggleSection("notifications")}
+          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
+        >
+          {openSections.notifications ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
           <h4 className="text-base font-semibold text-[#003527]">Notifications</h4>
-        </div>
-        <div className="px-6 py-5 space-y-3">
-          {[
-            "Email alerts for certification expiry",
-            "Notify admin on new leave requests",
-            "Weekly payroll summary digest",
-            "Absence alerts (same-day)",
-          ].map((label) => (
-            <label key={label} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 cursor-pointer">
-              <span className="text-sm text-slate-700">{label}</span>
-              <div className="relative">
-                <input type="checkbox" defaultChecked className="sr-only peer" />
-                <div className="w-10 h-5 bg-slate-200 peer-checked:bg-teal-500 rounded-full transition-colors" />
-                <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-all peer-checked:translate-x-5" />
-              </div>
-            </label>
-          ))}
-        </div>
+        </button>
+        {openSections.notifications && (
+          <div className="px-6 py-5 space-y-3">
+            {[
+              "Email alerts for certification expiry",
+              "Notify admin on new leave requests",
+              "Weekly payroll summary digest",
+              "Absence alerts (same-day)",
+            ].map((label) => (
+              <label key={label} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 cursor-pointer">
+                <span className="text-sm text-slate-700">{label}</span>
+                <div className="relative">
+                  <input type="checkbox" defaultChecked className="sr-only peer" />
+                  <div className="w-10 h-5 bg-slate-200 peer-checked:bg-teal-500 rounded-full transition-colors" />
+                  <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-all peer-checked:translate-x-5" />
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

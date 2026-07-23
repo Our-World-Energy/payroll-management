@@ -12,13 +12,16 @@ type Props = {
 };
 
 // ── Country → States ──────────────────────────────────────────────────────────
+// State lists only exist for these seed countries — any country an admin adds
+// under Settings → Country Locations that isn't listed here just gets no
+// state options (the State field then has nothing to pick from).
 const COUNTRY_STATES: Record<string, string[]> = {
   Philippines: ["Metro Manila", "Cebu", "Davao", "Laguna", "Batangas", "Pampanga", "Bulacan"],
   Mexico:      ["Mexico City", "Jalisco", "Nuevo León", "Puebla", "Guanajuato", "Querétaro", "Yucatán"],
   India:       ["Karnataka", "Maharashtra", "Delhi", "Tamil Nadu", "Telangana", "Gujarat", "Rajasthan"],
   USA:         ["California", "Texas", "Arizona", "Colorado", "Florida", "New York", "Washington"],
 };
-const COUNTRIES = Object.keys(COUNTRY_STATES);
+const FALLBACK_COUNTRIES = Object.keys(COUNTRY_STATES);
 
 const PAY_CATEGORIES = ["Hourly", "Fixed-Ind", "Fixed-Mex"];
 const CURRENCIES     = ["PHP", "INR", "MXN", "USD"];
@@ -65,8 +68,9 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
-  const { officeLocations, deptTree, managers } = useContractorConfig();
+  const { officeLocations, deptTree, managers, countryLocations } = useContractorConfig();
   const DEPARTMENTS = Object.keys(deptTree);
+  const COUNTRIES = countryLocations.length ? countryLocations : FALLBACK_COUNTRIES;
 
   const parseLocation = (loc?: string) => {
     if (!loc) return { country: COUNTRIES[0], state: "" };
@@ -188,8 +192,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       // to 0 just because an unrelated profile field changed.
       ptoBalance:         initial?.ptoBalance       ?? 0,
       ptoUsed:            initial?.ptoUsed          ?? 0,
+      ptoUsedImport:      initial?.ptoUsedImport    ?? 0,
       sickLeaveBalance:   initial?.sickLeaveBalance ?? 0,
       sickLeaveUsed:      initial?.sickLeaveUsed    ?? 0,
+      sickUsedImport:     initial?.sickUsedImport   ?? 0,
       birthdayLeave:      initial?.birthdayLeave    ?? 0,
       birthdayLeaveUsed:  initial?.birthdayLeaveUsed ?? 0,
       advanceSickLeave:   initial?.advanceSickLeave ?? 0,

@@ -51,8 +51,10 @@ function toContractor(row: Record<string, unknown>): Contractor {
     worksnapId:        String(row.worksnapId        ?? ""),
     ptoBalance:       Number(row.ptoBalance        ?? 0),
     ptoUsed:          Number(row.ptoUsed           ?? 0),
+    ptoUsedImport:    Number(row.pto_used_import   ?? 0),
     sickLeaveBalance: Number(row.sickLeaveBalance  ?? 0),
     sickLeaveUsed:    Number(row.sickLeaveUsed     ?? 0),
+    sickUsedImport:   Number(row.sick_used_import  ?? 0),
     birthdayLeave:    Number(row.birthdayLeave     ?? 0),
     birthdayLeaveUsed: Number(row.birthdayLeaveUsed ?? 0),
     advanceSickLeave: Number(row.advanceSickLeave  ?? 0),
@@ -232,8 +234,10 @@ export async function createContractor(c: Contractor): Promise<void> {
     worksnapId:        c.worksnapId,
     ptoBalance,
     ptoUsed:           c.ptoUsed          ?? 0,
+    pto_used_import:   c.ptoUsedImport    ?? 0,
     sickLeaveBalance,
     sickLeaveUsed:     c.sickLeaveUsed    ?? 0,
+    sick_used_import:  c.sickUsedImport   ?? 0,
     birthdayLeave:     c.birthdayLeave    ?? 0,
     birthdayLeaveUsed: c.birthdayLeaveUsed ?? 0,
     advanceSickLeave:  c.advanceSickLeave ?? 0,
@@ -310,8 +314,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
     worksnapId:        c.worksnapId,
     ptoBalance,
     ptoUsed,
+    pto_used_import:   c.ptoUsedImport ?? 0,
     sickLeaveBalance,
     sickLeaveUsed,
+    sick_used_import:  c.sickUsedImport ?? 0,
     birthdayLeave,
     birthdayLeaveUsed,
     advanceSickLeave,
@@ -339,6 +345,26 @@ export async function updateTimeOffUsage(
   const sb = getSupabase();
   const { error } = await sb.from(TABLE).update(fields).eq("uid", uid);
   if (error) throw new Error(error.message);
+}
+
+// Bulk-sets the imported/legacy PTO Used or Sick Used baseline (pto_used_import /
+// sick_used_import) from an admin-uploaded CSV, matching contractors by email.
+// One update per row so a typo'd/missing email fails just that row instead of
+// aborting the whole batch.
+export async function bulkImportUsedImport(
+  type: "pto" | "sick",
+  entries: { email: string; hours: number }[],
+): Promise<{ results: { email: string; ok: boolean; error?: string }[] }> {
+  const sb = getSupabase();
+  const column = type === "pto" ? "pto_used_import" : "sick_used_import";
+  const results: { email: string; ok: boolean; error?: string }[] = [];
+  for (const { email, hours } of entries) {
+    const { data, error } = await sb.from(TABLE).update({ [column]: hours }).eq("email", email).select("uid");
+    if (error) { results.push({ email, ok: false, error: error.message }); continue; }
+    if (!data || data.length === 0) { results.push({ email, ok: false, error: "No contractor found with this email" }); continue; }
+    results.push({ email, ok: true });
+  }
+  return { results };
 }
 
 export async function backfillLeaveBalances(): Promise<{ updated: number }> {

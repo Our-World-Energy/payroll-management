@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { fetchOrgConfig, seedOrgDefaults } from "@/app/admin/settings/actions";
+import { fetchOrgConfig, seedOrgDefaults, addCountryLocation } from "@/app/admin/settings/actions";
 
 // ── Fallback defaults (used only on first seed) ───────────────────────────────
 const DEFAULT_OFFICE_LOCATIONS = [
@@ -60,6 +60,8 @@ const DEFAULT_DEPT_TREE: DeptTree = {
 
 const DEFAULT_MANAGERS = ["Colten Warnock", "Dillard Blanton"];
 
+const DEFAULT_COUNTRY_LOCATIONS = ["Philippines", "Mexico", "India", "USA"];
+
 // ── Context type ──────────────────────────────────────────────────────────────
 
 type ContractorConfig = {
@@ -69,6 +71,8 @@ type ContractorConfig = {
   setDeptTree: (v: DeptTree) => void;
   managers: string[];
   setManagers: (v: string[]) => void;
+  countryLocations: string[];
+  setCountryLocations: (v: string[]) => void;
   configLoaded: boolean;
   reloadConfig: () => Promise<void>;
 };
@@ -80,6 +84,8 @@ const ContractorConfigContext = createContext<ContractorConfig>({
   setDeptTree: () => {},
   managers: DEFAULT_MANAGERS,
   setManagers: () => {},
+  countryLocations: DEFAULT_COUNTRY_LOCATIONS,
+  setCountryLocations: () => {},
   configLoaded: false,
   reloadConfig: async () => {},
 });
@@ -88,6 +94,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
   const [officeLocations, setOfficeLocations] = useState<string[]>([]);
   const [deptTree, setDeptTree]               = useState<DeptTree>({});
   const [managers, setManagers]               = useState<string[]>([]);
+  const [countryLocations, setCountryLocations] = useState<string[]>([]);
   const [configLoaded, setConfigLoaded]       = useState(false);
 
   const reloadConfig = useCallback(async () => {
@@ -96,21 +103,33 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
 
       // If DB is empty (first run), seed from defaults then reload
       if (cfg.officeLocations.length === 0 && cfg.managers.length === 0 && Object.keys(cfg.deptTree).length === 0) {
-        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE);
+        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE, DEFAULT_COUNTRY_LOCATIONS);
         const seeded = await fetchOrgConfig();
         setOfficeLocations(seeded.officeLocations);
         setManagers(seeded.managers);
         setDeptTree(seeded.deptTree);
+        setCountryLocations(seeded.countryLocations);
       } else {
         setOfficeLocations(cfg.officeLocations);
         setManagers(cfg.managers);
         setDeptTree(cfg.deptTree);
+
+        // org_country_locations is a newer table — an already-seeded org
+        // (departments already exist) won't have gone through seedOrgDefaults
+        // above, so backfill its defaults here if it's still empty.
+        if (cfg.countryLocations.length === 0) {
+          await Promise.all(DEFAULT_COUNTRY_LOCATIONS.map((name) => addCountryLocation(name)));
+          setCountryLocations(DEFAULT_COUNTRY_LOCATIONS);
+        } else {
+          setCountryLocations(cfg.countryLocations);
+        }
       }
     } catch {
       // Fall back to hardcoded defaults if DB is unreachable
       setOfficeLocations(DEFAULT_OFFICE_LOCATIONS);
       setManagers(DEFAULT_MANAGERS);
       setDeptTree(DEFAULT_DEPT_TREE);
+      setCountryLocations(DEFAULT_COUNTRY_LOCATIONS);
     }
     setConfigLoaded(true);
   }, []);
@@ -124,6 +143,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
       officeLocations, setOfficeLocations,
       deptTree, setDeptTree,
       managers, setManagers,
+      countryLocations, setCountryLocations,
       configLoaded,
       reloadConfig,
     }}>

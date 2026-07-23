@@ -232,8 +232,10 @@ model ContractorProfile {
   // Time-off tracking
   ptoBalance          Float    @default(0)
   ptoUsed             Float    @default(0)
+  ptoUsedImport       Float    @default(0) @map("pto_used_import") // imported/legacy starting PTO Used baseline — not yet wired into ptoUsed math or CSV import
   sickLeaveBalance    Float    @default(0)
   sickLeaveUsed       Float    @default(0)
+  sickUsedImport      Float    @default(0) @map("sick_used_import") // imported/legacy starting Sick Used baseline — not yet wired into sickLeaveUsed math or CSV import
   birthdayLeave        Float    @default(0)
   birthdayLeaveUsed    Float    @default(0) // cumulative amount repaid so far from newly-accrued PTO
   advanceSickLeave     Float    @default(0)
@@ -438,6 +440,16 @@ model OrgManager {
   createdAt DateTime @default(now())
 
   @@map("org_managers")
+}
+
+/// Org-wide settings: country locations list (populates the Country dropdown
+/// on the Add Contractor form)
+model OrgCountryLocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("org_country_locations")
 }
 
 /// Org-wide settings: department names
