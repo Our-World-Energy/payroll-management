@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const result = buildAttendanceStatusOps(prisma, body);
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
 
-  await prisma.$transaction(result.ops);
+  await Promise.all(result.ops);
 
   const days = Array.isArray(body.days) ? body.days : [];
   return Response.json({ ok: true, savedDays: days.length });

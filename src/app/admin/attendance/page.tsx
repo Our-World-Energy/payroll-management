@@ -1753,7 +1753,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     return () => { isCancelled = true; };
   }, [week, retryNonce]);
 
-  const filteredRows = modalRows
+  const filteredRows = useMemo(() => modalRows
     .filter((r) =>
       r.weeklyStatus === "For Review" &&
       !isFixedContractor(r.payCategory) &&
@@ -1762,7 +1762,35 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter) &&
       (shiftTypeFilter === "All" || r.shiftType === shiftTypeFilter)
     )
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name)),
+    [modalRows, payCategoryFilter, countryFilter, deptFilter, shiftTypeFilter]
+  );
+
+  // Pre-compute all per-row totals once per data change so the render loop
+  // doesn't call buildBulkApproveDaySnapshots (expensive) for every row on
+  // every re-render (e.g. checkbox toggles, filter changes).
+  const rowTotalsCache = useMemo(() => {
+    const cache = new Map<string, {
+      weeklyTotals: ReturnType<typeof rowWeeklyTotals>;
+      holidayBonusMins: number;
+      localHolidayMins: number;
+      timeOffRequestMins: number;
+    }>();
+    for (const r of filteredRows) {
+      const email = r.role.includes("@") ? r.role : "";
+      const rowLeave = leaveRequests.filter((req) => req.email === email);
+      const rowDailyMins = effectiveDailyMinutesFor(r, adjustedByContractor.get(r.contractorId));
+      const rowRestDays = restDaysForAttendanceRow(r);
+      const userLogs = dailyLogs.filter((l) => l.worksnapUserId === r.worksnapUserId);
+      cache.set(r.contractorId, {
+        weeklyTotals: rowWeeklyTotals(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), rowLeave),
+        holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates)), 0),
+        localHolidayMins: modalWeekDates.reduce((sum, date) => sum + (localHolidayMinutesFor(date, userLogs, r.region, allHolidays) ?? 0), 0),
+        timeOffRequestMins: email ? totalTimeOffRequestMinutesFor(modalWeekDates, rowLeave) : 0,
+      });
+    }
+    return cache;
+  }, [filteredRows, leaveRequests, dailyLogs, adjustedByContractor, modalWeekDates, usaHolidays, allHolidays]);
 
   const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.contractorId));
 
@@ -1775,45 +1803,10 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     else setSelectedIds(new Set(filteredRows.map((r) => r.contractorId)));
   }
 
-  function rowHolidayBonus(r: AttendanceRow) {
-    const rowDailyMins = effectiveDailyMinutesFor(r, adjustedByContractor.get(r.contractorId));
-    const rowRestDays = restDaysForAttendanceRow(r);
-    return modalWeekDates.reduce(
-      (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates)),
-      0
-    );
-  }
-
-  function rowLocalHolidayMinutes(r: AttendanceRow) {
-    const userLogs = dailyLogs.filter((l) => l.worksnapUserId === r.worksnapUserId);
-    return modalWeekDates.reduce(
-      (sum, date) => sum + (localHolidayMinutesFor(date, userLogs, r.region, allHolidays) ?? 0),
-      0
-    );
-  }
-
-  function rowTimeOffRequestMinutes(r: AttendanceRow) {
-    const email = r.role.includes("@") ? r.role : "";
-    if (!email) return 0;
-    return totalTimeOffRequestMinutesFor(modalWeekDates, leaveRequests.filter((req) => req.email === email));
-  }
-
-  // Same week-total formula Attendance Review actually saves (see
-  // rowWeeklyTotals/buildBulkApproveDaySnapshots), not the legacy
-  // computeApprovedCompletionMinutes (which never saw real leave requests
-  // or HO OT Time).
-  function bulkApproveCompletionMinutes(r: AttendanceRow) {
-    const email = r.role.includes("@") ? r.role : "";
-    return rowWeeklyTotals(
-      r, modalWeekDates, usaHolidays, dailyLogs, allHolidays,
-      adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)
-    ).totalCompletionMinutes;
-  }
-
   function handleBulkApprovePreview() {
     const map = new Map<string, number>();
     filteredRows.filter((r) => selectedIds.has(r.contractorId)).forEach((r) => {
-      map.set(r.contractorId, bulkApproveCompletionMinutes(r));
+      map.set(r.contractorId, rowTotalsCache.get(r.contractorId)?.weeklyTotals.totalCompletionMinutes ?? 0);
     });
     setProcessedApprovals(map);
     setFailedContractorIds(new Map());
@@ -1825,7 +1818,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       ? processedApprovals
       : new Map<string, number>(filteredRows
           .filter((r) => selectedIds.has(r.contractorId))
-          .map((r) => [r.contractorId, bulkApproveCompletionMinutes(r)])
+          .map((r) => [r.contractorId, rowTotalsCache.get(r.contractorId)?.weeklyTotals.totalCompletionMinutes ?? 0])
         );
 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
@@ -1956,13 +1949,13 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                 <tr><td colSpan={14} className="px-5 py-10 text-center text-sm text-slate-400">No contractors match the selected filters.</td></tr>
               ) : filteredRows.map((row) => {
                 const processedMins = processedApprovals.get(row.contractorId);
-                const rowHolidayBonusMins = rowHolidayBonus(row);
-                const rowEmailForLeave = row.role.includes("@") ? row.role : "";
-                const weeklyTotals = rowWeeklyTotals(row, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(row.contractorId), leaveRequests.filter((req) => req.email === rowEmailForLeave));
-                const completionMins = processedMins ?? row.completionMinutes ?? weeklyTotals.totalCompletionMinutes;
+                const cached = rowTotalsCache.get(row.contractorId);
+                const weeklyTotals = cached?.weeklyTotals;
+                const rowHolidayBonusMins = cached?.holidayBonusMins ?? 0;
+                const completionMins = processedMins ?? row.completionMinutes ?? weeklyTotals?.totalCompletionMinutes ?? 0;
                 const isProcessed = processedMins !== undefined;
-                const localHolidayMins = rowLocalHolidayMinutes(row);
-                const timeOffRequestMins = rowTimeOffRequestMinutes(row);
+                const localHolidayMins = cached?.localHolidayMins ?? 0;
+                const timeOffRequestMins = cached?.timeOffRequestMins ?? 0;
                 const failedError = failedContractorIds.get(row.contractorId);
                 const hasFailed = failedError !== undefined;
                 return (
@@ -1987,22 +1980,22 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                   <td className={`sticky left-[272px] z-10 px-4 py-3 w-[160px] min-w-[160px] text-sm whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${hasFailed ? "bg-red-50 text-red-700" : "bg-white text-slate-600"}`}>{departmentForAttendanceRow(row)}</td>
                   <td className="px-4 py-3 text-sm font-bold text-slate-900 border-r border-slate-100">{row.actualMinutes.toLocaleString()}</td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedRegularMinutes) : "—"}
+                    {(weeklyTotals?.totalEvaluatedRegularMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalEvaluatedRegularMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalRegularOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRegularOtMinutes) : "—"}
+                    {(weeklyTotals?.totalRegularOtMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalRegularOtMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalRdOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalRdOtMinutes) : "—"}
+                    {(weeklyTotals?.totalRdOtMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalRdOtMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalEvaluatedMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalEvaluatedMinutes) : "—"}
+                    {(weeklyTotals?.totalEvaluatedMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalEvaluatedMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalUsHoMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalUsHoMinutes) : "—"}
+                    {(weeklyTotals?.totalUsHoMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalUsHoMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
-                    {weeklyTotals.totalHoOtMinutes > 0 ? formatMinutesAsMins(weeklyTotals.totalHoOtMinutes) : "—"}
+                    {(weeklyTotals?.totalHoOtMinutes ?? 0) > 0 ? formatMinutesAsMins(weeklyTotals!.totalHoOtMinutes) : "—"}
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-600 border-r border-slate-100">
                     {localHolidayMins > 0 ? formatMinutesAsMins(localHolidayMins) : "—"}
