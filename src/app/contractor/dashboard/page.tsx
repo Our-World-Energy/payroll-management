@@ -8,6 +8,7 @@ import { fetchContractorTimeOff, type ContractorTimeOff } from "../time-off/acti
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
 import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
 import { fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { PageHeader, ProgressRing } from "../_components/portal";
 import {
   LuCalendarDays, LuUmbrella, LuStethoscope,
   LuChevronRight, LuLoader, LuShieldCheck,
@@ -349,11 +350,24 @@ export default function ContractorDashboardPage() {
   const sickUsed      = timeOff?.sickLeaveUsed    ?? 0;
   const sickAvailable = Math.max(sickBalance - sickUsed, 0);
 
-  const now      = new Date();
+  // Ring/bar percentages (same convention as the Time-Off balance cards).
+  const ptoUsedPct   = ptoBalance  > 0 ? Math.min((ptoUsed  / ptoBalance)  * 100, 100) : 0;
+  const ptoAvailPct  = 100 - ptoUsedPct;
+  const sickUsedPct  = sickBalance > 0 ? Math.min((sickUsed / sickBalance) * 100, 100) : 0;
+  const sickAvailPct = 100 - sickUsedPct;
+
+  const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
 
+  const statusChip = profile?.status === "Active" ? (
+    <span className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-full text-sm font-semibold shadow-sm">
+      <LuShieldCheck size={16} strokeWidth={2} />
+      Active Contractor
+    </span>
+  ) : undefined;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-7xl mx-auto">
 
       {calOpen && (
         <HolidayCalendarModal
@@ -364,38 +378,34 @@ export default function ContractorDashboardPage() {
       )}
 
       {/* ── Welcome ── */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-bold text-[#003527] tracking-tight" style={{ letterSpacing: "-0.02em" }}>
-            {greeting}, {firstName}.
-          </h1>
-          <p className="text-slate-600 mt-1 text-lg">Ready to power the future today?</p>
-        </div>
-        {profile?.status === "Active" && (
-          <div className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-lg text-sm font-semibold">
-            <LuShieldCheck size={16} strokeWidth={2} />
-            Active Contractor
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title={`${greeting}, ${firstName}.`}
+        subtitle="Ready to power the future today?"
+        right={statusChip}
+      />
 
-      {/* ── Stat Cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-1 bg-[#003527] rounded-2xl p-6 text-white flex flex-col justify-between min-h-40 shadow-sm">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">Contractor ID</span>
-            <LuBriefcase size={20} className="text-white/40" strokeWidth={1.5} />
+      {/* ── Stat cards ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
+        {/* Contractor ID — deep brand gradient */}
+        <div className="relative overflow-hidden rounded-2xl p-6 text-white shadow-sm bg-brand-gradient flex flex-col justify-between min-h-[160px]">
+          <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
+          <div className="relative flex justify-between items-start">
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/70">Contractor ID</span>
+            <LuBriefcase size={20} className="text-emerald-300/50" strokeWidth={1.5} />
           </div>
-          <div>
-            <p className="text-2xl font-black leading-tight">{profile?.contractorId || "—"}</p>
-            <p className="text-sm text-white/60 mt-1">{profile?.department || "—"} · {profile?.role || "—"}</p>
+          <div className="relative">
+            <p className="text-2xl font-black leading-tight tabular-nums">{profile?.contractorId || "—"}</p>
+            <p className="text-sm text-emerald-100/70 mt-1">{profile?.department || "—"} · {profile?.role || "—"}</p>
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between min-h-40 shadow-sm">
+        {/* Hire Date */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between min-h-[160px] shadow-sm hover:shadow-md transition-shadow">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Hire Date</span>
-            <LuCalendarDays size={20} className="text-[#003527]/40" strokeWidth={1.5} />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-1">Hire Date</span>
+            <span className="grid place-items-center w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600">
+              <LuCalendarDays size={17} strokeWidth={2} />
+            </span>
           </div>
           <div>
             <p className="text-2xl font-black text-[#003527] leading-tight">{fmtHireDate(profile?.hireDate ?? "")}</p>
@@ -403,10 +413,13 @@ export default function ContractorDashboardPage() {
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between min-h-40 shadow-sm">
+        {/* Location */}
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between min-h-[160px] shadow-sm hover:shadow-md transition-shadow">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Location</span>
-            <LuMapPin size={20} className="text-[#003527]/40" strokeWidth={1.5} />
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-1">Location</span>
+            <span className="grid place-items-center w-9 h-9 rounded-xl bg-teal-50 text-teal-600">
+              <LuMapPin size={17} strokeWidth={2} />
+            </span>
           </div>
           <div>
             <p className="text-2xl font-black text-[#003527] leading-tight">{country || "—"}</p>
@@ -415,96 +428,113 @@ export default function ContractorDashboardPage() {
         </div>
       </div>
 
-      {/* ── Leave Balance Cards ── */}
-      <div className={`grid gap-4 ${isPtoHidden ? "grid-cols-1 max-w-sm" : "grid-cols-1 md:grid-cols-2"}`}>
+      {/* ── Leave balance cards ── */}
+      <div className={`grid gap-4 md:gap-5 ${isPtoHidden ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
         {!isPtoHidden && (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-emerald-100 text-emerald-800">
-                  <LuUmbrella size={18} strokeWidth={1.75} />
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="grid place-items-center w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800">
+                <LuUmbrella size={18} strokeWidth={1.75} />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-[#003527]">Paid Time Off (PTO)</p>
+                <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Active Cycle</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="relative grid place-items-center shrink-0">
+                <ProgressRing pct={ptoAvailPct} size={96} stroke={8} />
+                <div className="absolute text-center leading-none">
+                  <span className="block text-lg font-bold tabular-nums text-emerald-700">{Math.round(ptoAvailPct)}%</span>
+                  <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
+                </div>
+              </div>
+              <div className="flex-1 grid grid-cols-3 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Balance</p>
+                  <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(ptoBalance)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">Paid Time Off (PTO)</p>
-                  <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Active Cycle</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
+                  <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(ptoUsed)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
+                  <p className="text-xl font-bold text-emerald-700 tabular-nums">{fmtDays(ptoAvailable)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
                 </div>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Balance</p>
-                <p className="text-2xl font-bold text-[#003527]">{fmtDays(ptoBalance)}<span className="text-xs font-medium text-slate-400 ml-1">days</span></p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Used</p>
-                <p className="text-2xl font-bold text-slate-700">{fmtDays(ptoUsed)}<span className="text-xs font-medium text-slate-400 ml-1">days</span></p>
-              </div>
-              <div>
-                <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Available</p>
-                <p className="text-2xl font-black text-emerald-700">{fmtDays(ptoAvailable)}<span className="text-sm font-medium text-slate-400 ml-1">days</span></p>
-              </div>
-            </div>
-            <div className="mt-4 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
-              <div className="h-full bg-emerald-700" style={{ width: ptoBalance > 0 ? `${Math.min((ptoUsed / ptoBalance) * 100, 100)}%` : "0%" }} />
-              <div className="h-full bg-emerald-200" style={{ width: ptoBalance > 0 ? `${Math.min((ptoAvailable / ptoBalance) * 100, 100)}%` : "100%" }} />
+            <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
+              <div className="h-full bg-emerald-700" style={{ width: `${ptoUsedPct}%`  }} />
+              <div className="h-full bg-emerald-200" style={{ width: `${ptoAvailPct}%` }} />
             </div>
           </div>
         )}
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-teal-100 text-teal-700">
-                <LuStethoscope size={18} strokeWidth={1.75} />
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="grid place-items-center w-10 h-10 rounded-xl bg-teal-100 text-teal-700">
+              <LuStethoscope size={18} strokeWidth={1.75} />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-[#003527]">Sick Leave</p>
+              <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Renewal Dec 31</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-6">
+            <div className="relative grid place-items-center shrink-0">
+              <ProgressRing pct={sickAvailPct} size={96} stroke={8} />
+              <div className="absolute text-center leading-none">
+                <span className="block text-lg font-bold tabular-nums text-teal-700">{Math.round(sickAvailPct)}%</span>
+                <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
+              </div>
+            </div>
+            <div className="flex-1 grid grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Balance</p>
+                <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(sickBalance)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-800">Sick Leave</p>
-                <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Renewal Dec 31</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
+                <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(sickUsed)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
+                <p className="text-xl font-bold text-teal-700 tabular-nums">{fmtDays(sickAvailable)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Balance</p>
-              <p className="text-2xl font-bold text-[#003527]">{fmtDays(sickBalance)}<span className="text-xs font-medium text-slate-400 ml-1">days</span></p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Used</p>
-              <p className="text-2xl font-bold text-slate-700">{fmtDays(sickUsed)}<span className="text-xs font-medium text-slate-400 ml-1">days</span></p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase font-bold tracking-tight text-slate-400 mb-1">Available</p>
-              <p className="text-2xl font-black text-teal-700">{fmtDays(sickAvailable)}<span className="text-sm font-medium text-slate-400 ml-1">days</span></p>
-            </div>
-          </div>
-          <div className="mt-4 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
-            <div className="h-full bg-teal-600" style={{ width: sickBalance > 0 ? `${Math.min((sickUsed / sickBalance) * 100, 100)}%` : "0%" }} />
-            <div className="h-full bg-teal-200" style={{ width: sickBalance > 0 ? `${Math.min((sickAvailable / sickBalance) * 100, 100)}%` : "100%" }} />
+          <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
+            <div className="h-full bg-teal-600" style={{ width: `${sickUsedPct}%`  }} />
+            <div className="h-full bg-teal-200" style={{ width: `${sickAvailPct}%` }} />
           </div>
         </div>
       </div>
 
-      {/* ── Announcements + Holidays ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
-        {/* Announcements */}
+      {/* ── Announcements + holidays ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+        {/* Announcements — left 2/3 */}
         <div className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-2xl font-semibold text-[#003527]">Offshore Announcements</h3>
+            <h3 className="text-xl font-bold text-[#003527]">Offshore Announcements</h3>
+            <button className="text-emerald-700 text-sm font-semibold flex items-center gap-1 hover:underline">
+              View All <LuChevronRight size={16} strokeWidth={2} />
+            </button>
           </div>
-          <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+
+          <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
             {announcements.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-400">No announcements yet.</div>
             ) : (
-              <div className="divide-y divide-slate-50">
+              <div className="divide-y divide-slate-100">
                 {announcements.map((a, i) => (
                   <div key={a.id} className="flex gap-4 p-5 hover:bg-slate-50 transition-colors">
-                    <div className={`w-11 h-11 rounded-full flex items-center justify-center text-xl shrink-0 ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
                       {ANNOUNCEMENT_ICONS[i % ANNOUNCEMENT_ICONS.length]}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start gap-2">
-                        <h4 className="text-sm font-semibold text-[#003527]">{a.title}</h4>
+                        <h4 className="text-sm font-bold text-[#003527]">{a.title}</h4>
                         <span className="text-xs text-slate-400 shrink-0">{fmtAnnouncementDate(a.date)}</span>
                       </div>
                       <p className="text-sm text-slate-500 mt-0.5 leading-relaxed">{a.body}</p>
@@ -518,9 +548,8 @@ export default function ContractorDashboardPage() {
 
         {/* Right panel */}
         <div className="space-y-6">
-
           {/* Upcoming Holidays */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
             <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Upcoming Holidays</h4>
             {upcomingHols.length === 0 ? (
               <p className="text-sm text-slate-400">No upcoming holidays.</p>
@@ -539,7 +568,7 @@ export default function ContractorDashboardPage() {
                       </div>
                       <div>
                         <p className="text-sm font-semibold text-[#003527]">{h.name}</p>
-                        <p className="text-xs text-slate-400">{date}</p>
+                        <p className="text-xs text-slate-400 tabular-nums">{date}</p>
                       </div>
                     </div>
                   );
@@ -555,7 +584,7 @@ export default function ContractorDashboardPage() {
           </div>
 
           {/* Quick Actions */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
             <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Quick Actions</h4>
             <div className="space-y-2">
               <Link href="/contractor/time-off" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700">
@@ -575,7 +604,6 @@ export default function ContractorDashboardPage() {
               </Link>
             </div>
           </div>
-
         </div>
       </div>
     </div>

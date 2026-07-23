@@ -521,28 +521,6 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* Payroll */}
-      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
-          <h4 className="text-base font-semibold text-[#003527]">Payroll</h4>
-        </div>
-        <div className="px-6 py-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Pay Cycle</label>
-              <select className={SELECT}>
-                <option>Bi-weekly (every 2 weeks)</option>
-                <option>Monthly</option><option>Weekly</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Default Tax Rate (%)</label>
-              <input type="number" defaultValue={15} className={INPUT} />
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Notifications */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100">

@@ -285,7 +285,7 @@ export default function TimeOffPage() {
   const isIndia = countryFilter === "India";
 
   const COLS = [
-    "Employee", "Country", "Department", "Hire Date",
+    "Contractor", "Country", "Department", "Hire Date",
     ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
     "Sick Leave Accrual", "Sick Used", "Sick Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
@@ -1080,7 +1080,7 @@ export default function TimeOffPage() {
             <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                  style={{ minWidth: 210, background: "#003527" }}>Employee</th>
+                  style={{ minWidth: 210, background: "#003527" }}>Contractor</th>
                 {COLS.slice(1, -1).map((h) => (
                   <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20">{h}</th>
                 ))}

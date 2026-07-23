@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LuDownload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil } from "react-icons/lu";
+import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
-import { fetchPayrollAdjustments, savePayrollAdjustment } from "./actions";
+import { fetchPayrollAdjustments, savePayrollAdjustment, bulkImportPayrollAdjustments, type AdjustmentField } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween } from "@/lib/weekUtils";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -81,9 +81,9 @@ type PayrollRow = {
   deductions: number | null;
   net: number | null;
   status: "Reviewed" | "For Review" | "No Activity";
-  // Saved per-day Evaluated Regular Time (not raw Worksnap minutes) — feeds
-  // the voucher's Sun→Sat grid.
-  evaluatedRegularDailyMinutes: Record<string, number>;
+  // Saved per-day Evaluated Time (not raw Worksnap minutes) — feeds the
+  // voucher's Sun→Sat grid only; all other voucher figures are unaffected.
+  evaluatedDailyMinutes: Record<string, number>;
   bonus: number;
   misc: number;
   retroPay: number;
@@ -173,6 +173,7 @@ export default function PayrollPage() {
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [voucherTarget, setVoucherTarget] = useState<PayrollRow | null>(null);
   const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   // Same recent-Sun→Sat-weeks list Attendance Management uses, anchored to
   // the current Arizona week.
@@ -214,16 +215,18 @@ export default function PayrollPage() {
           minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + durationMins);
         }
 
-        // Saved per-day Evaluated Regular Time (not raw Worksnap minutes) for
-        // the voucher's Sun→Sat grid — reflects admin review/adjustments.
-        const evaluatedRegularDailyMinutesByEmail = new Map<string, Record<string, number>>();
-        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; evaluatedRegularMinutes?: number }>) {
+        // Saved per-day Evaluated Time (not raw Worksnap minutes) for the
+        // voucher's Sun→Sat grid only — reflects admin review/adjustments.
+        // All other payroll figures still come from the week-level totals
+        // below (totalEvaluatedRegularMinutes, etc.), unaffected by this.
+        const evaluatedDailyMinutesByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; evaluatedMinutes?: number }>) {
           const email = String(d.email ?? "").trim().toLowerCase();
           const date = String(d.date ?? "").slice(0, 10);
           if (!email || !date) continue;
-          const days = evaluatedRegularDailyMinutesByEmail.get(email) ?? {};
-          days[date] = (days[date] ?? 0) + (d.evaluatedRegularMinutes ?? 0);
-          evaluatedRegularDailyMinutesByEmail.set(email, days);
+          const days = evaluatedDailyMinutesByEmail.get(email) ?? {};
+          days[date] = (days[date] ?? 0) + (d.evaluatedMinutes ?? 0);
+          evaluatedDailyMinutesByEmail.set(email, days);
         }
 
         type SavedWeekStatus = {
@@ -322,7 +325,7 @@ export default function PayrollPage() {
               deductions,
               net,
               status: isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
-              evaluatedRegularDailyMinutes: evaluatedRegularDailyMinutesByEmail.get(email) ?? {},
+              evaluatedDailyMinutes: evaluatedDailyMinutesByEmail.get(email) ?? {},
               bonus,
               misc,
               retroPay,
@@ -390,6 +393,13 @@ export default function PayrollPage() {
     return result;
   }
 
+  function handleImported(field: AdjustmentField, values: Map<string, number>) {
+    setRows((prev) => prev.map((r) => {
+      const value = values.get(r.email.trim().toLowerCase());
+      return value !== undefined ? { ...r, [field]: value } : r;
+    }));
+  }
+
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 md:mb-8">
@@ -399,10 +409,19 @@ export default function PayrollPage() {
             Pay period: <span className="font-semibold text-slate-600">{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
           </p>
         </div>
-        <button className="self-start sm:self-auto flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
-          <LuDownload size={16} strokeWidth={2} />
-          Export CSV
-        </button>
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <button
+            onClick={() => setShowImportModal(true)}
+            className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm"
+          >
+            <LuUpload size={16} strokeWidth={2} />
+            Import Earnings & Deductions
+          </button>
+          <button className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
+            <LuDownload size={16} strokeWidth={2} />
+            Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -607,6 +626,14 @@ export default function PayrollPage() {
           onClose={() => setReviewTarget(null)}
         />
       )}
+
+      {showImportModal && (
+        <ImportAdjustmentsModal
+          weekStart={rangeFrom}
+          onClose={() => setShowImportModal(false)}
+          onImported={handleImported}
+        />
+      )}
     </div>
   );
 }
@@ -708,7 +735,7 @@ function PayrollVoucherModal({
                     {weekDates.map((date, i) => {
                       const label = DAY_LABELS[i];
                       const isOff = restDayLabels.has(label);
-                      const hours = (row.evaluatedRegularDailyMinutes[date] ?? 0) / 60;
+                      const hours = (row.evaluatedDailyMinutes[date] ?? 0) / 60;
                       return (
                         <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
                           {isOff ? "OFF" : hours.toFixed(2)}
@@ -921,6 +948,186 @@ function PayrollAdjustmentModal({
           className="w-full mt-5 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
         >
           <LuCircleCheck size={15} strokeWidth={2} /> {saving ? "Saving…" : "Save Adjustments"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const EARNINGS_FIELD_OPTIONS: { value: AdjustmentField; label: string }[] = [
+  { value: "bonus", label: "Bonus" },
+  { value: "misc", label: "MISC" },
+  { value: "retroPay", label: "Retro Pay" },
+  { value: "reim", label: "REIM" },
+];
+const DEDUCTION_FIELD_OPTIONS: { value: AdjustmentField; label: string }[] = [
+  { value: "cashAdvance", label: "Cash Advance" },
+  { value: "hmo", label: "HMO" },
+];
+
+// Minimal dependency-free CSV parser — handles quoted fields (with ""
+// escaping) and both \n and \r\n line endings. Good enough for a simple
+// two-column Email,Amount file.
+function parseCsvRows(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      if (row.some((f) => f.trim() !== "")) rows.push(row);
+      row = [];
+    } else {
+      field += c;
+    }
+  }
+  if (field !== "" || row.length > 0) {
+    row.push(field);
+    if (row.some((f) => f.trim() !== "")) rows.push(row);
+  }
+  return rows;
+}
+
+function ImportAdjustmentsModal({
+  weekStart, onClose, onImported,
+}: {
+  weekStart: string;
+  onClose: () => void;
+  onImported: (field: AdjustmentField, values: Map<string, number>) => void;
+}) {
+  const [category, setCategory] = useState<"Earnings" | "Deduction">("Earnings");
+  const [field, setField] = useState<AdjustmentField>("bonus");
+  const [file, setFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ updated: number; failed: number } | null>(null);
+
+  const fieldOptions = category === "Earnings" ? EARNINGS_FIELD_OPTIONS : DEDUCTION_FIELD_OPTIONS;
+
+  function handleCategoryChange(next: "Earnings" | "Deduction") {
+    setCategory(next);
+    setField(next === "Earnings" ? EARNINGS_FIELD_OPTIONS[0].value : DEDUCTION_FIELD_OPTIONS[0].value);
+    setResult(null);
+    setError("");
+  }
+
+  async function handleImport() {
+    if (!file) { setError("Choose a CSV file first."); return; }
+    setError("");
+    setResult(null);
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const dataRows = parseCsvRows(text).slice(1); // first row is the header
+      const rows: { email: string; value: number }[] = [];
+      for (const cols of dataRows) {
+        const email = (cols[0] ?? "").trim();
+        const value = Number(cols[1]);
+        if (!email || !Number.isFinite(value)) continue;
+        rows.push({ email, value });
+      }
+      if (rows.length === 0) {
+        setError("No valid rows found. Expected columns: Email, Amount.");
+        return;
+      }
+
+      const res = await bulkImportPayrollAdjustments(weekStart, field, rows);
+      setResult({ updated: res.updated, failed: res.failed.length });
+
+      if (res.updated > 0) {
+        const failedEmails = new Set(res.failed.map((f) => f.email));
+        const values = new Map(
+          rows
+            .map((r) => [r.email.trim().toLowerCase(), r.value] as const)
+            .filter(([email]) => !failedEmails.has(email))
+        );
+        onImported(field, values);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to import CSV.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !importing && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <button
+          onClick={onClose}
+          disabled={importing}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40"
+        >
+          <LuX size={18} strokeWidth={2} />
+        </button>
+
+        <h3 className="text-base font-bold text-[#003527]">Import Earnings & Deductions</h3>
+        <p className="text-xs text-slate-400 mt-1 mb-5">CSV columns: Email, Amount</p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Type</label>
+            <select
+              value={category}
+              onChange={(e) => handleCategoryChange(e.target.value as "Earnings" | "Deduction")}
+              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+            >
+              <option value="Earnings">Earnings</option>
+              <option value="Deduction">Deduction</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Field</label>
+            <select
+              value={field}
+              onChange={(e) => setField(e.target.value as AdjustmentField)}
+              className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+            >
+              {fieldOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">CSV File</label>
+            <input
+              type="file"
+              accept=".csv"
+              onChange={(e) => { setFile(e.target.files?.[0] ?? null); setResult(null); setError(""); }}
+              className="w-full text-sm text-slate-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:text-xs file:font-semibold hover:file:bg-slate-200"
+            />
+          </div>
+        </div>
+
+        {error && <p className="text-xs font-medium text-red-600 mt-3">{error}</p>}
+        {result && (
+          <p className={`text-xs font-medium mt-3 ${result.failed > 0 ? "text-amber-600" : "text-emerald-600"}`}>
+            {result.updated} row{result.updated !== 1 ? "s" : ""} updated{result.failed > 0 ? `, ${result.failed} failed` : ""}.
+          </p>
+        )}
+
+        <button
+          onClick={handleImport}
+          disabled={importing || !file}
+          className="w-full mt-5 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          <LuUpload size={15} strokeWidth={2} /> {importing ? "Importing…" : "Import"}
         </button>
       </div>
     </div>

@@ -1126,7 +1126,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   }
 
   function approveAllDays() {
-    const applicableDates = weekDates.filter((date) => !isRestDayDate(date, restDaysStr));
+    // Matches exactly which days show the per-day Decision check/x icons —
+    // every non-rest day, plus any rest day that still has Worksnap Time logged.
+    const applicableDates = weekDates.filter((date) =>
+      !isRestDayDate(date, restDaysStr) || worksnapTimeForDate(dailyWorksnapMinutes, date) !== "-"
+    );
     const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
     setDailyDecisionStatuses((current) => {
       const next = { ...current };
@@ -1339,7 +1343,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           <td className={`sticky left-[156px] z-10 w-[112px] min-w-[112px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                             hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
                           }`}>
-                            {!isRestDay ? (
+                            {!isRestDay || rawWorksnapTime !== "-" ? (
                               <div className="flex items-center gap-1.5">
                                 <button
                                   type="button"
