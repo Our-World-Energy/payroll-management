@@ -1273,7 +1273,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     {weeklyDayHeadings.map((heading) => (
                       <th
                         key={heading}
-                        className={`px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100 last:border-r-0 whitespace-nowrap ${
+                        className={`px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-b border-slate-100 last:border-r-0 whitespace-nowrap ${
                           heading === "Days" ? "sticky left-0 z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
                         } ${
                           heading === "Decision" ? "sticky left-[156px] z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]" : ""
@@ -1468,7 +1468,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     );
                   })}
                 </tbody>
-                <tfoot className="bg-slate-50">
+                <tfoot className="bg-slate-50 [&_tr]:border-t [&_tr]:border-slate-100">
                   <tr>
                     <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                       Total Time
@@ -1538,6 +1538,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
                         <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        {/* Regular Time, Evaluated Regular Time, Regular OT Time, RD OT Time,
+                            Evaluated Time, US HO Time, HO OT Time, Local HO, Local HO Time —
+                            9 placeholder cells, matching weeklyDayHeadings 1:1 for isIndia. */}
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
@@ -1557,7 +1561,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
                         <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
-                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        {/* Same 9 placeholder cells as the Offset Credit row above. */}
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
