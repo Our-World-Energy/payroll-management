@@ -445,11 +445,9 @@ model OrgManager {
 /// Org-wide settings: country locations list (populates the Country dropdown
 /// on the Add Contractor form)
 model OrgCountryLocation {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String   @unique
-  createdAt DateTime @default(now())
+  country String @id
 
-  @@map("org_country_locations")
+  @@map("org_country")
 }
 
 /// Org-wide settings: department names

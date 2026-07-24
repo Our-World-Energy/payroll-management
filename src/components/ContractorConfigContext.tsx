@@ -114,7 +114,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
         setManagers(cfg.managers);
         setDeptTree(cfg.deptTree);
 
-        // org_country_locations is a newer table — an already-seeded org
+        // org_country is a newer table — an already-seeded org
         // (departments already exist) won't have gone through seedOrgDefaults
         // above, so backfill its defaults here if it's still empty.
         if (cfg.countryLocations.length === 0) {

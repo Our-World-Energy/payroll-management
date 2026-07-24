@@ -24,7 +24,7 @@ export async function fetchOrgConfig(): Promise<{
   const [locRes, mgrRes, countryRes, deptRes, subRes, roleRes] = await Promise.all([
     sb.from("org_office_locations").select("name").order("name"),
     sb.from("org_managers").select("name").order("name"),
-    sb.from("org_country_locations").select("name").order("name"),
+    sb.from("org_country").select("country").order("country"),
     sb.from("org_departments").select("id, name").order("name"),
     sb.from("org_sub_departments").select("id, departmentId, name").order("name"),
     sb.from("org_roles").select("subDepartmentId, name").order("name"),
@@ -32,7 +32,7 @@ export async function fetchOrgConfig(): Promise<{
 
   const officeLocations: string[] = (locRes.data ?? []).map((r: { name: string }) => r.name);
   const managers: string[] = (mgrRes.data ?? []).map((r: { name: string }) => r.name);
-  const countryLocations: string[] = (countryRes.data ?? []).map((r: { name: string }) => r.name);
+  const countryLocations: string[] = (countryRes.data ?? []).map((r: { country: string }) => r.country);
 
   const deptTree: DeptTree = {};
   for (const dept of (deptRes.data ?? []) as { id: string; name: string }[]) {
@@ -73,17 +73,16 @@ export async function removeOfficeLocation(name: string): Promise<{ ok: boolean;
 
 export async function addCountryLocation(name: string): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
-  const now = new Date().toISOString();
   const { error } = await sb
-    .from("org_country_locations")
-    .insert({ id: crypto.randomUUID(), name: name.trim(), createdAt: now });
+    .from("org_country")
+    .insert({ country: name.trim() });
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
 
 export async function removeCountryLocation(name: string): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
-  const { error } = await sb.from("org_country_locations").delete().eq("name", name);
+  const { error } = await sb.from("org_country").delete().eq("country", name);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
@@ -261,8 +260,8 @@ export async function seedOrgDefaults(
 
   // Insert country locations
   if (countryLocations.length) {
-    await sb.from("org_country_locations").insert(
-      countryLocations.map((name) => ({ id: crypto.randomUUID(), name, createdAt: now })),
+    await sb.from("org_country").insert(
+      countryLocations.map((country) => ({ country })),
     );
   }
 
