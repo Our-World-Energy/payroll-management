@@ -704,7 +704,7 @@ function PayrollVoucherModal({
             </div>
             <div className="text-right text-xs">
               <p><span className="text-slate-500">Pay Period:</span> <span className="font-semibold">{fmtVoucherDate(rangeFrom)} to {fmtVoucherDate(rangeTo)}</span></p>
-              <p className="mt-1"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">—</span></p>
+              <p className="mt-1"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">{rangeTo ? fmtVoucherDate(addDaysIso(rangeTo, 6)) : "—"}</span></p>
             </div>
           </div>
 
@@ -824,7 +824,7 @@ function PayrollVoucherModal({
           </div>
 
           <p className="text-[10px] text-slate-400 mt-3">
-            Check Date is not yet tracked in the system and is shown blank pending manual entry.
+            Check Date is always the Friday following the pay period&apos;s end date.
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
         </div>

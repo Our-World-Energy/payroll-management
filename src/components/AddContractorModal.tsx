@@ -7,7 +7,7 @@ import { useContractorConfig } from "@/components/ContractorConfigContext";
 
 type Props = {
   onClose: () => void;
-  onSave: (c: Contractor) => void;
+  onSave: (c: Contractor) => Promise<void>;
   initial?: Contractor;
 };
 
@@ -91,6 +91,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     dob:            initial?.dob            ?? "",
     gender:         initial?.gender         ?? "Not Specified",
     email:          initial?.email          ?? "",
+    contractorId:   initial?.contractorId   ?? `#C-${Math.floor(1000 + Math.random() * 8999)}`,
     department:     initial?.department     ?? DEPARTMENTS[0],
     subDepartment:  initial?.subDepartment  ?? "",
     role:           initial?.role           ?? "",
@@ -116,6 +117,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -143,6 +146,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     if (!form.surname.trim())   e.surname   = "Required";
     if (!form.email.trim())     e.email     = "Required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) e.email = "Invalid email";
+    if (!form.contractorId.trim()) e.contractorId = "Required";
     if (!form.role.trim())      e.role      = "Required";
     if (!form.hireDate)         e.hireDate  = "Required";
     if (!form.restDays.length)  e.restDays  = "Required";
@@ -150,13 +154,14 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     return Object.keys(e).length === 0;
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setSaveError("");
     if (!validate()) return;
 
     const contractor: Contractor = {
       uid:            initial?.uid          ?? `UID-${Math.floor(10000 + Math.random() * 89999)}`,
-      contractorId:   initial?.contractorId ?? `#C-${Math.floor(1000 + Math.random() * 8999)}`,
+      contractorId:   form.contractorId,
       avatar:         (form.firstName[0] + form.surname[0]).toUpperCase(),
       fullName:       [form.firstName, form.middleName, form.surname].filter(Boolean).join(" "),
       createdOn:      initial?.createdOn    ?? new Date().toISOString().split("T")[0],
@@ -204,8 +209,15 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       specialLeaveUsed:    initial?.specialLeaveUsed    ?? 0,
     };
 
-    onSave(contractor);
-    onClose();
+    setIsSaving(true);
+    try {
+      await onSave(contractor);
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to save. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const subDepts = Object.keys(deptTree[form.department] ?? {});
@@ -273,6 +285,12 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               <FIELD label="Email" required>
                 <input type="email" className={INPUT} value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="name@company.com" />
                 {errors.email && <span className="text-xs text-red-500">{errors.email}</span>}
+              </FIELD>
+
+              {/* Contractor ID — editable; uniqueness is enforced server-side on save */}
+              <FIELD label="Contractor ID" required>
+                <input className={INPUT} value={form.contractorId} onChange={(e) => set("contractorId", e.target.value)} placeholder="#C-1234" />
+                {errors.contractorId && <span className="text-xs text-red-500">{errors.contractorId}</span>}
               </FIELD>
 
             </div>
@@ -477,13 +495,14 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+          {saveError && <p className="mr-auto text-sm font-medium text-red-600">{saveError}</p>}
+          <button type="button" onClick={onClose} disabled={isSaving} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             Cancel
           </button>
-          <button onClick={handleSubmit as never}
-            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={handleSubmit as never} disabled={isSaving}
+            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
             {isEdit ? <LuPencil size={15} strokeWidth={2} /> : <LuUserPlus size={15} strokeWidth={2} />}
-            {isEdit ? "Save Changes" : "Add Contractor"}
+            {isSaving ? "Saving…" : isEdit ? "Save Changes" : "Add Contractor"}
           </button>
         </div>
       </div>

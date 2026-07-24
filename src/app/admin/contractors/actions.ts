@@ -195,6 +195,8 @@ export async function fetchAllContractors(
 
 export async function createContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
+  const { data: dupe } = await sb.from(TABLE).select("uid").eq("contractorId", c.contractorId).maybeSingle();
+  if (dupe) throw new Error(`Contractor ID "${c.contractorId}" is already in use.`);
   const cutoff = cutoffFromSaved(await fetchCutOffTime());
   const ptoBalance      = calculatePtoBalance(c.hireDate, cutoff);
   const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
@@ -253,6 +255,8 @@ export async function createContractor(c: Contractor): Promise<void> {
 
 export async function updateContractor(c: Contractor): Promise<void> {
   const sb = getSupabase();
+  const { data: dupe } = await sb.from(TABLE).select("uid").eq("contractorId", c.contractorId).neq("uid", c.uid).maybeSingle();
+  if (dupe) throw new Error(`Contractor ID "${c.contractorId}" is already in use.`);
   const cutoff = cutoffFromSaved(await fetchCutOffTime());
   const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
   const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
