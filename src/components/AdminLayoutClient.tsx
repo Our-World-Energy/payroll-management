@@ -3,6 +3,7 @@
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminTopbar } from "./AdminTopbar";
 import { useAdminTheme } from "./AdminThemeContext";
+import { Toaster } from "sonner";
 
 export function AdminLayoutClient({ children }: { children: React.ReactNode }) {
   const { dark, collapsed } = useAdminTheme();
@@ -17,6 +18,7 @@ export function AdminLayoutClient({ children }: { children: React.ReactNode }) {
         <AdminTopbar />
         <main>{children}</main>
       </div>
+      <Toaster position="top-right" richColors closeButton />
     </div>
   );
 }

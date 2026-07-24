@@ -58,6 +58,30 @@ const VALID_CURRENCIES  = ["PHP", "INR", "MXN", "USD"];
 const EMAIL_RE          = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_RE           = /^\d{4}-\d{2}-\d{2}$/;
 
+// Normalize common date formats → YYYY-MM-DD, return null if unparseable
+function normalizeDate(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  // Already YYYY-MM-DD
+  if (DATE_RE.test(s)) return s;
+  // MM/DD/YYYY or M/D/YYYY (US spreadsheet export)
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2,"0")}-${mdy[2].padStart(2,"0")}`;
+  // DD-MM-YYYY or D-M-YYYY (European dash format)
+  const dmy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}`;
+  // YYYY/MM/DD
+  const ymd = s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+  // Try native Date parse as last resort
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+    return `${y}-${String(m).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+  }
+  return null;
+}
+
 type RowResult = {
   row:    number;
   data:   Record<string, string>;
@@ -88,13 +112,23 @@ function validateRow(data: Record<string, string>, rowNum: number): RowResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  // Normalize dates in-place so rowToContractor always gets YYYY-MM-DD
+  if (data.hire_date) {
+    const norm = normalizeDate(data.hire_date);
+    if (norm) data.hire_date = norm; else data.hire_date = data.hire_date; // keep raw to trigger error below
+  }
+  if (data.dob) {
+    const norm = normalizeDate(data.dob);
+    if (norm) data.dob = norm;
+  }
+
   if (!data.first_name?.trim())  errors.push("first_name is required");
   if (!data.surname?.trim())     errors.push("surname is required");
   if (!data.email?.trim())       errors.push("email is required");
   else if (!EMAIL_RE.test(data.email)) errors.push("email is invalid");
   if (!data.hire_date?.trim())   errors.push("hire_date is required");
-  else if (!DATE_RE.test(data.hire_date)) errors.push("hire_date must be YYYY-MM-DD");
-  if (data.dob && !DATE_RE.test(data.dob)) errors.push("dob must be YYYY-MM-DD");
+  else if (!DATE_RE.test(data.hire_date)) errors.push("hire_date: unrecognised date format (use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY)");
+  if (data.dob && !DATE_RE.test(data.dob)) errors.push("dob: unrecognised date format (use YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY)");
   if (data.status && !VALID_STATUSES.includes(data.status))
     errors.push(`status must be one of: ${VALID_STATUSES.join(", ")}`);
   if (data.pay_category && !VALID_PAY_CATS.includes(data.pay_category))
@@ -333,6 +367,7 @@ export function ImportContractorsModal({ onClose, onImport }: Props) {
                 </div>
                 <p className="text-xs text-slate-400 mt-2">
                   weekly_rate and hourly_rate are auto-calculated from monthly_rate — do not include them.
+                  Dates accept YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY formats.
                 </p>
               </div>
             </div>

@@ -11,12 +11,21 @@ import {
 import { fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
-  LuCalendarDays, LuDownload, LuChevronRight, LuInfo, LuX, LuCircleAlert,
+  LuChevronRight, LuInfo, LuX, LuCircleAlert,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
 
 function fmtDays(hrs: number) {
   return fmtBalance(hrs / HOURS_PER_DAY);
+}
+
+function fmtHoursMinutes(hrs: number): string {
+  const totalMins = Math.round(hrs * 60);
+  const h = Math.floor(totalMins / 60);
+  const m = totalMins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 function fmtDateRange(start: string, end: string) {
@@ -74,14 +83,17 @@ function BalanceCard({
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Total</p>
             <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(total)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(total)}</p>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
             <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(used)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(used)}</p>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
             <p className={`text-xl font-bold tabular-nums ${availColor}`}>{fmtDays(available)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
+            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(available)}</p>
           </div>
         </div>
       </div>
@@ -391,23 +403,6 @@ export default function ContractorTimeOffPage() {
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm p-6">
-            <h4 className="text-xs font-bold mb-4 uppercase text-slate-400 tracking-widest">Quick Actions</h4>
-            <div className="space-y-3">
-              <button className="w-full flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700">
-                Download Policy Handbook
-                <LuDownload size={18} className="text-emerald-700" strokeWidth={1.75} />
-              </button>
-              <button
-                onClick={() => router.push("/contractor/holidays")}
-                className="w-full flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700"
-              >
-                View Holiday Calendar
-                <LuCalendarDays size={18} className="text-emerald-700" strokeWidth={1.75} />
-              </button>
-            </div>
-          </div>
         </div>
       </section>
 

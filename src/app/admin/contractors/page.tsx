@@ -7,6 +7,7 @@ import {
   LuPencil, LuChevronRight as LuBreadcrumb,
   LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle, LuSearch,
 } from "react-icons/lu";
+import { toast } from "sonner";
 import type { Contractor, FilterRule } from "./types";
 import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, type CutoffDate } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
@@ -234,6 +235,9 @@ export default function ContractorsPage() {
         fetchCutOffTime(),
       ]);
       exportCSV(all, cutoffFromSaved(savedCutoff));
+      toast.success(`Exported ${all.length} contractor${all.length !== 1 ? "s" : ""}`);
+    } catch (err) {
+      toast.error(`Export failed: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setExporting(false);
     }
@@ -246,6 +250,9 @@ export default function ContractorsPage() {
       pageCache = null;
       setPage(1);
       await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
+      toast.success("Contractor added successfully");
+    } catch (err) {
+      toast.error(`Failed to add contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setSaving(false);
     }
@@ -257,6 +264,9 @@ export default function ContractorsPage() {
       await updateContractor(c);
       pageCache = null;
       await loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true });
+      toast.success("Contractor updated successfully");
+    } catch (err) {
+      toast.error(`Failed to update contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setSaving(false);
     }
@@ -264,11 +274,21 @@ export default function ContractorsPage() {
 
   async function handleImportContractors(contractors: Contractor[]) {
     setSaving(true);
+    const tid = toast.loading(`Importing ${contractors.length} contractor${contractors.length !== 1 ? "s" : ""}…`);
     try {
-      await Promise.all(contractors.map((c) => createContractor(c)));
+      const results = await Promise.allSettled(contractors.map((c) => createContractor(c)));
+      const failed  = results.filter((r) => r.status === "rejected").length;
+      const ok      = results.length - failed;
       pageCache = null;
       setPage(1);
       await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
+      if (failed === 0) {
+        toast.success(`${ok} contractor${ok !== 1 ? "s" : ""} imported successfully`, { id: tid });
+      } else {
+        toast.warning(`${ok} imported, ${failed} failed — check for duplicate emails`, { id: tid });
+      }
+    } catch (err) {
+      toast.error(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`, { id: tid });
     } finally {
       setSaving(false);
     }
@@ -277,6 +297,7 @@ export default function ContractorsPage() {
   async function handleDelete() {
     if (!deleteTarget) return;
     setDeleting(true);
+    const name = deleteTarget.fullName || deleteTarget.firstName;
     try {
       await deleteContractor(deleteTarget.uid);
       pageCache = null;
@@ -285,6 +306,9 @@ export default function ContractorsPage() {
       const newPage = rows.length === 1 && page > 1 ? page - 1 : page;
       setPage(newPage);
       await loadPage(newPage, pageSize, country, status, activeRules, nameSearch, { force: true });
+      toast.success(`${name} deleted successfully`);
+    } catch (err) {
+      toast.error(`Failed to delete contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
     } finally {
       setDeleting(false);
     }

@@ -3,19 +3,16 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { fetchContractorProfileByEmail, type ContractorProfile } from "../profile/actions";
-import { fetchContractorTimeOff, type ContractorTimeOff } from "../time-off/actions";
+import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type ContractorProfile, type BirthdayEntry } from "../profile/actions";
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
 import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
-import { fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
-import { PageHeader, ProgressRing } from "../_components/portal";
+import { PageHeader } from "../_components/portal";
 import {
-  LuCalendarDays, LuUmbrella, LuStethoscope,
+  LuCalendarDays, LuCake,
   LuChevronRight, LuLoader, LuShieldCheck,
-  LuArrowRight, LuBriefcase, LuMapPin,
+  LuArrowRight,
   LuX, LuChevronLeft,
 } from "react-icons/lu";
-import Link from "next/link";
 
 // ── Calendar helpers ──────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -55,15 +52,6 @@ function buildCalendar(year: number, month: number) {
   return cells;
 }
 
-function fmtHireDate(dateStr: string) {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-}
-
-function fmtDays(hrs: number) {
-  return fmtBalance(hrs / HOURS_PER_DAY);
-}
 
 const ANNOUNCEMENT_ICONS = ["📢", "📅", "🛡️", "👥", "⚡", "🔔", "📋", "🌐"];
 const ANNOUNCEMENT_BG    = ["bg-teal-50", "bg-emerald-50", "bg-red-50", "bg-blue-50", "bg-amber-50", "bg-purple-50"];
@@ -285,10 +273,10 @@ export default function ContractorDashboardPage() {
   const router = useRouter();
 
   const [profile,       setProfile]       = useState<ContractorProfile | null>(null);
-  const [timeOff,       setTimeOff]       = useState<ContractorTimeOff | null>(null);
   const [allHolidays,   setAllHolidays]   = useState<Holiday[]>([]);
   const [upcomingHols,  setUpcomingHols]  = useState<Holiday[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
 
@@ -299,26 +287,30 @@ export default function ContractorDashboardPage() {
       if (!session?.user?.email) { router.replace("/login"); return; }
       const email = session.user.email;
 
-      const [prof, to, hols, allAnnouncements] = await Promise.all([
+      const [prof, hols, allAnnouncements, bdays] = await Promise.all([
         fetchContractorProfileByEmail(email),
-        fetchContractorTimeOff(email),
         fetchHolidays(),
         fetchAnnouncements(),
+        fetchCurrentMonthBirthdays(),
       ]);
 
       setProfile(prof);
-      setTimeOff(to);
       setAllHolidays(hols);
+      setBirthdays(bdays);
 
       // Country comes from the location field: "City, Country" → last segment
       const country = prof?.location?.split(",").pop()?.trim() ?? "";
       const today   = new Date().toISOString().slice(0, 10);
 
-      // Upcoming: contractor's country + Global (no hardcoded US)
+      // Current month: contractor's country + US + Global
+      const nowDate  = new Date();
+      const monthPfx = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}`;
       const upcoming = hols
-        .filter(h => h.date >= today && (h.country === country || h.country === "Global"))
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .slice(0, 4);
+        .filter(h =>
+          h.date.startsWith(monthPfx) &&
+          (h.country === country || h.country === "United States" || h.country === "Global")
+        )
+        .sort((a, b) => a.date.localeCompare(b.date));
       setUpcomingHols(upcoming);
 
       // Announcements: contractor's country + "All" + "Global"
@@ -339,22 +331,8 @@ export default function ContractorDashboardPage() {
     );
   }
 
-  const firstName   = profile?.firstName || profile?.fullName?.split(" ")[0] || "there";
-  const country     = profile?.location?.split(",").pop()?.trim() ?? "";
-  const isPtoHidden = country.toLowerCase() === "india";
-
-  const ptoBalance    = timeOff?.ptoBalance       ?? 0;
-  const ptoUsed       = timeOff?.ptoUsed          ?? 0;
-  const ptoAvailable  = Math.max(ptoBalance - ptoUsed, 0);
-  const sickBalance   = timeOff?.sickLeaveBalance ?? 0;
-  const sickUsed      = timeOff?.sickLeaveUsed    ?? 0;
-  const sickAvailable = Math.max(sickBalance - sickUsed, 0);
-
-  // Ring/bar percentages (same convention as the Time-Off balance cards).
-  const ptoUsedPct   = ptoBalance  > 0 ? Math.min((ptoUsed  / ptoBalance)  * 100, 100) : 0;
-  const ptoAvailPct  = 100 - ptoUsedPct;
-  const sickUsedPct  = sickBalance > 0 ? Math.min((sickUsed / sickBalance) * 100, 100) : 0;
-  const sickAvailPct = 100 - sickUsedPct;
+  const firstName = profile?.firstName || profile?.fullName?.split(" ")[0] || "there";
+  const country   = profile?.location?.split(",").pop()?.trim() ?? "";
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
@@ -383,133 +361,6 @@ export default function ContractorDashboardPage() {
         subtitle="Ready to power the future today?"
         right={statusChip}
       />
-
-      {/* ── Stat cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5">
-        {/* Contractor ID — deep brand gradient */}
-        <div className="relative overflow-hidden rounded-2xl p-6 text-white shadow-sm bg-brand-gradient flex flex-col justify-between min-h-[160px]">
-          <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
-          <div className="relative flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/70">Contractor ID</span>
-            <LuBriefcase size={20} className="text-emerald-300/50" strokeWidth={1.5} />
-          </div>
-          <div className="relative">
-            <p className="text-2xl font-black leading-tight tabular-nums">{profile?.contractorId || "—"}</p>
-            <p className="text-sm text-emerald-100/70 mt-1">{profile?.department || "—"} · {profile?.role || "—"}</p>
-          </div>
-        </div>
-
-        {/* Hire Date */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between min-h-[160px] shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-1">Hire Date</span>
-            <span className="grid place-items-center w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600">
-              <LuCalendarDays size={17} strokeWidth={2} />
-            </span>
-          </div>
-          <div>
-            <p className="text-2xl font-black text-[#003527] leading-tight">{fmtHireDate(profile?.hireDate ?? "")}</p>
-            <p className="text-sm text-slate-400 mt-1">Member since</p>
-          </div>
-        </div>
-
-        {/* Location */}
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 flex flex-col justify-between min-h-[160px] shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mt-1">Location</span>
-            <span className="grid place-items-center w-9 h-9 rounded-xl bg-teal-50 text-teal-600">
-              <LuMapPin size={17} strokeWidth={2} />
-            </span>
-          </div>
-          <div>
-            <p className="text-2xl font-black text-[#003527] leading-tight">{country || "—"}</p>
-            <p className="text-sm text-slate-400 mt-1">{profile?.location || "—"}</p>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Leave balance cards ── */}
-      <div className={`grid gap-4 md:gap-5 ${isPtoHidden ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
-        {!isPtoHidden && (
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="grid place-items-center w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800">
-                <LuUmbrella size={18} strokeWidth={1.75} />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-[#003527]">Paid Time Off (PTO)</p>
-                <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Active Cycle</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="relative grid place-items-center shrink-0">
-                <ProgressRing pct={ptoAvailPct} size={96} stroke={8} />
-                <div className="absolute text-center leading-none">
-                  <span className="block text-lg font-bold tabular-nums text-emerald-700">{Math.round(ptoAvailPct)}%</span>
-                  <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
-                </div>
-              </div>
-              <div className="flex-1 grid grid-cols-3 gap-3">
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Balance</p>
-                  <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(ptoBalance)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
-                  <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(ptoUsed)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-                </div>
-                <div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
-                  <p className="text-xl font-bold text-emerald-700 tabular-nums">{fmtDays(ptoAvailable)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-                </div>
-              </div>
-            </div>
-            <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
-              <div className="h-full bg-emerald-700" style={{ width: `${ptoUsedPct}%`  }} />
-              <div className="h-full bg-emerald-200" style={{ width: `${ptoAvailPct}%` }} />
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="grid place-items-center w-10 h-10 rounded-xl bg-teal-100 text-teal-700">
-              <LuStethoscope size={18} strokeWidth={1.75} />
-            </div>
-            <div>
-              <p className="text-sm font-bold text-[#003527]">Sick Leave</p>
-              <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">Renewal Dec 31</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <div className="relative grid place-items-center shrink-0">
-              <ProgressRing pct={sickAvailPct} size={96} stroke={8} />
-              <div className="absolute text-center leading-none">
-                <span className="block text-lg font-bold tabular-nums text-teal-700">{Math.round(sickAvailPct)}%</span>
-                <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
-              </div>
-            </div>
-            <div className="flex-1 grid grid-cols-3 gap-3">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Balance</p>
-                <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(sickBalance)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
-                <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(sickUsed)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
-                <p className="text-xl font-bold text-teal-700 tabular-nums">{fmtDays(sickAvailable)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
-            <div className="h-full bg-teal-600" style={{ width: `${sickUsedPct}%`  }} />
-            <div className="h-full bg-teal-200" style={{ width: `${sickAvailPct}%` }} />
-          </div>
-        </div>
-      </div>
 
       {/* ── Announcements + holidays ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
@@ -548,26 +399,28 @@ export default function ContractorDashboardPage() {
 
         {/* Right panel */}
         <div className="space-y-6">
-          {/* Upcoming Holidays */}
+          {/* This Month's Holidays */}
           <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Upcoming Holidays</h4>
+            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">
+              {MONTHS[new Date().getMonth()]} Holidays
+            </h4>
             {upcomingHols.length === 0 ? (
-              <p className="text-sm text-slate-400">No upcoming holidays.</p>
+              <p className="text-sm text-slate-400">No holidays this month.</p>
             ) : (
-              <div className="space-y-3">
-                {upcomingHols.map((h, i) => {
+              <div className="space-y-2">
+                {upcomingHols.map((h) => {
                   const code     = COUNTRY_CODE[h.country] ?? h.country.slice(0, 2).toUpperCase();
-                  const colorCls = COUNTRY_BG[h.country] ?? "bg-slate-100 text-slate-600";
+                  const colorCls = COUNTRY_BG[h.country]  ?? "bg-slate-100 text-slate-600";
                   const date     = new Date(h.date + "T00:00:00").toLocaleDateString("en-US", {
-                    month: "short", day: "numeric", year: "numeric",
+                    month: "short", day: "numeric",
                   });
                   return (
-                    <div key={h.id} className={`flex items-center gap-3 p-3 rounded-xl ${i === 0 ? "bg-slate-50 border border-slate-100" : ""}`}>
-                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${colorCls}`}>
+                    <div key={h.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors">
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${colorCls}`}>
                         {code}
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-[#003527]">{h.name}</p>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{h.name}</p>
                         <p className="text-xs text-slate-400 tabular-nums">{date}</p>
                       </div>
                     </div>
@@ -577,35 +430,82 @@ export default function ContractorDashboardPage() {
             )}
             <button
               onClick={() => setCalOpen(true)}
-              className="mt-4 flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
+              className="mt-3 flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
             >
               View full calendar <LuArrowRight size={13} strokeWidth={2} />
             </button>
           </div>
 
-          {/* Quick Actions */}
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">Quick Actions</h4>
-            <div className="space-y-2">
-              <Link href="/contractor/time-off" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700">
-                Request Time Off
-                <LuUmbrella size={17} className="text-emerald-700" strokeWidth={1.75} />
-              </Link>
-              <button
-                onClick={() => setCalOpen(true)}
-                className="w-full flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700"
-              >
-                View Holiday Calendar
-                <LuCalendarDays size={17} className="text-emerald-700" strokeWidth={1.75} />
-              </button>
-              <Link href="/contractor/profile" className="flex items-center justify-between p-3 rounded-xl border border-slate-100 hover:bg-slate-50 transition-colors text-sm font-semibold text-slate-700">
-                View My Profile
-                <LuArrowRight size={17} className="text-emerald-700" strokeWidth={1.75} />
-              </Link>
-            </div>
-          </div>
         </div>
       </div>
+
+      {/* ── Birthday Calendar ── */}
+      <BirthdaySection birthdays={birthdays} />
+
+    </div>
+  );
+}
+
+// ── Birthday section component ────────────────────────────────────────────────
+function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
+
+  const today     = new Date();
+  const year      = today.getFullYear();
+  const month     = today.getMonth();
+  const todayDay  = today.getDate();
+  const cells     = buildCalendar(year, month);
+
+  const entriesByDay = new Map<number, BirthdayEntry[]>();
+  for (const c of birthdays) {
+    const [, mm, dd] = c.dob.split("-").map(Number);
+    if (!mm || !dd || mm - 1 !== month) continue;
+    const list = entriesByDay.get(dd) ?? [];
+    list.push(c);
+    entriesByDay.set(dd, list);
+  }
+
+  return (
+    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
+      <div className="flex items-center justify-between mb-5">
+        <h3 className="text-xl font-bold text-[#003527]">Birthdays</h3>
+        <div className="flex items-center gap-2">
+          <LuCake size={18} strokeWidth={1.75} className="text-pink-400" />
+          <span className="text-xs font-semibold text-slate-400">{MONTHS[month]} {year}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {DAYS.map((d) => (
+          <span key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase">{d[0]}</span>
+        ))}
+        {cells.map((day, i) => {
+          if (day == null) return <div key={i} className="min-h-11 rounded-md border border-transparent" />;
+          const dayEntries = entriesByDay.get(day);
+          const isToday    = day === todayDay;
+          return (
+            <div
+              key={i}
+              title={dayEntries?.map((c) => c.fullName).join(", ")}
+              className={[
+                "min-h-11 rounded-md border p-1 flex flex-col",
+                isToday    ? "border-[#003527] bg-[#003527]/5"
+                : dayEntries ? "border-pink-200 bg-pink-50"
+                : "border-slate-100",
+              ].join(" ")}
+            >
+              <span className={`text-[10px] font-semibold ${isToday ? "text-[#003527]" : "text-slate-400"}`}>{day}</span>
+              {dayEntries?.map((c) => (
+                <p key={c.fullName} className="text-[9px] leading-tight text-pink-700 font-medium truncate">{c.fullName}</p>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      {birthdays.length === 0 && (
+        <p className="text-sm text-slate-400 mt-4 text-center">No birthdays this month.</p>
+      )}
+
     </div>
   );
 }
