@@ -449,20 +449,21 @@ export default function ContractorDashboardPage() {
 // ── Birthday section component ────────────────────────────────────────────────
 function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
 
-  const today     = new Date();
-  const year      = today.getFullYear();
-  const month     = today.getMonth();
-  const todayDay  = today.getDate();
-  const cells     = buildCalendar(year, month);
+  const today    = new Date();
+  const year     = today.getFullYear();
+  const month    = today.getMonth();
+  const todayDay = today.getDate();
 
-  const entriesByDay = new Map<number, BirthdayEntry[]>();
-  for (const c of birthdays) {
-    const [, mm, dd] = c.dob.split("-").map(Number);
-    if (!mm || !dd || mm - 1 !== month) continue;
-    const list = entriesByDay.get(dd) ?? [];
-    list.push(c);
-    entriesByDay.set(dd, list);
-  }
+  // This month's birthdays, sorted by day.
+  const items = birthdays
+    .map((c) => {
+      const [, mm, dd] = c.dob.split("-").map(Number);
+      return { ...c, mm, dd };
+    })
+    .filter((c) => c.mm && c.dd && c.mm - 1 === month)
+    .sort((a, b) => a.dd - b.dd);
+
+  const monthAbbr = MONTHS[month].slice(0, 3);
 
   return (
     <div>
@@ -475,38 +476,36 @@ function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
       </div>
     <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
 
-      <div className="grid grid-cols-7 gap-1">
-        {DAYS.map((d) => (
-          <span key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase">{d[0]}</span>
-        ))}
-        {cells.map((day, i) => {
-          if (day == null) return <div key={i} className="min-h-11 rounded-md border border-transparent" />;
-          const dayEntries = entriesByDay.get(day);
-          const isToday    = day === todayDay;
-          return (
-            <div
-              key={i}
-              title={dayEntries?.map((c) => c.fullName).join(", ")}
-              className={[
-                "min-h-11 rounded-md border p-1 flex flex-col",
-                isToday    ? "border-[#003527] bg-[#003527]/5"
-                : dayEntries ? "border-pink-200 bg-pink-50"
-                : "border-slate-100",
-              ].join(" ")}
-            >
-              <span className={`text-[10px] font-semibold ${isToday ? "text-[#003527]" : "text-slate-400"}`}>{day}</span>
-              {dayEntries?.map((c) => (
-                <p key={c.fullName} className="text-[9px] leading-tight text-pink-700 font-medium truncate">{c.fullName}</p>
-              ))}
-            </div>
-          );
-        })}
-      </div>
-
-      {birthdays.length === 0 && (
-        <p className="text-sm text-slate-400 mt-4 text-center">No birthdays this month.</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-slate-400 text-center py-6">No birthdays this month.</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {items.map((c) => {
+            const isToday  = c.dd === todayDay;
+            const initials = c.fullName.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
+            return (
+              <div
+                key={`${c.fullName}-${c.dd}`}
+                className={[
+                  "flex items-center gap-3 p-3 rounded-xl border transition-colors",
+                  isToday ? "border-pink-200 bg-pink-50" : "border-slate-100 hover:bg-slate-50",
+                ].join(" ")}
+              >
+                <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-700 flex items-center justify-center text-sm font-bold shrink-0">
+                  {initials || "?"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{c.fullName}</p>
+                  <p className="text-xs text-slate-400 tabular-nums">{monthAbbr} {c.dd}</p>
+                </div>
+                {isToday && (
+                  <span className="shrink-0 text-[9px] font-bold bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full uppercase tracking-wide">Today</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
-
     </div>
     </div>
   );
