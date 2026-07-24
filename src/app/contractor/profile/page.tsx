@@ -84,7 +84,7 @@ export default function ContractorProfilePage() {
     <div className="max-w-7xl mx-auto space-y-8">
       <PageHeader
         title="My Profile"
-        subtitle="Your employment details, compensation, and personal information."
+        subtitle="Your engagement details, contract information, and personal information."
       />
 
       {/* ── Identity hero — deep brand gradient ── */}
@@ -134,19 +134,19 @@ export default function ContractorProfilePage() {
         {/* Left: Employment + Operational */}
         <div className="md:col-span-2 space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
-            <CardTitle icon={<LuBriefcase size={16} strokeWidth={1.75} />}>Employment Details</CardTitle>
+            <CardTitle icon={<LuBriefcase size={16} strokeWidth={1.75} />}>Contractor Details</CardTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <Field label="Department"     value={profile.department} />
-              <Field label="Sub-Department" value={profile.subDepartment} />
-              <Field label="Hire Date"      value={profile.hireDate} />
-              <Field label="Manager"        value={profile.manager} />
+              <Field label="Department"        value={profile.department} />
+              <Field label="Sub-Department"    value={profile.subDepartment} />
+              <Field label="Contract Start Date" value={profile.hireDate} />
+              <Field label="Manager"           value={profile.manager} />
             </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
             <CardTitle icon={<LuClock size={16} strokeWidth={1.75} />}>Operational Details</CardTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <Field label="Office Location"    value={profile.officeLocation} />
+              <Field label="Work Location"      value={profile.officeLocation} />
               <Field label="Shift Hours"        value={profile.shiftHours} />
               <Field label="Rest Day"           value={profile.restDay} />
               <Field label="Equipment Provided" value={profile.equipmentProvided ? "Yes" : "No"} />
