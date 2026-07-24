@@ -170,7 +170,7 @@ export async function fetchContractorsPage(params: FetchParams): Promise<{
 
   let query = sb.from(TABLE).select("*", { count: "exact" });
   query = applyFilters(query, params.country, params.status, params.rules, params.search);
-  query = query.order("id", { ascending: false }).range(from, to);
+  query = query.order("fullName", { ascending: true }).range(from, to);
 
   const { data, error, count } = await query;
   if (error) throw new Error(error.message);

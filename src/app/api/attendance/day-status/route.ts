@@ -34,12 +34,14 @@ export async function GET(request: Request) {
   if (!userId && from && to) {
     const rows = await prisma.attendanceDayStatus.findMany({
       where: { date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } },
-      select: { email: true, date: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, adjustedMinutes: true },
+      select: { worksnapUserId: true, email: true, date: true, decisionStatus: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, adjustedMinutes: true },
     });
     return Response.json({
       days: rows.map((r) => ({
+        worksnapUserId: r.worksnapUserId,
         email: r.email,
         date: toISODate(r.date),
+        decisionStatus: r.decisionStatus,
         evaluatedMinutes: r.evaluatedMinutes,
         evaluatedRegularMinutes: r.evaluatedRegularMinutes,
         adjustedMinutes: r.adjustedMinutes,

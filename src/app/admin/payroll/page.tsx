@@ -359,7 +359,7 @@ export default function PayrollPage() {
     const matchesShiftType = shiftTypeFilter === "All" || r.shiftType === shiftTypeFilter;
     const matchesDepartment = departmentFilter === "All" || r.department === departmentFilter;
     return matchesName && matchesPayCategory && matchesCountry && matchesShiftType && matchesDepartment;
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name));
 
   const payCategoryOptions = Array.from(new Set(rows.map((r) => r.payCategory).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(rows.map((r) => r.country).filter((c) => c !== "-"))).sort();

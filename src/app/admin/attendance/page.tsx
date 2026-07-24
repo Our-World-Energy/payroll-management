@@ -2,13 +2,13 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 
 import { useState, useEffect, useMemo } from "react";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn } from "react-icons/lu";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn, LuListChecks } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
-import { fetchAllLeaveRequestsAdmin, type AdminLeaveRequest } from "../contractors/actions";
+import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
 
 
 // Transparently retries a fetch on network failure or a 5xx/429 response —
@@ -44,10 +44,6 @@ function formatElapsedSeconds(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function showDailyDecisionActions(worksnapTime: string) {
-  return worksnapTime !== "-";
 }
 
 type ReviewModalProps = {
@@ -618,7 +614,10 @@ function buildBulkApproveDaySnapshots(
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
-    const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
+    // Matches exactly which days Attendance Review's own "Approve All" targets
+    // (every non-rest day, plus any rest day with logged time) — so a Bulk
+    // Approve save leaves the same per-day decisions "Approve All" would.
+    const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
     const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
@@ -638,8 +637,9 @@ function buildBulkApproveDaySnapshots(
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-    const dailyDecisionStatus = showDailyDecisionActions(worksnapTime) ? "Approved" : "No Status";
     const isRestDay = isRestDayDate(date, restDaysStr);
+    // Same "Approve All"-equivalent rule as above.
+    const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, shiftType, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
@@ -1125,16 +1125,19 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     }));
   }
 
+  // Matches exactly which days show the per-day Decision check/x icons —
+  // every non-rest day, plus any rest day that still has Worksnap Time logged.
+  // Shared between "Approve All" and the save logic below, which uses it to
+  // decide whether the week actually counts as fully reviewed.
+  const applicableDecisionDates = weekDates.filter((date) =>
+    !isRestDayDate(date, restDaysStr) || worksnapTimeForDate(dailyWorksnapMinutes, date) !== "-"
+  );
+
   function approveAllDays() {
-    // Matches exactly which days show the per-day Decision check/x icons —
-    // every non-rest day, plus any rest day that still has Worksnap Time logged.
-    const applicableDates = weekDates.filter((date) =>
-      !isRestDayDate(date, restDaysStr) || worksnapTimeForDate(dailyWorksnapMinutes, date) !== "-"
-    );
-    const allApproved = applicableDates.every((date) => dailyDecisionStatuses[date] === "Approved");
+    const allApproved = applicableDecisionDates.every((date) => dailyDecisionStatuses[date] === "Approved");
     setDailyDecisionStatuses((current) => {
       const next = { ...current };
-      applicableDates.forEach((date) => { next[date] = allApproved ? "No Status" : "Approved"; });
+      applicableDecisionDates.forEach((date) => { next[date] = allApproved ? "No Status" : "Approved"; });
       return next;
     });
   }
@@ -1147,6 +1150,18 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   async function handleSaveClick() {
     const finalCompletionMinutes = isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes;
     const finalOffsetCredit = isIndia ? offsetCredit : 0;
+
+    // Fixed-Ind has no per-day Decision, so its "reviewed" outcome instead
+    // hinges on whether the actual saved completion (worked minutes, plus any
+    // Time Credit just applied) falls in the same 2,400–2,700 min "Standard
+    // Met" band that computeWeeklyStatus itself uses — not just the lower
+    // bound, since exceeding 2,700 also needs review, and there's no "Apply
+    // Time Credit"-style fix for excess hours, so it stays "For Review" until
+    // resolved some other way. Hourly contractors always save as "APPROVED"
+    // (original behavior) regardless of per-day decisions.
+    const requestStatus = isIndia
+      ? (finalCompletionMinutes >= 2400 && finalCompletionMinutes <= 2700 ? "APPROVED" : "OPEN")
+      : "APPROVED";
 
     if (record.worksnapUserId != null) {
       setIsSaving(true);
@@ -1192,7 +1207,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             worksnapUserId: record.worksnapUserId,
             email: record.role.includes("@") ? record.role : "",
             week: weekDates[0],
-            requestStatus: "APPROVED",
+            requestStatus,
             completionMinutes: finalCompletionMinutes,
             days,
           }),
@@ -1651,12 +1666,11 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   week: string;
   isWeekEnded: boolean;
 }) {
-  const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
-  const [modalRows, setModalRows] = useState<AttendanceRow[]>([]);
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
+  const [dayStatusDays, setDayStatusDays] = useState<Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
@@ -1665,7 +1679,6 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   const [failedContractorIds, setFailedContractorIds] = useState<Map<string, string>>(new Map());
   const [loadError, setLoadError] = useState("");
   const [retryNonce, setRetryNonce] = useState(0);
-  const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
   const [savingElapsedSeconds, setSavingElapsedSeconds] = useState(0);
 
   // Ticks once a second while a save is in flight, purely to show elapsed
@@ -1685,12 +1698,15 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   );
 
   // Uses the same week currently selected in Weekly Time Tracking (passed in
-  // via the `week` prop) rather than its own independent week picker.
+  // via the `week` prop) rather than its own independent week picker, and the
+  // exact same rows already loaded/computed there (worksnapRows) rather than
+  // re-fetching and re-deriving weeklyStatus independently — otherwise this
+  // modal could drift out of sync with what the main table shows (e.g. the
+  // live "all days No Status" → "For Review" override).
   const modalWeekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
-  const payCategoryOptions = Array.from(new Set(modalRows.map(payCategoryForAttendanceRow).filter((c) => c !== "-"))).sort();
-  const countryOptions = Array.from(new Set(modalRows.map((r) => r.region).filter(Boolean))).sort();
-  const deptOptions = Array.from(new Set(modalRows.map(departmentForAttendanceRow))).sort();
-  const shiftTypeOptions = Array.from(new Set(modalRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
+  const countryOptions = Array.from(new Set(worksnapRows.map((r) => r.region).filter(Boolean))).sort();
+  const deptOptions = Array.from(new Set(worksnapRows.map(departmentForAttendanceRow))).sort();
+  const shiftTypeOptions = Array.from(new Set(worksnapRows.map((row) => row.shiftType ?? "").filter(Boolean))).sort();
 
   useEffect(() => {
     if (!week) return;
@@ -1703,54 +1719,16 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     async function load() {
       try {
-        const [entriesResult, weekStatusResult, dailyLogResult, dayStatusResult] = await Promise.all([
-          fetchWithRetry(`/api/worksnap-entries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => r.json()),
-          fetchWithRetry(`/api/attendance/week-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
+        const [dailyLogResult, dayStatusResult] = await Promise.all([
           fetchWithRetry(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
           fetchWithRetry(`/api/attendance/day-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { days: [] })),
         ]);
         if (isCancelled) return;
 
-        const rows = worksnapEntriesToAttendanceRecords((entriesResult.entries ?? []) as WorksnapEntry[], dates);
-        const savedByUserId = new Map<number, { requestStatus: string; completionMinutes: number | null }>(
-          (weekStatusResult.weekStatuses ?? []).map((s: { worksnapUserId: number; requestStatus: string; completionMinutes: number | null }) => [s.worksnapUserId, s])
-        );
-        const mergedRows = rows.map((row) => {
-          const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
-          if (!saved) return row;
-          return {
-            ...row,
-            completionMinutes: saved.completionMinutes ?? row.completionMinutes,
-            weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
-          };
-        });
-        setModalRows(mergedRows);
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
-
-        // Adjusted Time overrides Worksnap Time the same way an individual
-        // Attendance Review does — one bulk request covers every contractor's
-        // saved per-day adjustment instead of firing one request per candidate
-        // row (was the slow part of loading this modal).
-        const candidateRows = mergedRows.filter((r) =>
-          r.weeklyStatus === "For Review" && !isFixedContractor(r.payCategory) && r.worksnapUserId != null
-        );
-        const adjustedByEmail = new Map<string, Record<string, number>>();
-        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
-          const email = String(d.email ?? "").trim().toLowerCase();
-          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
-          const map = adjustedByEmail.get(email) ?? {};
-          map[String(d.date ?? "")] = d.adjustedMinutes;
-          adjustedByEmail.set(email, map);
-        }
-        const adjustedEntries: [string, Record<string, number>][] = candidateRows.map((r) => {
-          const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
-          return [r.contractorId, adjustedByEmail.get(email) ?? {}];
-        });
-        if (isCancelled) return;
-        setAdjustedByContractor(new Map(adjustedEntries));
+        setDayStatusDays((dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>);
       } catch {
         if (isCancelled) return;
-        setModalRows([]);
         setLoadError("Unable to load contractors for bulk approval. Please try again.");
       } finally {
         if (!isCancelled) setIsLoading(false);
@@ -1761,17 +1739,42 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     return () => { isCancelled = true; };
   }, [week, retryNonce]);
 
-  const filteredRows = useMemo(() => modalRows
+  // Candidate rows come straight from Weekly Time Tracking's own rows (the
+  // `worksnapRows` prop) instead of a separate fetch, so this modal can never
+  // drift out of sync with what the main table shows for the same week.
+  const candidateRows = useMemo(() => worksnapRows.filter((r) =>
+    r.weeklyStatus === "For Review" && r.payCategory?.trim().toLowerCase() === "hourly" && (r.shiftType === "Fixed" || r.shiftType === "Flexible") && r.worksnapUserId != null
+  ), [worksnapRows]);
+
+  // Adjusted Time overrides Worksnap Time the same way an individual
+  // Attendance Review does — one bulk request covers every contractor's saved
+  // per-day adjustment instead of firing one request per candidate row.
+  const adjustedByContractor = useMemo(() => {
+    const adjustedByEmail = new Map<string, Record<string, number>>();
+    for (const d of dayStatusDays) {
+      const email = String(d.email ?? "").trim().toLowerCase();
+      if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+      const map = adjustedByEmail.get(email) ?? {};
+      map[String(d.date ?? "")] = d.adjustedMinutes;
+      adjustedByEmail.set(email, map);
+    }
+    return new Map(candidateRows.map((r) => {
+      const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+      return [r.contractorId, adjustedByEmail.get(email) ?? {}];
+    }));
+  }, [dayStatusDays, candidateRows]);
+
+  const filteredRows = useMemo(() => worksnapRows
     .filter((r) =>
       r.weeklyStatus === "For Review" &&
-      !isFixedContractor(r.payCategory) &&
-      (payCategoryFilter === "All" || payCategoryForAttendanceRow(r) === payCategoryFilter) &&
+      r.payCategory?.trim().toLowerCase() === "hourly" &&
+      (r.shiftType === "Fixed" || r.shiftType === "Flexible") &&
       (countryFilter === "All" || r.region === countryFilter) &&
       (deptFilter === "All" || departmentForAttendanceRow(r) === deptFilter) &&
       (shiftTypeFilter === "All" || r.shiftType === shiftTypeFilter)
     )
     .sort((a, b) => a.name.localeCompare(b.name)),
-    [modalRows, payCategoryFilter, countryFilter, deptFilter, shiftTypeFilter]
+    [worksnapRows, countryFilter, deptFilter, shiftTypeFilter]
   );
 
   // Pre-compute all per-row totals once per data change so the render loop
@@ -1895,16 +1898,15 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
             <p className="text-sm text-green-200 mt-0.5">
               Approve all selected contractors for {week ? weekLabel(week) : "the selected week"} (same week as Weekly Time Tracking)
             </p>
+            <span className="inline-flex items-center mt-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-white/10 text-green-100">
+              Pay Category: Hourly
+            </span>
           </div>
           <button onClick={onClose} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white">
             <LuX size={18} strokeWidth={2} />
           </button>
         </div>
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
-          <select value={payCategoryFilter} onChange={(e) => setPayCategoryFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
-            <option value="All">All Pay Categories</option>
-            {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
           <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
             <option value="All">All Departments</option>
             {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
@@ -2189,6 +2191,210 @@ function BreakdownModal({ userId, userName, email, week, onClose }: { userId: nu
   );
 }
 
+// Bulk-finalizes every row that doesn't need manual review ("Standard Met" —
+// never reviewed but already compliant — and "Reviewed" — re-saved/refreshed
+// too) in one shot, skipping "For Review" rows entirely. Reuses the exact
+// same per-day snapshot builder and bulk-save endpoint Bulk Approve does, so
+// the persisted numbers are computed identically either way.
+function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolidays, week, onClose, onProcessed }: {
+  rows: AttendanceRow[];
+  allLeaveRequests: AdminLeaveRequest[];
+  usaHolidays: HolidayEntry[];
+  allHolidays: HolidayEntry[];
+  week: string;
+  onClose: () => void;
+  onProcessed: () => void;
+}) {
+  const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
+  const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processError, setProcessError] = useState("");
+  // Live total of every contractor profile row in the database — not derived
+  // from this week's attendance data at all, so it stays accurate whenever a
+  // profile is added or removed regardless of whether they logged any time.
+  const [contractorRecordsCount, setContractorRecordsCount] = useState<number | null>(null);
+
+  const weekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
+  const leaveRequests = useMemo(() => allLeaveRequests.filter((r) => r.status === "Approved"), [allLeaveRequests]);
+
+  const needsReviewCount = rows.filter((r) => r.weeklyStatus === "For Review").length;
+  const reviewedCount = rows.filter((r) => r.weeklyStatus === "Reviewed").length;
+  const standardMetCount = rows.filter((r) => r.weeklyStatus === "Standard Met").length;
+
+  // Everything except "For Review" — "Standard Met" rows get saved for the
+  // first time, already-"Reviewed" rows get refreshed/re-saved alongside them.
+  const eligibleRows = useMemo(() => rows.filter((r) =>
+    (r.weeklyStatus === "Standard Met" || r.weeklyStatus === "Reviewed") && r.worksnapUserId != null
+  ), [rows]);
+
+  useEffect(() => {
+    if (!week) return;
+    let isCancelled = false;
+    const dates = datesBetween(week, addDaysIso(week, 6));
+    const from = dates[0];
+    const to = dates[dates.length - 1];
+    setIsLoadingData(true);
+    setLoadError("");
+
+    async function load() {
+      try {
+        const [dailyLogResult, dayStatusResult] = await Promise.all([
+          fetchWithRetry(`/api/attendance/daily-log?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+          fetchWithRetry(`/api/attendance/day-status?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`).then((r) => (r.ok ? r.json() : { days: [] })),
+        ]);
+        if (isCancelled) return;
+        setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
+
+        const adjustedByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
+          const email = String(d.email ?? "").trim().toLowerCase();
+          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          const map = adjustedByEmail.get(email) ?? {};
+          map[String(d.date ?? "")] = d.adjustedMinutes;
+          adjustedByEmail.set(email, map);
+        }
+        const entries: [string, Record<string, number>][] = eligibleRows.map((r) => {
+          const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+          return [r.contractorId, adjustedByEmail.get(email) ?? {}];
+        });
+        setAdjustedByContractor(new Map(entries));
+      } catch {
+        if (isCancelled) return;
+        setLoadError("Unable to load supporting data for processing. Please try again.");
+      } finally {
+        if (!isCancelled) setIsLoadingData(false);
+      }
+    }
+
+    load();
+    return () => { isCancelled = true; };
+  }, [week]);
+
+  // Total contractor profile count — independent of the selected week, so it
+  // always reflects the current Contractor Details roster whenever this
+  // modal is opened, regardless of who logged attendance this particular week.
+  useEffect(() => {
+    let isCancelled = false;
+    fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] })
+      .then((contractors) => { if (!isCancelled) setContractorRecordsCount(contractors.length); })
+      .catch(() => { if (!isCancelled) setContractorRecordsCount(null); });
+    return () => { isCancelled = true; };
+  }, []);
+
+  async function handleProcess() {
+    setIsProcessing(true);
+    setProcessError("");
+
+    const items = eligibleRows.map((r) => {
+      const email = r.role.includes("@") ? r.role : "";
+      const rowLeaveRequests = leaveRequests.filter((req) => req.email === email);
+      const adjustedDaily = adjustedByContractor.get(r.contractorId);
+      const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests);
+      return {
+        worksnapUserId: r.worksnapUserId,
+        email,
+        week: weekDates[0],
+        requestStatus: "APPROVED",
+        completionMinutes: totals.totalCompletionMinutes,
+        days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests),
+      };
+    });
+
+    type BulkSaveResult = { worksnapUserId: number | null; ok: boolean; error?: string };
+    const response = await fetch("/api/attendance/status/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    })
+      .then(async (res) => (res.ok ? ((await res.json()) as { results: BulkSaveResult[] }) : null))
+      .catch(() => null);
+
+    setIsProcessing(false);
+
+    const results = response?.results ?? [];
+    const failedCount = results.filter((r) => !r.ok).length;
+
+    if (!response || failedCount > 0) {
+      setProcessError(
+        failedCount > 0
+          ? `${failedCount} of ${results.length} record${results.length !== 1 ? "s" : ""} failed to process. Please try again.`
+          : "Unable to process attendance. Please try again."
+      );
+      if (results.some((r) => r.ok)) onProcessed();
+      return;
+    }
+
+    onProcessed();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isProcessing && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-bold text-[#003527]">Process Attendance</h3>
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <LuX size={18} strokeWidth={2} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          {week ? weekLabel(week) : "This week"} — rows that need review are skipped.
+        </p>
+
+        <div className="space-y-2 mb-4">
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-red-50 border border-red-100">
+            <span className="text-sm font-medium text-red-700">Needs Review</span>
+            <span className="text-sm font-bold text-red-700">{needsReviewCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-orange-50 border border-orange-100">
+            <span className="text-sm font-medium text-orange-700">Reviewed</span>
+            <span className="text-sm font-bold text-orange-700">{reviewedCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-emerald-50 border border-emerald-100">
+            <span className="text-sm font-medium text-emerald-700">Standard Met</span>
+            <span className="text-sm font-bold text-emerald-700">{standardMetCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-sm font-medium text-slate-600">Contractor Records</span>
+            <span className="text-sm font-bold text-slate-600">{contractorRecordsCount ?? "—"}</span>
+          </div>
+        </div>
+
+        {loadError && <p className="text-xs text-red-600 mb-3">{loadError}</p>}
+        {processError && <p className="text-xs text-red-600 mb-3">{processError}</p>}
+
+        <p className="text-xs text-slate-400 mb-5">
+          {eligibleRows.length} record{eligibleRows.length !== 1 ? "s" : ""} will be saved to attendance_week_status / attendance_day_status.
+        </p>
+
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleProcess}
+            disabled={isProcessing || isLoadingData || eligibleRows.length === 0}
+            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
+          >
+            {isProcessing ? "Processing…" : isLoadingData ? "Loading…" : "Process"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AttendancePage() {
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
@@ -2208,6 +2414,7 @@ export default function AttendancePage() {
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
+  const [showProcessModal, setShowProcessModal] = useState(false);
   const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
   const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
   const [allHolidays, setAllHolidays] = useState<HolidayEntry[]>([]);
@@ -2296,7 +2503,7 @@ export default function AttendancePage() {
               totalRegularOtMinutes: saved.totalRegularOtMinutes,
               totalRdOtMinutes: saved.totalRdOtMinutes,
               totalHoOtMinutes: saved.totalHoOtMinutes,
-              weeklyStatus: saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus,
+              weeklyStatus: (saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus) as AttendanceRecord["weeklyStatus"],
             };
           }));
           setLastSyncedAt(result.lastSyncedAt ?? null);
@@ -2459,6 +2666,16 @@ export default function AttendancePage() {
               <LuRefreshCw size={16} strokeWidth={2} className={syncing ? "animate-spin" : ""} />
               <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span>
               <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
+            </button>
+            <button
+              onClick={() => setShowProcessModal(true)}
+              disabled={!isSelectedWeekEnded}
+              title={!isSelectedWeekEnded ? "Process Attendance is only available once the selected week has ended" : undefined}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              <LuListChecks size={16} strokeWidth={2} />
+              <span className="hidden sm:inline">Process Attendance</span>
+              <span className="sm:hidden">Process</span>
             </button>
           </div>
           <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
@@ -2953,6 +3170,19 @@ export default function AttendancePage() {
           allHolidays={allHolidays}
           week={week}
           isWeekEnded={isSelectedWeekEnded}
+        />
+      )}
+
+      {/* Process Attendance Modal */}
+      {showProcessModal && (
+        <ProcessAttendanceModal
+          rows={filteredAttendanceRows}
+          allLeaveRequests={leaveRequests}
+          usaHolidays={usaHolidays}
+          allHolidays={allHolidays}
+          week={week}
+          onClose={() => setShowProcessModal(false)}
+          onProcessed={handleBulkApprove}
         />
       )}
 

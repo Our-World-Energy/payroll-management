@@ -5,10 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
-  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil,
+  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, updateTimeOffUsage,
+  fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, type AdminLeaveRequest,
 } from "../contractors/actions";
 import { fetchCutOffTime } from "../settings/actions";
@@ -156,6 +156,52 @@ type TimeOffRow = {
   latestRequest: AdminLeaveRequest | null;
 };
 
+// Purely informational summary — counts contractors with any PTO/Sick Leave
+// usage on file this period. Doesn't save or change anything; just gives an
+// admin a quick snapshot before they go looking at individual rows.
+function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: () => void }) {
+  const ptoCount = rows.filter((r) => r.ptoUsed > 0).length;
+  const sickLeaveCount = rows.filter((r) => r.sickLeaveUsed > 0).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-bold text-[#003527]">Process Time Off</h3>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+          >
+            <LuX size={18} strokeWidth={2} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">Current PTO / Sick Leave usage across your contractor workforce.</p>
+
+        <div className="space-y-2 mb-5">
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-teal-50 border border-teal-100">
+            <span className="text-sm font-medium text-teal-700">Contractors with PTO</span>
+            <span className="text-sm font-bold text-teal-700">{ptoCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-orange-50 border border-orange-100">
+            <span className="text-sm font-medium text-orange-700">Count of Sick Leave</span>
+            <span className="text-sm font-bold text-orange-700">{sickLeaveCount}</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function TimeOffPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -199,6 +245,7 @@ export default function TimeOffPage() {
   const [cutoff, setCutoff] = useState<CutoffDate>(DEFAULT_CUTOFF);
 
   const [showUsedImportModal, setShowUsedImportModal] = useState(false);
+  const [showProcessTimeOffModal, setShowProcessTimeOffModal] = useState(false);
 
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
@@ -217,6 +264,30 @@ export default function TimeOffPage() {
   }, []);
 
   useEffect(() => { reloadData(); }, [reloadData]);
+
+  // ── Clear PTO/Sick Used Import ──────────────────────────────────────────
+  // Resets a single contractor's imported baseline back to 0 (i.e. "no
+  // import on file"), reusing the same bulk-import action with a lone
+  // zero-hours entry rather than adding a dedicated clear endpoint.
+  const [clearingUsedImport, setClearingUsedImport] = useState<{ id: string; type: "pto" | "sick" } | null>(null);
+  const [clearImportError,   setClearImportError]   = useState<{ id: string; type: "pto" | "sick"; message: string } | null>(null);
+
+  async function handleClearUsedImport(row: TimeOffRow, type: "pto" | "sick") {
+    setClearingUsedImport({ id: row.id, type });
+    setClearImportError(null);
+    try {
+      const { results } = await bulkImportUsedImport(type, [{ email: row.email, hours: 0 }]);
+      if (!results[0]?.ok) {
+        setClearImportError({ id: row.id, type, message: results[0]?.error ?? "Failed to clear." });
+        return;
+      }
+      await reloadData();
+    } catch (err) {
+      setClearImportError({ id: row.id, type, message: err instanceof Error ? err.message : "Failed to clear." });
+    } finally {
+      setClearingUsedImport(null);
+    }
+  }
 
   // Map email → latest leave request (already sorted newest-first)
   const latestByEmail = useMemo<Record<string, AdminLeaveRequest>>(() => {
@@ -988,18 +1059,33 @@ export default function TimeOffPage() {
           <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
           <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
         </div>
-        <button
-          onClick={() => setShowUsedImportModal(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors shrink-0"
-        >
-          <LuUpload size={13} strokeWidth={2} /> PTO / SICK Used Import
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowProcessTimeOffModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+          >
+            <LuListChecks size={13} strokeWidth={2} /> Process Time Off
+          </button>
+          <button
+            onClick={() => setShowUsedImportModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors"
+          >
+            <LuUpload size={13} strokeWidth={2} /> PTO / SICK Used Import
+          </button>
+        </div>
       </div>
 
       {showUsedImportModal && (
         <PtoSickUsedImportModal
           onClose={() => setShowUsedImportModal(false)}
           onImported={reloadData}
+        />
+      )}
+
+      {showProcessTimeOffModal && (
+        <ProcessTimeOffModal
+          rows={rows}
+          onClose={() => setShowProcessTimeOffModal(false)}
         />
       )}
 
@@ -1162,7 +1248,27 @@ export default function TimeOffPage() {
                         {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
                       </td>
                       <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                        {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsedImport)}h`}
+                        {row.country === "India" ? <span className="text-slate-300">—</span> : (
+                          <div className="flex items-center gap-1.5">
+                            <span>{fmtBalance(row.ptoUsedImport)}h</span>
+                            {row.ptoUsedImport > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => handleClearUsedImport(row, "pto")}
+                                disabled={clearingUsedImport?.id === row.id && clearingUsedImport.type === "pto"}
+                                title="Clear PTO Used Import"
+                                className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {clearingUsedImport?.id === row.id && clearingUsedImport.type === "pto"
+                                  ? <LuLoader size={13} className="animate-spin" />
+                                  : <LuTrash2 size={13} strokeWidth={2} />}
+                              </button>
+                            )}
+                          </div>
+                        )}
+                        {clearImportError?.id === row.id && clearImportError.type === "pto" && (
+                          <p className="text-[10px] text-red-500 mt-0.5">{clearImportError.message}</p>
+                        )}
                       </td>
                       <td className="px-4 py-2.5 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : (
@@ -1175,7 +1281,27 @@ export default function TimeOffPage() {
                     </>}
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
-                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickUsedImport)}h</td>
+                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
+                      <div className="flex items-center gap-1.5">
+                        <span>{fmtBalance(row.sickUsedImport)}h</span>
+                        {row.sickUsedImport > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleClearUsedImport(row, "sick")}
+                            disabled={clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"}
+                            title="Clear Sick Used Import"
+                            className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"
+                              ? <LuLoader size={13} className="animate-spin" />
+                              : <LuTrash2 size={13} strokeWidth={2} />}
+                          </button>
+                        )}
+                      </div>
+                      {clearImportError?.id === row.id && clearImportError.type === "sick" && (
+                        <p className="text-[10px] text-red-500 mt-0.5">{clearImportError.message}</p>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 border-r border-slate-100">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold tabular-nums text-orange-600">{fmtBalance(row.sickLeaveAvailable)}h</span>
