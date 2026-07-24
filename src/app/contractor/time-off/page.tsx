@@ -8,16 +8,12 @@ import {
   submitLeaveRequest, cancelLeaveRequest,
   type ContractorTimeOff, type LeaveRequest,
 } from "./actions";
-import { fmtBalance, HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { HOURS_PER_DAY } from "@/lib/timeOffBalances";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuChevronRight, LuInfo, LuX, LuCircleAlert,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
-
-function fmtDays(hrs: number) {
-  return fmtBalance(hrs / HOURS_PER_DAY);
-}
 
 function fmtHoursMinutes(hrs: number): string {
   const totalMins = Math.round(hrs * 60);
@@ -26,6 +22,13 @@ function fmtHoursMinutes(hrs: number): string {
   if (h === 0) return `${m}m`;
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
+}
+
+// A leave request's duration in hours: half-day types are a fixed 4h; full-day
+// types are the selected calendar span × the 8h standard day.
+function fmtRequestHours(type: string, durationDays: number): string {
+  if (type.endsWith("Half Day")) return "4h";
+  return fmtHoursMinutes(durationDays * HOURS_PER_DAY);
 }
 
 function fmtDateRange(start: string, end: string) {
@@ -82,18 +85,15 @@ function BalanceCard({
         <div className="flex-1 grid grid-cols-3 gap-3">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Total</p>
-            <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtDays(total)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(total)}</p>
+            <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtHoursMinutes(total)}</p>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
-            <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtDays(used)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(used)}</p>
+            <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtHoursMinutes(used)}</p>
           </div>
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
-            <p className={`text-xl font-bold tabular-nums ${availColor}`}>{fmtDays(available)}<span className="text-xs font-medium text-slate-400 ml-1">d</span></p>
-            <p className="text-[10px] text-slate-400 tabular-nums mt-0.5">{fmtHoursMinutes(available)}</p>
+            <p className={`text-xl font-bold tabular-nums ${availColor}`}>{fmtHoursMinutes(available)}</p>
           </div>
         </div>
       </div>
@@ -363,7 +363,7 @@ export default function ContractorTimeOffPage() {
                 <LuInfo size={14} strokeWidth={1.75} />
                 Estimated duration:{" "}
                 <span className="font-bold text-slate-700">
-                  {estimatedDays === null ? "-- days" : isHalfDay ? "Half day" : `${estimatedDays} day${estimatedDays !== 1 ? "s" : ""}`}
+                  {estimatedDays === null ? "-- h" : isHalfDay ? "4h" : `${estimatedDays * HOURS_PER_DAY}h`}
                 </span>
               </div>
               <button
@@ -456,7 +456,7 @@ export default function ContractorTimeOffPage() {
                           {fmtDateRange(row.startDate, row.endDate)}
                         </td>
                         <td className="px-6 py-4 text-sm font-semibold text-slate-800 whitespace-nowrap">
-                          {row.type.endsWith("Half Day") ? "Half day" : `${row.durationDays} day${row.durationDays !== 1 ? "s" : ""}`}
+                          {fmtRequestHours(row.type, row.durationDays)}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-400 italic max-w-[180px] truncate">
                           {row.reason || "—"}
@@ -557,7 +557,7 @@ export default function ContractorTimeOffPage() {
                             {new Date(row.endDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           </td>
                           <td className="px-5 py-4 text-sm font-semibold text-slate-800 whitespace-nowrap">
-                            {row.type.endsWith("Half Day") ? "Half day" : `${row.durationDays} day${row.durationDays !== 1 ? "s" : ""}`}
+                            {fmtRequestHours(row.type, row.durationDays)}
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-400 italic max-w-[200px]">
                             <span className="block truncate" title={row.reason}>{row.reason || "—"}</span>
