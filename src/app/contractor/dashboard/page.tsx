@@ -400,10 +400,10 @@ export default function ContractorDashboardPage() {
         {/* Right panel */}
         <div className="space-y-6">
           {/* This Month's Holidays */}
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-[#003527]">{MONTHS[new Date().getMonth()]} Holidays</h3>
+          </div>
           <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-4">
-              {MONTHS[new Date().getMonth()]} Holidays
-            </h4>
             {upcomingHols.length === 0 ? (
               <p className="text-sm text-slate-400">No holidays this month.</p>
             ) : (
@@ -466,14 +466,15 @@ function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
   const monthAbbr = MONTHS[month].slice(0, 3);
 
   return (
-    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-5">
+    <div>
+      <div className="flex items-center justify-between mb-4">
         <h3 className="text-xl font-bold text-[#003527]">Birthdays</h3>
         <div className="flex items-center gap-2">
           <LuCake size={18} strokeWidth={1.75} className="text-pink-400" />
           <span className="text-xs font-semibold text-slate-400">{MONTHS[month]} {year}</span>
         </div>
       </div>
+    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
 
       {items.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-6">No birthdays this month.</p>
@@ -505,6 +506,7 @@ function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
           })}
         </div>
       )}
+    </div>
     </div>
   );
 }
