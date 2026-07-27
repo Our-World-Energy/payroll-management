@@ -2033,6 +2033,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                     )}
                     {row.weeklyStatus === "On Leave" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">On Leave</span>}
                     {row.weeklyStatus === "Reviewed" && <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">Reviewed</span>}
+                    {row.weeklyStatus === "Processed" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">Processed</span>}
                   </td>
                 </tr>
               );
@@ -2219,15 +2220,21 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
   const weekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
   const leaveRequests = useMemo(() => allLeaveRequests.filter((r) => r.status === "Approved"), [allLeaveRequests]);
 
-  const needsReviewCount = rows.filter((r) => r.weeklyStatus === "For Review").length;
-  const reviewedCount = rows.filter((r) => r.weeklyStatus === "Reviewed").length;
-  const standardMetCount = rows.filter((r) => r.weeklyStatus === "Standard Met").length;
+  // Only contractors that actually exist in Contractor Details are counted or
+  // processed at all — same flag the "Contractors Records" count below uses.
+  // Anyone logging Worksnap time with no matching contractor profile is
+  // excluded from every count and never gets saved to the database.
+  const profiledRows = useMemo(() => rows.filter((r) => r.hasContractorProfile !== false), [rows]);
+
+  const needsReviewCount = profiledRows.filter((r) => r.weeklyStatus === "For Review").length;
+  const reviewedCount = profiledRows.filter((r) => r.weeklyStatus === "Reviewed").length;
+  const standardMetCount = profiledRows.filter((r) => r.weeklyStatus === "Standard Met").length;
 
   // Everything except "For Review" — "Standard Met" rows get saved for the
   // first time, already-"Reviewed" rows get refreshed/re-saved alongside them.
-  const eligibleRows = useMemo(() => rows.filter((r) =>
+  const eligibleRows = useMemo(() => profiledRows.filter((r) =>
     (r.weeklyStatus === "Standard Met" || r.weeklyStatus === "Reviewed") && r.worksnapUserId != null
-  ), [rows]);
+  ), [profiledRows]);
 
   useEffect(() => {
     if (!week) return;
@@ -2299,6 +2306,7 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
         requestStatus: "APPROVED",
         completionMinutes: totals.totalCompletionMinutes,
         days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests),
+        processed: true,
       };
     });
 
@@ -2486,6 +2494,7 @@ export default function AttendancePage() {
             worksnapUserId: number; requestStatus: string; completionMinutes: number | null; totalLocalHolidayMinutes: number | null;
             totalEvaluatedRegularMinutes: number | null; totalEvaluatedMinutes: number | null; totalUsHoMinutes: number | null;
             totalRegularOtMinutes: number | null; totalRdOtMinutes: number | null; totalHoOtMinutes: number | null;
+            processed?: boolean;
           };
           const savedByUserId = new Map<number, SavedWeekStatus>(
             (weekStatusResult.weekStatuses ?? []).map((s: SavedWeekStatus) => [s.worksnapUserId, s])
@@ -2493,6 +2502,13 @@ export default function AttendancePage() {
           setWorksnapRows(rows.map((row) => {
             const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
             if (!saved) return row;
+            // "Processed" (via the Process Attendance action) takes priority
+            // over a plain "Reviewed" save — it's cleared back to false by any
+            // normal individual/Bulk Approve save, so it only ever reflects
+            // whether Process Attendance is the most recent thing to touch it.
+            const weeklyStatus: AttendanceRecord["weeklyStatus"] = saved.processed
+              ? "Processed"
+              : saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus;
             return {
               ...row,
               completionMinutes: saved.completionMinutes ?? row.completionMinutes,
@@ -2503,7 +2519,7 @@ export default function AttendancePage() {
               totalRegularOtMinutes: saved.totalRegularOtMinutes,
               totalRdOtMinutes: saved.totalRdOtMinutes,
               totalHoOtMinutes: saved.totalHoOtMinutes,
-              weeklyStatus: (saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus) as AttendanceRecord["weeklyStatus"],
+              weeklyStatus,
             };
           }));
           setLastSyncedAt(result.lastSyncedAt ?? null);
@@ -2602,11 +2618,13 @@ export default function AttendancePage() {
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
   const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
   const reviewedCount    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed").length;
+  const processedCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Processed").length;
 
   const STATS = [
     { label: "Standard Met",      value: perfectStandard, color: "text-emerald-600", iconBg: "bg-teal-50",   iconColor: "text-teal-600",   Icon: LuCircleCheck },
     { label: "For Review",        value: forReviewCount,  color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",    Icon: LuCircleAlert },
     { label: "Reviewed", value: reviewedCount,   color: "text-orange-600", iconBg: "bg-orange-50", iconColor: "text-orange-600", Icon: LuClock       },
+    { label: "Processed", value: processedCount, color: "text-blue-600",   iconBg: "bg-blue-50",   iconColor: "text-blue-600",   Icon: LuListChecks  },
   ];
 
   function appliedOffsetCreditFor(row: AttendanceRow) {
@@ -2683,7 +2701,7 @@ export default function AttendancePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-3 md:mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
           <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
             <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
@@ -2776,7 +2794,7 @@ export default function AttendancePage() {
               )}
             </div>
 
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-48" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
               <option value="All">All Pay Categories</option>
               {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
@@ -2797,6 +2815,7 @@ export default function AttendancePage() {
               <option value="For Review">For Review</option>
               <option value="Reviewed">Reviewed</option>
               <option value="Standard Met">Standard Met</option>
+              <option value="Processed">Processed</option>
             </FilterSelect>
 
             <div className="flex items-center gap-2 ml-auto">
@@ -2884,6 +2903,7 @@ export default function AttendancePage() {
                 const isStandard = row.weeklyStatus === "Standard Met";
                 const isForReview = row.weeklyStatus === "For Review";
                 const isReviewed = row.weeklyStatus === "Reviewed";
+                const isProcessed = row.weeklyStatus === "Processed";
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
                 const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
@@ -3044,7 +3064,7 @@ export default function AttendancePage() {
 
                     {/* Variance */}
                     <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
-                      {isOnLeave || isStandard || isReviewed ? (
+                      {isOnLeave || isStandard || isReviewed || isProcessed ? (
                         <span className="text-sm text-slate-400">--</span>
                       ) : (
                         <span className="text-sm font-medium text-red-600">
@@ -3087,6 +3107,11 @@ export default function AttendancePage() {
                               Reviewed
                             </span>
                           )}
+                          {isProcessed && (
+                            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">
+                              Processed
+                            </span>
+                          )}
                         </>
                       )}
                     </td>
@@ -3098,7 +3123,7 @@ export default function AttendancePage() {
                       }`}
                       style={{ minWidth: 175, width: 175, maxWidth: 175 }}
                     >
-                      {(isStandard || isReviewed) && (
+                      {(isStandard || isReviewed || isProcessed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
                           className="text-slate-400 hover:text-[#003527] transition-all"

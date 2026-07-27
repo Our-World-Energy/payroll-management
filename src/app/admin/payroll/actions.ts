@@ -9,6 +9,7 @@ function getSupabase() {
 }
 
 const TABLE = "payroll_adjustments";
+const PROCESS_TABLE = "process_weekly_payroll";
 
 export type PayrollAdjustment = {
   email: string;
@@ -144,4 +145,85 @@ export async function bulkImportPayrollAdjustments(
     .map((r) => ({ email: r.email, error: r.error }));
 
   return { ok: failed.length === 0, updated: results.length - failed.length, failed };
+}
+
+// ── Process Weekly Payroll ───────────────────────────────────────────────────
+// Finalizes a snapshot of each already-Reviewed contractor's computed payroll
+// for the week into its own table — separate from payroll_adjustments (the
+// manual earnings/deductions inputs), this is the resulting full payroll
+// record. Re-processing the same contractor/week overwrites the prior
+// snapshot (upsert on email+weekStart), same pattern as savePayrollAdjustment.
+
+export type ProcessedPayrollRow = {
+  email: string;
+  weekStart: string;
+  weekEnd: string;
+  name: string;
+  role: string;
+  department: string;
+  country: string;
+  payCategory: string;
+  shiftType: string;
+  currency: string;
+  hourlyRate: number;
+  monthlyRate: number;
+  weeklyRate: number;
+  actualMinutes: number;
+  completionMinutes: number | null;
+  hours: number | null;
+  gross: number;
+  deductions: number;
+  net: number;
+  status: string;
+  bonus: number;
+  misc: number;
+  retroPay: number;
+  reim: number;
+  cashAdvance: number;
+  hmo: number;
+  tax: number;
+};
+
+type ProcessRowResult = { email: string; ok: true } | { email: string; ok: false; error: string };
+
+export async function processWeeklyPayroll(
+  rows: ProcessedPayrollRow[]
+): Promise<{ ok: boolean; processed: number; failed: Array<{ email: string; error: string }> }> {
+  const sb = getSupabase();
+
+  const results: ProcessRowResult[] = await Promise.all(rows.map(async (row): Promise<ProcessRowResult> => {
+    const email = row.email.trim().toLowerCase();
+
+    const { data: existing, error: lookupErr } = await sb
+      .from(PROCESS_TABLE)
+      .select("id")
+      .eq("email", email)
+      .eq("weekStart", row.weekStart)
+      .maybeSingle();
+    if (lookupErr) return { email, ok: false, error: lookupErr.message };
+
+    const payload = { ...row, email, processedAt: new Date().toISOString() };
+    const { error } = existing
+      ? await sb.from(PROCESS_TABLE).update(payload).eq("id", existing.id)
+      : await sb.from(PROCESS_TABLE).insert({ id: crypto.randomUUID(), ...payload });
+
+    if (error) return { email, ok: false, error: error.message };
+    return { email, ok: true };
+  }));
+
+  const failed = results
+    .filter((r): r is { email: string; ok: false; error: string } => !r.ok)
+    .map((r) => ({ email: r.email, error: r.error }));
+
+  return { ok: failed.length === 0, processed: results.length - failed.length, failed };
+}
+
+export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Record<string, string>> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(PROCESS_TABLE)
+    .select("email, processedAt")
+    .eq("weekStart", weekStart);
+  if (error || !data) return {};
+  return Object.fromEntries(data.map((r) => [String(r.email), String(r.processedAt)]));
 }
