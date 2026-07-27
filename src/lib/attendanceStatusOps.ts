@@ -41,6 +41,7 @@ export type AttendanceStatusInput = {
   requestStatus?: unknown;
   completionMinutes?: unknown;
   days?: unknown;
+  processed?: unknown;
 };
 
 export function buildAttendanceStatusOps(
@@ -57,6 +58,7 @@ export function buildAttendanceStatusOps(
   const requestStatus = asReq(body.requestStatus);
   const completionMinutes = Number.isFinite(Number(body.completionMinutes)) ? Math.trunc(Number(body.completionMinutes)) : null;
   const days = Array.isArray(body.days) ? (body.days as DayInput[]) : [];
+  const processed = body.processed === true;
 
   // Derived from the same per-day values being saved below, so the week totals
   // can never drift from their own days.
@@ -79,10 +81,12 @@ export function buildAttendanceStatusOps(
       create: {
         worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        processed,
       },
       update: {
         email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        processed,
       },
     }),
     // per-day attendance review snapshot
