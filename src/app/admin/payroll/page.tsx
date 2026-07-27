@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil } from "react-icons/lu";
+import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
-import { fetchPayrollAdjustments, savePayrollAdjustment, bulkImportPayrollAdjustments, type AdjustmentField } from "./actions";
-import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween } from "@/lib/weekUtils";
+import {
+  fetchPayrollAdjustments, savePayrollAdjustment, bulkImportPayrollAdjustments, type AdjustmentField,
+  processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow,
+} from "./actions";
+import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
 import { computePayComponents } from "@/lib/payrollVoucher";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -39,7 +42,7 @@ type PayrollRow = {
   gross: number | null;
   deductions: number | null;
   net: number | null;
-  status: "Reviewed" | "For Review" | "No Activity";
+  status: "Reviewed" | "For Review" | "No Activity" | "Processed";
   // Saved per-day Evaluated Time (not raw Worksnap minutes) — feeds the
   // voucher's Sun→Sat grid only; all other voucher figures are unaffected.
   evaluatedDailyMinutes: Record<string, number>;
@@ -85,12 +88,14 @@ const STATUS_STYLES: Record<string, string> = {
   Reviewed:      "bg-emerald-50 text-emerald-700",
   "For Review":  "bg-amber-50 text-amber-700",
   "No Activity": "bg-slate-100 text-slate-500",
+  Processed:     "bg-blue-50 text-blue-700",
 };
 
 const STATUS_ICONS: Record<string, React.ReactNode> = {
   Reviewed:      <LuCircleCheck size={13} strokeWidth={2} />,
   "For Review":  <LuClock       size={13} strokeWidth={2} />,
   "No Activity": <LuCircleAlert size={13} strokeWidth={2} />,
+  Processed:     <LuListChecks  size={13} strokeWidth={2} />,
 };
 
 function countryFromLocation(location: string) {
@@ -133,6 +138,7 @@ export default function PayrollPage() {
   const [voucherTarget, setVoucherTarget] = useState<PayrollRow | null>(null);
   const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showProcessModal, setShowProcessModal] = useState(false);
 
   // Same recent-Sun→Sat-weeks list Attendance Management uses, anchored to
   // the current Arizona week.
@@ -144,6 +150,7 @@ export default function PayrollPage() {
 
   const rangeFrom = week;
   const rangeTo = week ? addDaysIso(week, 6) : "";
+  const isSelectedWeekEnded = !!rangeTo && arizonaTodayIso() > rangeTo;
 
   useEffect(() => {
     let isMounted = true;
@@ -154,7 +161,7 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments, processedByEmail] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
@@ -162,6 +169,7 @@ export default function PayrollPage() {
           fetchHolidays().catch(() => [] as Holiday[]),
           fetchAllLeaveRequestsAdmin().catch(() => []),
           fetchPayrollAdjustments(rangeFrom).catch(() => []),
+          fetchProcessedWeeklyPayroll(rangeFrom).catch(() => ({} as Record<string, string>)),
         ]);
 
         if (!isMounted) return;
@@ -283,7 +291,13 @@ export default function PayrollPage() {
               gross,
               deductions,
               net,
-              status: isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
+              // "Processed" (via the Process Payroll action) takes priority
+              // over the raw Reviewed/For Review/No Activity computation —
+              // it only reflects whether a process_weekly_payroll snapshot
+              // exists for this contractor/week.
+              status: processedByEmail[email]
+                ? "Processed"
+                : isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
               evaluatedDailyMinutes: evaluatedDailyMinutesByEmail.get(email) ?? {},
               bonus,
               misc,
@@ -324,6 +338,18 @@ export default function PayrollPage() {
   const countryOptions = Array.from(new Set(rows.map((r) => r.country).filter((c) => c !== "-"))).sort();
   const shiftTypeOptions = Array.from(new Set(rows.map((r) => r.shiftType).filter((c) => c !== "-"))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department).filter((c) => c !== "-"))).sort();
+
+  const forReviewCount   = filteredRows.filter((r) => r.status === "For Review").length;
+  const reviewedCount    = filteredRows.filter((r) => r.status === "Reviewed").length;
+  const noActivityCount  = filteredRows.filter((r) => r.status === "No Activity").length;
+  const processedCount   = filteredRows.filter((r) => r.status === "Processed").length;
+
+  const STATS = [
+    { label: "For Review",  value: forReviewCount,  color: "text-amber-700",  iconBg: "bg-amber-50",  iconColor: "text-amber-600",  Icon: LuClock       },
+    { label: "Reviewed",    value: reviewedCount,   color: "text-emerald-700", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", Icon: LuCircleCheck },
+    { label: "No Activity", value: noActivityCount, color: "text-slate-600",  iconBg: "bg-slate-100", iconColor: "text-slate-500",  Icon: LuCircleAlert },
+    { label: "Processed",   value: processedCount,  color: "text-blue-700",   iconBg: "bg-blue-50",   iconColor: "text-blue-600",   Icon: LuListChecks  },
+  ];
 
   const filtersActive =
     nameSearch.trim() !== "" ||
@@ -370,6 +396,15 @@ export default function PayrollPage() {
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
           <button
+            onClick={() => setShowProcessModal(true)}
+            disabled={!isSelectedWeekEnded}
+            title={!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+          >
+            <LuListChecks size={16} strokeWidth={2} />
+            Process Payroll
+          </button>
+          <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm"
           >
@@ -381,6 +416,16 @@ export default function PayrollPage() {
             Export CSV
           </button>
         </div>
+      </div>
+
+      {/* Scorecards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
+        {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
+          <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
+            <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
+            <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${color}`}>{value}</p></div>
+          </div>
+        ))}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -439,7 +484,7 @@ export default function PayrollPage() {
               )}
             </div>
 
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-48" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
               <option value="All">All Pay Categories</option>
               {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
@@ -591,6 +636,16 @@ export default function PayrollPage() {
           weekStart={rangeFrom}
           onClose={() => setShowImportModal(false)}
           onImported={handleImported}
+        />
+      )}
+
+      {showProcessModal && (
+        <ProcessPayrollModal
+          rows={rows}
+          rangeFrom={rangeFrom}
+          rangeTo={rangeTo}
+          onClose={() => setShowProcessModal(false)}
+          onProcessed={() => {}}
         />
       )}
     </div>
@@ -1088,6 +1143,135 @@ function ImportAdjustmentsModal({
         >
           <LuUpload size={15} strokeWidth={2} /> {importing ? "Importing…" : "Import"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Finalizes every already-"Reviewed" row into process_weekly_payroll —
+// "For Review"/"No Activity" rows are skipped entirely, same spirit as
+// Process Attendance only saving Standard Met/Reviewed rows.
+function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }: {
+  rows: PayrollRow[];
+  rangeFrom: string;
+  rangeTo: string;
+  onClose: () => void;
+  onProcessed: () => void;
+}) {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processError, setProcessError] = useState("");
+
+  const reviewedCount   = rows.filter((r) => r.status === "Reviewed").length;
+  const forReviewCount  = rows.filter((r) => r.status === "For Review").length;
+  const noActivityCount = rows.filter((r) => r.status === "No Activity").length;
+
+  const eligibleRows = rows.filter((r) => r.status === "Reviewed");
+
+  async function handleProcess() {
+    setIsProcessing(true);
+    setProcessError("");
+
+    const items: ProcessedPayrollRow[] = eligibleRows.map((r) => ({
+      email: r.email,
+      weekStart: rangeFrom,
+      weekEnd: rangeTo,
+      name: r.name,
+      role: r.role,
+      department: r.department,
+      country: r.country,
+      payCategory: r.payCategory,
+      shiftType: r.shiftType,
+      currency: r.currency,
+      hourlyRate: r.hourlyRate,
+      monthlyRate: r.monthlyRate,
+      weeklyRate: r.weeklyRate,
+      actualMinutes: r.actualMinutes,
+      completionMinutes: r.completionMinutes,
+      hours: r.hours,
+      gross: r.gross ?? 0,
+      deductions: r.deductions ?? 0,
+      net: r.net ?? 0,
+      status: r.status,
+      bonus: r.bonus,
+      misc: r.misc,
+      retroPay: r.retroPay,
+      reim: r.reim,
+      cashAdvance: r.cashAdvance,
+      hmo: r.hmo,
+      tax: r.tax,
+    }));
+
+    try {
+      const result = await processWeeklyPayroll(items);
+      if (!result.ok) {
+        setProcessError(`${result.failed.length} of ${items.length} record${items.length !== 1 ? "s" : ""} failed to process. Please try again.`);
+        if (result.processed > 0) onProcessed();
+        return;
+      }
+      onProcessed();
+      onClose();
+    } catch (err) {
+      setProcessError(err instanceof Error ? err.message : "Failed to process payroll. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isProcessing && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-lg font-bold text-[#003527]">Process Payroll</h3>
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <LuX size={18} strokeWidth={2} />
+          </button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          {rangeFrom && rangeTo ? weekLabel(rangeFrom) : "This week"} — rows still needing review are skipped.
+        </p>
+
+        <div className="space-y-2 mb-4">
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-100">
+            <span className="text-sm font-medium text-amber-700">For Review</span>
+            <span className="text-sm font-bold text-amber-700">{forReviewCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-emerald-50 border border-emerald-100">
+            <span className="text-sm font-medium text-emerald-700">Reviewed</span>
+            <span className="text-sm font-bold text-emerald-700">{reviewedCount}</span>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-slate-50 border border-slate-200">
+            <span className="text-sm font-medium text-slate-600">No Activity</span>
+            <span className="text-sm font-bold text-slate-600">{noActivityCount}</span>
+          </div>
+        </div>
+
+        {processError && <p className="text-xs text-red-600 mb-3">{processError}</p>}
+
+        <p className="text-xs text-slate-400 mb-5">
+          {eligibleRows.length} record{eligibleRows.length !== 1 ? "s" : ""} will be saved to process_weekly_payroll.
+        </p>
+
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleProcess}
+            disabled={isProcessing || eligibleRows.length === 0}
+            className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
+          >
+            {isProcessing ? "Processing…" : "Process"}
+          </button>
+        </div>
       </div>
     </div>
   );

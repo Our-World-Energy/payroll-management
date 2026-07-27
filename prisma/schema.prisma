@@ -350,6 +350,7 @@ model AttendanceWeekStatus {
   totalHoOtMinutes     Int                     @default(0)         // sum of the week's per-day "HO OT Time"
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())
+  processed            Boolean                 @default(false)     // set true by the Weekly Time Tracking "Process Attendance" action, distinct from an individual/Bulk Approve review
 
   @@unique([worksnapUserId, weekStart], name: "attendance_week_key")
   @@index([weekStart])
@@ -422,6 +423,45 @@ model PayrollAdjustment {
 
   @@unique([email, weekStart], name: "payroll_adjustment_key")
   @@map("payroll_adjustments")
+}
+
+/// A finalized snapshot of one contractor's weekly payroll, written by the
+/// "Process Payroll" action on the Payroll page — only contractors already
+/// "Reviewed" for the week are processed. Re-processing the same
+/// contractor/week overwrites the prior snapshot (upsert on email+weekStart).
+model ProcessWeeklyPayroll {
+  id                 String   @id @default(uuid()) @db.Uuid
+  email              String
+  weekStart          String // "YYYY-MM-DD" (Sunday)
+  weekEnd            String // "YYYY-MM-DD" (Saturday)
+  name               String
+  role               String
+  department         String
+  country            String
+  payCategory        String
+  shiftType          String
+  currency           String
+  hourlyRate         Float
+  monthlyRate        Float
+  weeklyRate         Float
+  actualMinutes      Int
+  completionMinutes  Int?
+  hours              Float?
+  gross              Float
+  deductions         Float
+  net                Float
+  status             String // status at the time of processing (always "Reviewed")
+  bonus              Float    @default(0)
+  misc               Float    @default(0)
+  retroPay           Float    @default(0)
+  reim               Float    @default(0)
+  cashAdvance        Float    @default(0)
+  hmo                Float    @default(0)
+  tax                Float    @default(0)
+  processedAt        DateTime @updatedAt
+
+  @@unique([email, weekStart], name: "process_weekly_payroll_key")
+  @@map("process_weekly_payroll")
 }
 
 /// Org-wide settings: office locations list
