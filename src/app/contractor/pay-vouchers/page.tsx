@@ -55,6 +55,7 @@ export default function ContractorPayVouchersPage() {
   const [selected, setSelected] = useState<string>("");
   const [historyOpen, setHistoryOpen] = useState(false);
   const [printRequested, setPrintRequested] = useState(false);
+  const [printWeek, setPrintWeek] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -86,9 +87,10 @@ export default function ContractorPayVouchersPage() {
     window.print();
   }, [printRequested]);
 
-  // Download = select the target week, then trigger the print-to-PDF.
+  // Download the given week's voucher as a one-page PDF — from the main card or
+  // any Payment History row — without disturbing the on-screen selection.
   function handleDownload(weekStart: string) {
-    setSelected(weekStart);
+    setPrintWeek(weekStart);
     setPrintRequested(true);
   }
 
@@ -104,6 +106,9 @@ export default function ContractorPayVouchersPage() {
   }
 
   const main = vouchers.find((v) => v.weekStart === selected) ?? vouchers[0] ?? null;
+  // The voucher fed into the print-only layout — the week whose Download PDF was
+  // clicked (main card or a history row), falling back to the on-screen one.
+  const printVoucher = vouchers.find((v) => v.weekStart === printWeek) ?? main;
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -133,9 +138,9 @@ export default function ContractorPayVouchersPage() {
       {/* Print-only voucher (admin payroll-voucher design) — the Download PDF theme.
           Portalled to <body> so print CSS can drop the rest of the app and keep
           the voucher to a single page. */}
-      {mounted && main && createPortal(
+      {mounted && printVoucher && createPortal(
         <div className="pv-print hidden">
-          <PrintableVoucher profile={profile} v={main} />
+          <PrintableVoucher profile={profile} v={printVoucher} />
         </div>,
         document.body,
       )}
