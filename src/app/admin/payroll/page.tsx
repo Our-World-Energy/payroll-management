@@ -6,51 +6,10 @@ import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/
 import { fetchHolidays, type Holiday } from "../holidays/actions";
 import { fetchPayrollAdjustments, savePayrollAdjustment, bulkImportPayrollAdjustments, type AdjustmentField } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween } from "@/lib/weekUtils";
+import { computePayComponents } from "@/lib/payrollVoucher";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 import { Logo } from "@/components/Logo";
-
-// Pay multipliers applied on top of Hourly Rate for each OT bucket. Regular
-// Time, US Holiday Time, and Local Holiday Time all pay at the plain hourly
-// rate (100%) and need no multiplier of their own.
-const REGULAR_OT_MULTIPLIER = 1.25;
-const RD_OT_MULTIPLIER = 1.5;
-const HO_OT_MULTIPLIER = 2.25;
-
-// Each payroll component is calculated independently from its own saved time
-// total, the contractor's Hourly Rate, and its own pay multiplier, then
-// summed into one base payroll gross. Shared by the main table's Gross Pay
-// column and the printable voucher so the two totals can never drift apart.
-function computePayComponents(hourlyRate: number, totals: {
-  totalEvaluatedRegularMinutes: number | null;
-  totalRegularOtMinutes: number | null;
-  totalRdOtMinutes: number | null;
-  totalUsHoMinutes: number | null;
-  totalHoOtMinutes: number | null;
-  localHolidayMinutes: number | null;
-}) {
-  const regHours = (totals.totalEvaluatedRegularMinutes ?? 0) / 60;
-  const regOtHours = (totals.totalRegularOtMinutes ?? 0) / 60;
-  const rdOtHours = (totals.totalRdOtMinutes ?? 0) / 60;
-  const usHolidayHours = (totals.totalUsHoMinutes ?? 0) / 60;
-  const hoOtHours = (totals.totalHoOtMinutes ?? 0) / 60;
-  const localHolidayHours = (totals.localHolidayMinutes ?? 0) / 60;
-
-  const regPay = regHours * hourlyRate;
-  const regOtPay = regOtHours * hourlyRate * REGULAR_OT_MULTIPLIER;
-  const rdOtPay = rdOtHours * hourlyRate * RD_OT_MULTIPLIER;
-  const usHolidayPay = usHolidayHours * hourlyRate;
-  const hoOtPay = hoOtHours * hourlyRate * HO_OT_MULTIPLIER;
-  const localHolidayPay = localHolidayHours * hourlyRate;
-
-  const grossPay = regPay + regOtPay + rdOtPay + usHolidayPay + hoOtPay + localHolidayPay;
-
-  return {
-    regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
-    regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    grossPay,
-  };
-}
 
 type PayrollRow = {
   email: string;

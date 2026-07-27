@@ -233,3 +233,17 @@
     @apply focus:outline-none focus:ring-4 focus:ring-brand-900/12 focus:border-brand-700;
   }
 }
+
+/* Print-only payroll voucher. The .pv-print voucher is portalled to <body>;
+   the Download-PDF action adds `printing-voucher` to <body> just for that print,
+   so we can drop the whole app (no extra blank pages → one-page voucher) WITHOUT
+   affecting a normal Ctrl+P on any other page. */
+@media print {
+  body.printing-voucher > *:not(.pv-print) { display: none !important; }
+  body.printing-voucher .pv-print { display: block !important; background: #ffffff; }
+}
+@media print {
+  body.printing-voucher { background: #ffffff; }
+}
+@page { size: A4 portrait; margin: 12mm; }
+
