@@ -8,7 +8,7 @@ import { parseIsoDate, toIsoDate, sundayOf, addDaysIso, datesBetween, arizonaTod
 import { ARIZONA_TIME_ZONE, countryFromLocation, timeZoneForCountry } from "@/lib/countryTimeZones";
 import {
   LuLoader, LuChevronLeft, LuChevronRight, LuCalendar, LuTimer,
-  LuCircleCheck, LuBadgeCheck, LuClock, LuActivity,
+  LuCircleCheck, LuBadgeCheck, LuClock,
 } from "react-icons/lu";
 
 // Standard shift = 8 hours (matches Attendance Review / Payroll's 480-min shift).
@@ -54,7 +54,7 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 // rotated so the arc begins at 12 o'clock; the % label is rendered separately
 // (unrotated) by the caller.
 function ProgressRing({ pct }: { pct: number }) {
-  const size = 76, stroke = 7;
+  const size = 58, stroke = 6;
   const r    = (size - stroke) / 2;
   const circ = 2 * Math.PI * r;
   const dash = (Math.max(0, Math.min(pct, 100)) / 100) * circ;
@@ -215,20 +215,20 @@ export default function ContractorAttendancePage() {
     : 0;
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-5 max-w-7xl mx-auto">
       {/* ── Page header ── */}
-      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2.5 mb-3">
+          <div className="flex items-center gap-2.5 mb-1.5">
             <span className="h-px w-8 bg-emerald-600/50" />
             <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-700">Contractor Portal</span>
           </div>
-          <h2 className="text-4xl md:text-[2.7rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
+          <h2 className="text-xl md:text-2xl font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
             Attendance Logs
           </h2>
-          <p className="text-slate-500 mt-3">Track your hours and efficiency for the current pay period.</p>
+          <p className="text-slate-500 mt-1.5 text-sm">Track your hours and efficiency for the current pay period.</p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-medium text-slate-500 bg-white border border-slate-200/80 rounded-full pl-3.5 pr-4 py-2 shadow-sm self-start md:self-auto">
+        <div className="flex items-center gap-2 text-xs font-medium text-slate-500 bg-white border border-slate-200/80 rounded-full pl-3.5 pr-4 py-1.5 shadow-sm self-start md:self-auto">
           <LuClock size={13} strokeWidth={2} className="text-emerald-600" />
           {new Date(today + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
         </div>
@@ -247,91 +247,79 @@ export default function ContractorAttendancePage() {
       ) : (
         <>
           {/* ── Summary stats ── */}
-          <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
+          <section className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Weekly total + progress ring */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-3.5">
               <div className="relative grid place-items-center">
                 <ProgressRing pct={weekPct} />
-                <span className="absolute text-sm font-bold text-[#003527] tabular-nums">{weekPct}%</span>
+                <span className="absolute text-xs font-bold text-[#003527] tabular-nums">{weekPct}%</span>
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.14em]">This Week</p>
-                <p className="text-2xl font-bold text-[#003527] mt-1.5 leading-none tabular-nums">{fmtHours(summary.weekMins)}</p>
-                <p className="text-xs text-slate-400 mt-1.5 tabular-nums">of {fmtHours(summary.expectedWeekMins)} target</p>
+                <p className="text-xl font-bold text-[#003527] mt-1 leading-none tabular-nums">{fmtHours(summary.weekMins)}</p>
+                <p className="text-[11px] text-slate-400 mt-1 tabular-nums">of {fmtHours(summary.expectedWeekMins)} target</p>
               </div>
             </div>
 
             {/* Today */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.14em] mt-1">Today</p>
-                <span className="grid place-items-center w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600">
-                  <LuTimer size={17} strokeWidth={2} />
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.14em] mt-0.5">Today</p>
+                <span className="grid place-items-center w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600">
+                  <LuTimer size={16} strokeWidth={2} />
                 </span>
               </div>
-              <p className="text-3xl font-bold text-[#003527] mt-3 leading-none tabular-nums">{fmtHours(summary.todayMins)}</p>
-              <p className="text-xs text-slate-400 mt-2 tabular-nums">{summary.todayMins.toLocaleString()} minutes logged</p>
-            </div>
-
-            {/* This month */}
-            <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.14em] mt-1">This Month</p>
-                <span className="grid place-items-center w-9 h-9 rounded-xl bg-teal-50 text-teal-600">
-                  <LuActivity size={17} strokeWidth={2} />
-                </span>
-              </div>
-              <p className="text-3xl font-bold text-teal-700 mt-3 leading-none tabular-nums">{fmtHours(summary.monthMins)}</p>
-              <p className="text-xs text-slate-400 mt-2 tabular-nums">{summary.monthMins.toLocaleString()} minutes total</p>
+              <p className="text-2xl font-bold text-[#003527] mt-2 leading-none tabular-nums">{fmtHours(summary.todayMins)}</p>
+              <p className="text-[11px] text-slate-400 mt-1.5 tabular-nums">{summary.todayMins.toLocaleString()} minutes logged</p>
             </div>
 
             {/* Rest days — deep brand-gradient accent */}
-            <div className="relative overflow-hidden rounded-2xl p-5 text-white shadow-sm bg-brand-gradient">
+            <div className="relative overflow-hidden rounded-2xl p-4 text-white shadow-sm bg-brand-gradient">
               <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
               <div className="relative flex flex-col h-full">
                 <div className="flex items-start justify-between">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/80 mt-1">Rest Days</p>
-                  <span className="grid place-items-center w-9 h-9 rounded-xl bg-white/10 text-emerald-300">
-                    <LuBadgeCheck size={17} strokeWidth={2} />
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/80 mt-0.5">Rest Days</p>
+                  <span className="grid place-items-center w-8 h-8 rounded-lg bg-white/10 text-emerald-300">
+                    <LuBadgeCheck size={16} strokeWidth={2} />
                   </span>
                 </div>
-                <p className="text-xl font-bold mt-3 leading-tight">{restStr && restStr !== "-" ? restStr : "None set"}</p>
-                <p className="text-xs text-emerald-200/70 mt-auto pt-2">{profile?.shiftType || "Fixed"} shift</p>
+                <p className="text-base font-bold mt-2 leading-tight">{restStr && restStr !== "-" ? restStr : "None set"}</p>
+                <p className="text-[11px] text-emerald-200/70 mt-auto pt-1.5">{profile?.shiftType || "Fixed"} shift</p>
               </div>
             </div>
           </section>
 
           {/* ── Calendar + daily logs ── */}
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
+          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* Calendar */}
             <div className="lg:col-span-2 bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
-              <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-[#003527] flex items-center gap-2.5">
-                  <span className="grid place-items-center w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700">
-                    <LuCalendar size={16} strokeWidth={2} />
+              <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-base font-bold text-[#003527] flex items-center gap-2">
+                  <span className="grid place-items-center w-7 h-7 rounded-lg bg-emerald-50 text-emerald-700">
+                    <LuCalendar size={15} strokeWidth={2} />
                   </span>
                   {MONTHS[monthIndex]} {monthYear}
                 </h3>
                 <div className="flex items-center gap-1">
                   {monthLoading && <LuLoader size={15} className="text-slate-300 animate-spin mr-1" />}
-                  <button onClick={goPrevMonth} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                  <button onClick={goPrevMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
                     <LuChevronLeft size={17} strokeWidth={2} />
                   </button>
-                  <button onClick={goNextMonth} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
+                  <button onClick={goNextMonth} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors">
                     <LuChevronRight size={17} strokeWidth={2} />
                   </button>
                 </div>
               </div>
 
-              <div className="p-4 md:p-5">
+              <div className="p-3 md:p-4">
                 {/* Weekday header */}
-                <div className="grid grid-cols-7 mb-2">
+                <div className="grid grid-cols-7 mb-1.5">
                   {WEEKDAYS.map((d) => (
-                    <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] py-1">{d}</div>
+                    <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em]">{d}</div>
                   ))}
                 </div>
                 {/* Day grid */}
-                <div className="grid grid-cols-7 gap-1.5">
+                <div className="grid grid-cols-7 gap-1">
                   {gridDays.map((d) => {
                     const inMonth = parseIsoDate(d).getMonth() === monthIndex;
                     const isToday = d === today;
@@ -346,7 +334,7 @@ export default function ContractorAttendancePage() {
                     else if (rest)     cellClass = "bg-slate-50 border-slate-100 text-slate-400";
 
                     return (
-                      <div key={d} className={`aspect-square rounded-xl p-2 flex flex-col justify-between border transition-all ${cellClass}`}>
+                      <div key={d} className={`h-12 md:h-14 rounded-lg p-1.5 flex flex-col justify-between border transition-all ${cellClass}`}>
                         <span className={`text-xs tabular-nums ${isToday ? "font-bold" : "font-semibold"}`}>{dayNum}</span>
                         {inMonth && mins > 0 ? (
                           <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${isToday ? "text-emerald-200" : "text-emerald-700"}`}>
@@ -365,11 +353,11 @@ export default function ContractorAttendancePage() {
 
             {/* Daily logs feed */}
             <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-              <div className="px-6 py-5 border-b border-slate-100">
-                <h3 className="text-lg font-bold text-[#003527]">Daily Logs</h3>
+              <div className="px-5 py-3 border-b border-slate-100">
+                <h3 className="text-base font-bold text-[#003527]">Daily Logs</h3>
                 <p className="text-xs text-slate-400 mt-0.5">{MONTHS[monthIndex]} {monthYear}</p>
               </div>
-              <div className="flex-1 overflow-y-auto px-6 py-5 max-h-[540px]">
+              <div className="flex-1 overflow-y-auto px-5 py-4 max-h-90">
                 {feedDays.length === 0 ? (
                   <div className="flex flex-col items-center justify-center text-center py-16">
                     <div className="w-12 h-12 rounded-2xl bg-slate-50 grid place-items-center mb-3">
@@ -378,7 +366,7 @@ export default function ContractorAttendancePage() {
                     <p className="text-sm text-slate-400">No time logged this month.</p>
                   </div>
                 ) : (
-                  <div className="space-y-5">
+                  <div className="space-y-4">
                     {feedDays.map((d, i) => {
                       const data    = monthData[d];
                       const mins    = data?.mins ?? 0;
@@ -431,7 +419,7 @@ export default function ContractorAttendancePage() {
           </section>
 
           {/* ── Legend ── */}
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-400 bg-white border border-slate-200/80 rounded-2xl px-5 py-3.5 shadow-sm">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-400 bg-white border border-slate-200/80 rounded-2xl px-5 py-3 shadow-sm">
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-50 border border-emerald-200" /> Logged time</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-50 border border-slate-200" /> Rest day</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#003527]" /> Today</span>
