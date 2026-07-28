@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
@@ -11,7 +12,6 @@ import {
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
-import { Logo } from "@/components/Logo";
 
 // Pay multipliers applied on top of Hourly Rate for each OT bucket. Regular
 // Time, US Holiday Time, and Local Holiday Time all pay at the plain hourly
@@ -275,7 +275,7 @@ export default function PayrollPage() {
         const adjustmentByEmail = new Map(adjustments.map((a) => [a.email.trim().toLowerCase(), a]));
 
         const nextRows: PayrollRow[] = contractors
-          .filter((c) => c.email)
+          .filter((c) => c.email && (c.payCategory || "").trim().toLowerCase() !== "fixed-ind")
           .map((c) => {
             const email = c.email.trim().toLowerCase();
             const actualMinutes = minutesByEmail.get(email) ?? 0;
@@ -846,6 +846,7 @@ function PayrollVoucherModal({
         setSaveError(result.failed[0]?.error ?? "Failed to process. Please try again.");
         return;
       }
+      toast.success(`${row.name} ${isReprocess ? "re-processed" : "processed"} successfully`);
       onProcessed();
       onClose();
     } catch (err) {
@@ -961,27 +962,37 @@ function PayrollVoucherModal({
           <LuX size={18} strokeWidth={2} />
         </button>
 
-        <div className="p-6 md:p-8 text-sm text-slate-800">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4 pb-4 border-b-2 border-[#003527]">
-            <div className="flex items-start gap-3">
-              <Logo className="h-10 w-10 shrink-0" />
-              <div>
-                <p className="font-bold text-slate-800">Our World Energy</p>
-                <p className="text-xs text-slate-500">2501 W Phelps Rd, Phoenix, AZ 85023</p>
-                <p className="text-xs text-teal-600">offshorepayroll@ourworldenergy.com</p>
-              </div>
+        <div className="p-4 md:p-5 text-sm text-slate-800">
+          {canProcess && (
+            <div className="flex items-center justify-start gap-3 mb-2.5">
+              <button
+                onClick={handleProcessClick}
+                disabled={isSaving}
+                className={`px-5 py-1.5 text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isReprocess
+                    ? "border border-blue-200 text-blue-700 hover:bg-blue-50"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
+              >
+                <LuListChecks size={15} strokeWidth={2} />
+                {isSaving ? (isReprocess ? "Re-Processing…" : "Processing…") : (isReprocess ? "Re-Process" : "Process")}
+              </button>
+              {saveError && <p className="text-xs font-medium text-red-600">{saveError}</p>}
             </div>
-            <div className="text-right text-xs">
+          )}
+
+          {/* Header */}
+          <div className="grid grid-cols-3 items-start gap-4 pb-2.5 border-b-2 border-[#003527]">
+            <div />
+            <h3 className="text-center font-bold text-slate-700 tracking-wide">Payroll Voucher</h3>
+            <div className="text-right text-xs justify-self-end">
               <p><span className="text-slate-500">Pay Period:</span> <span className="font-semibold">{fmtVoucherDate(rangeFrom)} to {fmtVoucherDate(rangeTo)}</span></p>
-              <p className="mt-1"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">{rangeTo ? fmtVoucherDate(addDaysIso(rangeTo, 6)) : "—"}</span></p>
+              <p className="mt-0.5"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">{rangeTo ? fmtVoucherDate(addDaysIso(rangeTo, 6)) : "—"}</span></p>
             </div>
           </div>
 
-          <h3 className="text-center font-bold text-slate-700 tracking-wide mt-3 mb-4">Payroll Voucher</h3>
-
           {/* Contractor info */}
-          <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs mb-5">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs mt-2.5 mb-3">
             <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{row.name}</span></p>
             <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{row.role}</span></p>
@@ -989,14 +1000,14 @@ function PayrollVoucherModal({
           </div>
 
           {/* Gross Pay */}
-          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-t-md">Gross Pay</div>
-          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-t-md">Gross Pay</div>
+          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-2.5 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <table className="w-full text-xs mb-4">
+              <table className="w-full text-xs mb-2">
                 <thead>
                   <tr>
                     {DAY_LABELS.map((d) => (
-                      <th key={d} className="border border-slate-200 bg-slate-50 px-1 py-1 font-semibold text-slate-500">{d}</th>
+                      <th key={d} className="border border-slate-200 bg-slate-50 px-1 py-0.5 font-semibold text-slate-500">{d}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1007,7 +1018,7 @@ function PayrollVoucherModal({
                       const isOff = restDayLabels.has(label);
                       const hours = (figures.evaluatedDailyMinutes[date] ?? 0) / 60;
                       return (
-                        <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
+                        <td key={date} className="border border-slate-200 px-1 py-1 text-center tabular-nums">
                           {isOff ? "OFF" : hours.toFixed(2)}
                         </td>
                       );
@@ -1016,14 +1027,14 @@ function PayrollVoucherModal({
                 </tbody>
               </table>
 
-              <div className="space-y-2 text-xs">
+              <div className="space-y-1 text-xs">
                 {[
                   ["REG Hours", regHours],
                   ["PTO HRS", ptoHours],
                   ["US HO HRS", usHolidayHours],
                   ["LOCAL HO HRS", localHolidayHours],
                 ].map(([label, value]) => (
-                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                     <span className="text-slate-500">{label}</span>
                     <span className="font-semibold tabular-nums">{(value as number).toFixed(2)}</span>
                   </div>
@@ -1033,7 +1044,7 @@ function PayrollVoucherModal({
                   ["RD OT HRS", rdOtHours],
                   ["HO OT HRS", hoOtHours],
                 ].map(([label, value]) => (
-                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                  <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                     <span className="text-slate-500">{label}</span>
                     <span className="font-semibold tabular-nums">{(value as number).toFixed(2)}</span>
                   </div>
@@ -1041,7 +1052,7 @@ function PayrollVoucherModal({
               </div>
             </div>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1 text-xs">
               {[
                 ["REG HRS Pay", regPay],
                 ["REG OT", regOtPay],
@@ -1055,12 +1066,12 @@ function PayrollVoucherModal({
                 ["Retro Pay", retroPay],
                 ["REIM", reim],
               ].map(([label, value]) => (
-                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                   <span className="text-slate-500">{label}</span>
                   <span className={`tabular-nums ${(value as number) > 0 ? "font-semibold" : "text-slate-300"}`}>{money(value as number)}</span>
                 </div>
               ))}
-              <div className="flex items-center justify-between border-2 border-[#003527] rounded-md px-2 py-1.5 mt-3">
+              <div className="flex items-center justify-between border-2 border-[#003527] rounded-md px-2 py-1 mt-1.5">
                 <span className="font-bold uppercase text-[10px] tracking-wider text-slate-500">Gross Pay</span>
                 <span className="font-bold tabular-nums">{money(grossPay)}</span>
               </div>
@@ -1068,14 +1079,14 @@ function PayrollVoucherModal({
           </div>
 
           {/* Deductions */}
-          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1.5 rounded-t-md mt-5">Deduction</div>
-          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-4 flex items-end justify-between gap-6">
-            <div className="space-y-2 text-xs flex-1">
+          <div className="bg-[#003527] text-white text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-t-md mt-2.5">Deduction</div>
+          <div className="border border-t-0 border-slate-200 rounded-b-md px-4 py-2.5 flex items-end justify-between gap-6">
+            <div className="space-y-1 text-xs flex-1">
               {[
                 ["Cash Advance", cashAdvance],
                 ["HMO Premium", hmo],
               ].map(([label, value]) => (
-                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
+                <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                   <span className="text-slate-500">{label}</span>
                   <span className={`tabular-nums ${(value as number) > 0 ? "font-semibold" : "text-slate-300"}`}>{money(value as number)}</span>
                 </div>
@@ -1083,38 +1094,20 @@ function PayrollVoucherModal({
             </div>
             <div className="flex items-center gap-3">
               <span className="font-bold uppercase text-[10px] tracking-wider text-slate-500 whitespace-nowrap">Total Deductions</span>
-              <span className="font-bold tabular-nums border-2 border-slate-300 rounded-md px-3 py-1.5">{money(totalDeductions)}</span>
+              <span className="font-bold tabular-nums border-2 border-slate-300 rounded-md px-3 py-1">{money(totalDeductions)}</span>
             </div>
           </div>
 
           {/* Net Pay */}
-          <div className="mt-5 flex items-center justify-between bg-[#003527] text-white rounded-md px-4 py-3">
+          <div className="mt-2.5 flex items-center justify-between bg-[#003527] text-white rounded-md px-4 py-2">
             <span className="font-bold uppercase text-xs tracking-wider">Net Pay</span>
             <span className="font-bold text-lg tabular-nums">{figures.currency} {money(netPay)}</span>
           </div>
 
-          <p className="text-[10px] text-slate-400 mt-3">
+          <p className="text-[10px] text-slate-400 mt-2">
             Check Date is always the Friday following the pay period&apos;s end date.
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
-
-          {canProcess && (
-            <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-slate-100">
-              {saveError && <p className="mr-auto text-xs font-medium text-red-600">{saveError}</p>}
-              <button
-                onClick={handleProcessClick}
-                disabled={isSaving}
-                className={`px-5 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isReprocess
-                    ? "border border-blue-200 text-blue-700 hover:bg-blue-50"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
-              >
-                <LuListChecks size={15} strokeWidth={2} />
-                {isSaving ? (isReprocess ? "Re-Processing…" : "Processing…") : (isReprocess ? "Re-Process" : "Process")}
-              </button>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -1507,7 +1500,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
     });
   }
 
-  async function runProcess(rowsToProcess: PayrollRow[], setBusy: (v: boolean) => void) {
+  async function runProcess(rowsToProcess: PayrollRow[], setBusy: (v: boolean) => void, label: string) {
     setBusy(true);
     setProcessError("");
 
@@ -1519,6 +1512,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
         if (result.processed > 0) onProcessed();
         return;
       }
+      toast.success(`${result.processed} contractor${result.processed !== 1 ? "s" : ""} ${label} successfully`);
       onProcessed();
       onClose();
     } catch (err) {
@@ -1529,11 +1523,11 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
   }
 
   function handleProcess() {
-    return runProcess(eligibleRows, setIsProcessing);
+    return runProcess(eligibleRows, setIsProcessing, "processed");
   }
 
   function handleReprocess() {
-    return runProcess(alreadyProcessedRows, setIsReprocessing);
+    return runProcess(alreadyProcessedRows, setIsReprocessing, "re-processed");
   }
 
   return (

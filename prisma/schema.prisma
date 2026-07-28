@@ -348,6 +348,7 @@ model AttendanceWeekStatus {
   totalRegularOtMinutes Int                    @default(0)         // sum of the week's per-day "Regular OT Time"
   totalRdOtMinutes     Int                     @default(0)         // sum of the week's per-day "RD OT Time"
   totalHoOtMinutes     Int                     @default(0)         // sum of the week's per-day "HO OT Time"
+  totalCompletionTimeMinutes Int               @default(0)         // sum of the week's per-day "Total Completion Time"
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())
   processed            Boolean                 @default(false)     // set true by the Weekly Time Tracking "Process Attendance" action, distinct from an individual/Bulk Approve review
@@ -575,6 +576,7 @@ model AttendanceDayStatus {
   hoOtMinutes          Int                     @default(0)       // "HO OT Time"
   timeOffStatus        TimeOffKind             @default(NOT_SET) // "Time Off Status"
   timeOffMinutes       Int                     @default(0)       // "Time Off Time"
+  totalCompletionTime  Int                     @default(0)       // "Total Completion Time" = Evaluated Regular + Regular OT + RD OT + US HO + Local HO + Time Off Request Time
   manualAdjustmentTime Int                     @default(0)
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())

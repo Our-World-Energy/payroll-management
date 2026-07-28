@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { fetchOrgConfig, seedOrgDefaults, addCountryLocation } from "@/app/admin/settings/actions";
+import { fetchOrgConfig, seedOrgDefaults, addCountryLocation, addCurrency } from "@/app/admin/settings/actions";
 
 // ── Fallback defaults (used only on first seed) ───────────────────────────────
 const DEFAULT_OFFICE_LOCATIONS = [
@@ -62,6 +62,8 @@ const DEFAULT_MANAGERS = ["Colten Warnock", "Dillard Blanton"];
 
 const DEFAULT_COUNTRY_LOCATIONS = ["Philippines", "Mexico", "India", "USA"];
 
+const DEFAULT_CURRENCIES = ["USD", "PHP", "MXN", "INR"];
+
 // ── Context type ──────────────────────────────────────────────────────────────
 
 type ContractorConfig = {
@@ -73,6 +75,8 @@ type ContractorConfig = {
   setManagers: (v: string[]) => void;
   countryLocations: string[];
   setCountryLocations: (v: string[]) => void;
+  currencies: string[];
+  setCurrencies: (v: string[]) => void;
   configLoaded: boolean;
   reloadConfig: () => Promise<void>;
 };
@@ -86,6 +90,8 @@ const ContractorConfigContext = createContext<ContractorConfig>({
   setManagers: () => {},
   countryLocations: DEFAULT_COUNTRY_LOCATIONS,
   setCountryLocations: () => {},
+  currencies: DEFAULT_CURRENCIES,
+  setCurrencies: () => {},
   configLoaded: false,
   reloadConfig: async () => {},
 });
@@ -95,6 +101,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
   const [deptTree, setDeptTree]               = useState<DeptTree>({});
   const [managers, setManagers]               = useState<string[]>([]);
   const [countryLocations, setCountryLocations] = useState<string[]>([]);
+  const [currencies, setCurrencies]           = useState<string[]>([]);
   const [configLoaded, setConfigLoaded]       = useState(false);
 
   const reloadConfig = useCallback(async () => {
@@ -103,25 +110,33 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
 
       // If DB is empty (first run), seed from defaults then reload
       if (cfg.officeLocations.length === 0 && cfg.managers.length === 0 && Object.keys(cfg.deptTree).length === 0) {
-        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE, DEFAULT_COUNTRY_LOCATIONS);
+        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE, DEFAULT_COUNTRY_LOCATIONS, DEFAULT_CURRENCIES);
         const seeded = await fetchOrgConfig();
         setOfficeLocations(seeded.officeLocations);
         setManagers(seeded.managers);
         setDeptTree(seeded.deptTree);
         setCountryLocations(seeded.countryLocations);
+        setCurrencies(seeded.currencies);
       } else {
         setOfficeLocations(cfg.officeLocations);
         setManagers(cfg.managers);
         setDeptTree(cfg.deptTree);
 
-        // org_country is a newer table — an already-seeded org
+        // org_country/org_currency are newer tables — an already-seeded org
         // (departments already exist) won't have gone through seedOrgDefaults
-        // above, so backfill its defaults here if it's still empty.
+        // above, so backfill their defaults here if they're still empty.
         if (cfg.countryLocations.length === 0) {
           await Promise.all(DEFAULT_COUNTRY_LOCATIONS.map((name) => addCountryLocation(name)));
           setCountryLocations(DEFAULT_COUNTRY_LOCATIONS);
         } else {
           setCountryLocations(cfg.countryLocations);
+        }
+
+        if (cfg.currencies.length === 0) {
+          await Promise.all(DEFAULT_CURRENCIES.map((name) => addCurrency(name)));
+          setCurrencies(DEFAULT_CURRENCIES);
+        } else {
+          setCurrencies(cfg.currencies);
         }
       }
     } catch {
@@ -130,6 +145,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
       setManagers(DEFAULT_MANAGERS);
       setDeptTree(DEFAULT_DEPT_TREE);
       setCountryLocations(DEFAULT_COUNTRY_LOCATIONS);
+      setCurrencies(DEFAULT_CURRENCIES);
     }
     setConfigLoaded(true);
   }, []);
@@ -144,6 +160,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
       deptTree, setDeptTree,
       managers, setManagers,
       countryLocations, setCountryLocations,
+      currencies, setCurrencies,
       configLoaded,
       reloadConfig,
     }}>

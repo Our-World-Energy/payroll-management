@@ -73,6 +73,13 @@ export function buildAttendanceStatusOps(
   const totalRegularOtMinutes = sumDayField("regularOtMinutes");
   const totalRdOtMinutes = sumDayField("rdOtMinutes");
   const totalHoOtMinutes = sumDayField("hoOtMinutes");
+  const totalTimeOffMinutes = sumDayField("timeOffMinutes");
+  // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT + US HO +
+  // Local HO + Time Off Request Time, matching the Attendance Review column
+  // of the same name (distinct from the older `completionMinutes`/"Ind Time")
+  // and the per-day `totalCompletionTime` saved on attendance_day_status below.
+  const totalCompletionTimeMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalRdOtMinutes
+    + totalUsHoMinutes + (totalLocalHolidayMinutes ?? 0) + totalTimeOffMinutes;
 
   const ops: Prisma.PrismaPromise<unknown>[] = [
     // week-level request status + saved completion time
@@ -81,11 +88,13 @@ export function buildAttendanceStatusOps(
       create: {
         worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        totalCompletionTimeMinutes,
         processed,
       },
       update: {
         email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
+        totalCompletionTimeMinutes,
         processed,
       },
     }),
@@ -108,10 +117,16 @@ export function buildAttendanceStatusOps(
         const timeOffMinutes = asInt(d.timeOffMinutes);
         const manualAdjustmentTime = asInt(d.manualAdjustmentTime);
         const note = typeof d.note === "string" && d.note.trim() ? d.note.trim() : null;
+        // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT +
+        // US HO + Local HO + Time Off Request Time, matching the Attendance
+        // Review column of the same name (distinct from the older
+        // `completionMinutes`/"Ind Time").
+        const totalCompletionTime = evaluatedRegularMinutes + regularOtMinutes + rdOtMinutes
+          + holidayMinutes + (localHolidayMinutes ?? 0) + timeOffMinutes;
         const fields = {
           email, decisionStatus, evaluatedMinutes, adjustedMinutes, holidayMinutes, localHoliday, localHolidayMinutes,
           evaluatedRegularMinutes, regularOtMinutes, rdOtMinutes, hoOtMinutes,
-          timeOffStatus, timeOffMinutes, manualAdjustmentTime, note,
+          timeOffStatus, timeOffMinutes, totalCompletionTime, manualAdjustmentTime, note,
         };
         return client.attendanceDayStatus.upsert({
           where: { attendance_day_key: { worksnapUserId, date } },
