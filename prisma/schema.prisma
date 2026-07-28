@@ -459,6 +459,23 @@ model ProcessWeeklyPayroll {
   hmo                Float    @default(0)
   tax                Float    @default(0)
   processedAt        DateTime @updatedAt
+  restDay            String   @default("")
+  ptoHours           Float    @default(0)
+  regHours           Float    @default(0)
+  regOtHours         Float    @default(0)
+  rdOtHours          Float    @default(0)
+  usHolidayHours     Float    @default(0)
+  hoOtHours          Float    @default(0)
+  localHolidayHours  Float    @default(0)
+  ptoPay             Float    @default(0)
+  regPay             Float    @default(0)
+  regOtPay           Float    @default(0)
+  rdOtPay            Float    @default(0)
+  usHolidayPay       Float    @default(0)
+  hoOtPay            Float    @default(0)
+  localHolidayPay    Float    @default(0)
+  // "date" -> minutes; freezes the voucher's Sun→Sat grid at process time
+  evaluatedDailyMinutes Json  @default("{}")
 
   @@unique([email, weekStart], name: "process_weekly_payroll_key")
   @@map("process_weekly_payroll")

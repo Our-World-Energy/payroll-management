@@ -6,7 +6,7 @@ import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/
 import { fetchHolidays, type Holiday } from "../holidays/actions";
 import {
   fetchPayrollAdjustments, savePayrollAdjustment, bulkImportPayrollAdjustments, type AdjustmentField,
-  processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow,
+  processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow, type ProcessedSnapshot,
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
@@ -84,6 +84,11 @@ type PayrollRow = {
   deductions: number | null;
   net: number | null;
   status: "Reviewed" | "For Review" | "No Activity" | "Processed";
+  // True only when status is "Processed" AND something in Contractor
+  // Details, Time Off Management, or Attendance has changed since the
+  // process_weekly_payroll snapshot was taken — surfaced as an icon next to
+  // the name, prompting a Re-Process.
+  hasChangedSinceProcessed: boolean;
   // Saved per-day Evaluated Time (not raw Worksnap minutes) — feeds the
   // voucher's Sun→Sat grid only; all other voucher figures are unaffected.
   evaluatedDailyMinutes: Record<string, number>;
@@ -160,6 +165,12 @@ function formatMinutesAsHours(minutes: number) {
   return `${hours}h ${String(remaining).padStart(2, "0")}m`;
 }
 
+// Tolerates float rounding noise (e.g. computed via a slightly different
+// division order) rather than flagging every processed row as "changed".
+function numsDiffer(a: number, b: number, epsilon = 0.01) {
+  return Math.abs(a - b) > epsilon;
+}
+
 function fmtMoney(n: number, currency: string) {
   return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -171,6 +182,7 @@ export default function PayrollPage() {
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const [nameSearch, setNameSearch] = useState("");
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
@@ -180,6 +192,7 @@ export default function PayrollPage() {
   const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [processedByEmail, setProcessedByEmail] = useState<Record<string, ProcessedSnapshot>>({});
 
   // Same recent-Sun→Sat-weeks list Attendance Management uses, anchored to
   // the current Arizona week.
@@ -202,7 +215,7 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments, processedByEmail] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments, processedSnapshotByEmail] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
@@ -210,7 +223,7 @@ export default function PayrollPage() {
           fetchHolidays().catch(() => [] as Holiday[]),
           fetchAllLeaveRequestsAdmin().catch(() => []),
           fetchPayrollAdjustments(rangeFrom).catch(() => []),
-          fetchProcessedWeeklyPayroll(rangeFrom).catch(() => ({} as Record<string, string>)),
+          fetchProcessedWeeklyPayroll(rangeFrom).catch(() => ({} as Record<string, ProcessedSnapshot>)),
         ]);
 
         if (!isMounted) return;
@@ -304,6 +317,29 @@ export default function PayrollPage() {
             const deductions = gross != null ? cashAdvance + hmo + tax : null;
             const net = gross != null && deductions != null ? gross - deductions : null;
 
+            // Compare the live-computed values against the saved snapshot to
+            // catch a Contractor Details / Time Off / Attendance change that
+            // happened after this contractor was processed — gross/net/
+            // deductions already fold in attendance totals, PTO hours, and
+            // hourly rate, so this alone covers changes from all three areas.
+            const snapshot = processedSnapshotByEmail[email];
+            const hasChangedSinceProcessed = !!snapshot && (
+              numsDiffer(snapshot.hourlyRate, hourlyRate) ||
+              numsDiffer(snapshot.monthlyRate, parseFloat(c.monthlyRate) || 0) ||
+              numsDiffer(snapshot.weeklyRate, parseFloat(c.weeklyRate) || 0) ||
+              snapshot.actualMinutes !== actualMinutes ||
+              snapshot.completionMinutes !== (isReviewed ? (saved!.completionMinutes as number) : null) ||
+              numsDiffer(snapshot.gross, gross ?? 0) ||
+              numsDiffer(snapshot.deductions, deductions ?? 0) ||
+              numsDiffer(snapshot.net, net ?? 0) ||
+              snapshot.department !== (c.department || "-") ||
+              snapshot.role !== (c.role || "-") ||
+              snapshot.country !== country ||
+              snapshot.payCategory !== (c.payCategory || "-") ||
+              snapshot.shiftType !== (c.shiftType || "-") ||
+              snapshot.currency !== (c.currency || "USD")
+            );
+
             return {
               email,
               name: c.fullName || email,
@@ -336,9 +372,10 @@ export default function PayrollPage() {
               // over the raw Reviewed/For Review/No Activity computation —
               // it only reflects whether a process_weekly_payroll snapshot
               // exists for this contractor/week.
-              status: processedByEmail[email]
+              status: processedSnapshotByEmail[email]
                 ? "Processed"
                 : isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
+              hasChangedSinceProcessed,
               evaluatedDailyMinutes: evaluatedDailyMinutesByEmail.get(email) ?? {},
               bonus,
               misc,
@@ -351,6 +388,7 @@ export default function PayrollPage() {
           });
 
         setRows(nextRows);
+        setProcessedByEmail(processedSnapshotByEmail);
       } catch {
         if (isMounted) {
           setLoadError("Unable to load payroll data.");
@@ -363,7 +401,7 @@ export default function PayrollPage() {
 
     load();
     return () => { isMounted = false; };
-  }, [rangeFrom, rangeTo]);
+  }, [rangeFrom, rangeTo, reloadKey]);
 
   const filteredRows = rows.filter((r) => {
     const query = nameSearch.trim().toLowerCase();
@@ -424,6 +462,14 @@ export default function PayrollPage() {
       const value = values.get(r.email.trim().toLowerCase());
       return value !== undefined ? { ...r, [field]: value } : r;
     }));
+  }
+
+  // Re-fetch from Supabase rather than trust a local mutation, so "Processed"
+  // status and the changed-since-processed icon always reflect exactly
+  // what's persisted — used by both bulk Process Payroll and the single-
+  // contractor Process/Re-Process button on the Voucher.
+  function handleProcessed() {
+    setReloadKey((key) => key + 1);
   }
 
   return (
@@ -596,7 +642,19 @@ export default function PayrollPage() {
                 </tr>
               ) : filteredRows.map((r) => (
                 <tr key={r.email} className="group hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-5 py-3.5 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">{r.name}</td>
+                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-5 py-3.5 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                    <span className="inline-flex items-center gap-1.5">
+                      {r.name}
+                      {r.status === "Processed" && r.hasChangedSinceProcessed && (
+                        <LuRefreshCw
+                          size={13}
+                          strokeWidth={2}
+                          className="text-amber-500 shrink-0"
+                          title="Contractor Details, Time Off, or Attendance changed since this was processed — Re-Process to refresh it"
+                        />
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.country}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
                   <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
@@ -660,7 +718,9 @@ export default function PayrollPage() {
           row={voucherTarget}
           rangeFrom={rangeFrom}
           rangeTo={rangeTo}
+          processedSnapshot={processedByEmail[voucherTarget.email]}
           onClose={() => setVoucherTarget(null)}
+          onProcessed={handleProcessed}
         />
       )}
 
@@ -686,7 +746,7 @@ export default function PayrollPage() {
           rangeFrom={rangeFrom}
           rangeTo={rangeTo}
           onClose={() => setShowProcessModal(false)}
-          onProcessed={() => {}}
+          onProcessed={handleProcessed}
         />
       )}
     </div>
@@ -700,38 +760,193 @@ const REST_DAY_TO_LABEL: Record<string, string> = {
 };
 
 function PayrollVoucherModal({
-  row, rangeFrom, rangeTo, onClose,
+  row, rangeFrom, rangeTo, processedSnapshot, onClose, onProcessed,
 }: {
   row: PayrollRow;
   rangeFrom: string;
   rangeTo: string;
+  processedSnapshot?: ProcessedSnapshot;
   onClose: () => void;
+  onProcessed: () => void;
 }) {
-  const weekDates = rangeFrom && rangeTo ? datesBetween(rangeFrom, rangeTo) : [];
-  const restDayLabels = new Set(
-    row.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
-  );
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
-  const ptoHours = row.ptoHours;
+  // Same button either processes this contractor for the first time or
+  // re-saves an already-"Processed" one — only the label/wording changes,
+  // the save itself is identical (an upsert on email+weekStart).
+  const canProcess = row.status === "Reviewed" || row.status === "Processed";
+  const isReprocess = row.status === "Processed";
+  // Once "Processed", the voucher is a frozen document: every figure below
+  // comes straight from the saved process_weekly_payroll snapshot rather
+  // than being recomputed from today's live Contractor Details/Time
+  // Off/Attendance data (which is exactly what "hasChangedSinceProcessed"
+  // would flag as drifted).
+  const usingSnapshot = row.status === "Processed" && !!processedSnapshot;
+
+  async function handleProcessClick() {
+    setIsSaving(true);
+    setSaveError("");
+    try {
+      const live = computePayComponents(row.hourlyRate, {
+        totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
+        totalRegularOtMinutes: row.totalRegularOtMinutes,
+        totalRdOtMinutes: row.totalRdOtMinutes,
+        totalUsHoMinutes: row.totalUsHoMinutes,
+        totalHoOtMinutes: row.totalHoOtMinutes,
+        localHolidayMinutes: row.localHolidayMinutes,
+      });
+      const ptoPay = row.ptoHours * row.hourlyRate;
+      const result = await processWeeklyPayroll([{
+        email: row.email,
+        weekStart: rangeFrom,
+        weekEnd: rangeTo,
+        name: row.name,
+        role: row.role,
+        restDay: row.restDay,
+        department: row.department,
+        country: row.country,
+        payCategory: row.payCategory,
+        shiftType: row.shiftType,
+        currency: row.currency,
+        hourlyRate: row.hourlyRate,
+        monthlyRate: row.monthlyRate,
+        weeklyRate: row.weeklyRate,
+        actualMinutes: row.actualMinutes,
+        completionMinutes: row.completionMinutes,
+        hours: row.hours,
+        gross: row.gross ?? 0,
+        deductions: row.deductions ?? 0,
+        net: row.net ?? 0,
+        status: row.status,
+        bonus: row.bonus,
+        misc: row.misc,
+        retroPay: row.retroPay,
+        reim: row.reim,
+        cashAdvance: row.cashAdvance,
+        hmo: row.hmo,
+        tax: row.tax,
+        ptoHours: row.ptoHours,
+        regHours: live.regHours,
+        regOtHours: live.regOtHours,
+        rdOtHours: live.rdOtHours,
+        usHolidayHours: live.usHolidayHours,
+        hoOtHours: live.hoOtHours,
+        localHolidayHours: live.localHolidayHours,
+        ptoPay,
+        regPay: live.regPay,
+        regOtPay: live.regOtPay,
+        rdOtPay: live.rdOtPay,
+        usHolidayPay: live.usHolidayPay,
+        hoOtPay: live.hoOtPay,
+        localHolidayPay: live.localHolidayPay,
+        evaluatedDailyMinutes: row.evaluatedDailyMinutes,
+      }]);
+      if (!result.ok) {
+        setSaveError(result.failed[0]?.error ?? "Failed to process. Please try again.");
+        return;
+      }
+      onProcessed();
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to process. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const weekDates = rangeFrom && rangeTo ? datesBetween(rangeFrom, rangeTo) : [];
+
+  // Every figure the voucher renders — sourced from the frozen snapshot when
+  // "Processed", otherwise computed live exactly as before.
+  const figures = usingSnapshot
+    ? {
+        regHours: processedSnapshot!.regHours,
+        regOtHours: processedSnapshot!.regOtHours,
+        rdOtHours: processedSnapshot!.rdOtHours,
+        usHolidayHours: processedSnapshot!.usHolidayHours,
+        hoOtHours: processedSnapshot!.hoOtHours,
+        localHolidayHours: processedSnapshot!.localHolidayHours,
+        regPay: processedSnapshot!.regPay,
+        regOtPay: processedSnapshot!.regOtPay,
+        rdOtPay: processedSnapshot!.rdOtPay,
+        usHolidayPay: processedSnapshot!.usHolidayPay,
+        hoOtPay: processedSnapshot!.hoOtPay,
+        localHolidayPay: processedSnapshot!.localHolidayPay,
+        ptoHours: processedSnapshot!.ptoHours,
+        ptoPay: processedSnapshot!.ptoPay,
+        bonus: processedSnapshot!.bonus,
+        misc: processedSnapshot!.misc,
+        retroPay: processedSnapshot!.retroPay,
+        reim: processedSnapshot!.reim,
+        cashAdvance: processedSnapshot!.cashAdvance,
+        hmo: processedSnapshot!.hmo,
+        tax: processedSnapshot!.tax,
+        grossPay: processedSnapshot!.gross,
+        totalDeductions: processedSnapshot!.deductions,
+        netPay: processedSnapshot!.net,
+        hourlyRate: processedSnapshot!.hourlyRate,
+        monthlyRate: processedSnapshot!.monthlyRate,
+        weeklyRate: processedSnapshot!.weeklyRate,
+        currency: processedSnapshot!.currency,
+        restDay: processedSnapshot!.restDay,
+        evaluatedDailyMinutes: processedSnapshot!.evaluatedDailyMinutes,
+      }
+    : (() => {
+        const live = computePayComponents(row.hourlyRate, {
+          totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
+          totalRegularOtMinutes: row.totalRegularOtMinutes,
+          totalRdOtMinutes: row.totalRdOtMinutes,
+          totalUsHoMinutes: row.totalUsHoMinutes,
+          totalHoOtMinutes: row.totalHoOtMinutes,
+          localHolidayMinutes: row.localHolidayMinutes,
+        });
+        const ptoPay = row.ptoHours * row.hourlyRate;
+        const grossPay = live.grossPay + ptoPay + row.bonus + row.misc + row.retroPay + row.reim;
+        const totalDeductions = row.cashAdvance + row.hmo + row.tax;
+        return {
+          regHours: live.regHours,
+          regOtHours: live.regOtHours,
+          rdOtHours: live.rdOtHours,
+          usHolidayHours: live.usHolidayHours,
+          hoOtHours: live.hoOtHours,
+          localHolidayHours: live.localHolidayHours,
+          regPay: live.regPay,
+          regOtPay: live.regOtPay,
+          rdOtPay: live.rdOtPay,
+          usHolidayPay: live.usHolidayPay,
+          hoOtPay: live.hoOtPay,
+          localHolidayPay: live.localHolidayPay,
+          ptoHours: row.ptoHours,
+          ptoPay,
+          bonus: row.bonus,
+          misc: row.misc,
+          retroPay: row.retroPay,
+          reim: row.reim,
+          cashAdvance: row.cashAdvance,
+          hmo: row.hmo,
+          tax: row.tax,
+          grossPay,
+          totalDeductions,
+          netPay: grossPay - totalDeductions,
+          hourlyRate: row.hourlyRate,
+          monthlyRate: row.monthlyRate,
+          weeklyRate: row.weeklyRate,
+          currency: row.currency,
+          restDay: row.restDay,
+          evaluatedDailyMinutes: row.evaluatedDailyMinutes,
+        };
+      })();
+
+  const restDayLabels = new Set(
+    figures.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
+  );
   const {
     regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
     regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    grossPay: componentGrossPay,
-  } = computePayComponents(row.hourlyRate, {
-    totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
-    totalRegularOtMinutes: row.totalRegularOtMinutes,
-    totalRdOtMinutes: row.totalRdOtMinutes,
-    totalUsHoMinutes: row.totalUsHoMinutes,
-    totalHoOtMinutes: row.totalHoOtMinutes,
-    localHolidayMinutes: row.localHolidayMinutes,
-  });
-  const ptoPay = ptoHours * row.hourlyRate;
-  // Bonus/MISC/Retro Pay/REIM (earnings) and Cash Advance/HMO/Tax (deductions)
-  // all come from the manual Review adjustment (if any).
-  const { bonus, misc, retroPay, reim, cashAdvance, hmo, tax } = row;
-  const grossPay = componentGrossPay + ptoPay + bonus + misc + retroPay + reim;
-  const totalDeductions = cashAdvance + hmo + tax;
-  const netPay = grossPay - totalDeductions;
+    ptoHours, ptoPay, bonus, misc, retroPay, reim, cashAdvance, hmo,
+    grossPay, totalDeductions, netPay,
+  } = figures;
 
   const money = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -768,9 +983,9 @@ function PayrollVoucherModal({
           {/* Contractor info */}
           <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs mb-5">
             <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{row.name}</span></p>
-            <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(row.monthlyRate)}</span></p>
+            <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{row.role}</span></p>
-            <p><span className="text-slate-500">Weekly Rate</span> <span className="font-semibold ml-2">{money(row.weeklyRate)}</span></p>
+            <p><span className="text-slate-500">Weekly Rate</span> <span className="font-semibold ml-2">{money(figures.weeklyRate)}</span></p>
           </div>
 
           {/* Gross Pay */}
@@ -790,7 +1005,7 @@ function PayrollVoucherModal({
                     {weekDates.map((date, i) => {
                       const label = DAY_LABELS[i];
                       const isOff = restDayLabels.has(label);
-                      const hours = (row.evaluatedDailyMinutes[date] ?? 0) / 60;
+                      const hours = (figures.evaluatedDailyMinutes[date] ?? 0) / 60;
                       return (
                         <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
                           {isOff ? "OFF" : hours.toFixed(2)}
@@ -875,13 +1090,31 @@ function PayrollVoucherModal({
           {/* Net Pay */}
           <div className="mt-5 flex items-center justify-between bg-[#003527] text-white rounded-md px-4 py-3">
             <span className="font-bold uppercase text-xs tracking-wider">Net Pay</span>
-            <span className="font-bold text-lg tabular-nums">{row.currency} {money(netPay)}</span>
+            <span className="font-bold text-lg tabular-nums">{figures.currency} {money(netPay)}</span>
           </div>
 
           <p className="text-[10px] text-slate-400 mt-3">
             Check Date is always the Friday following the pay period&apos;s end date.
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
+
+          {canProcess && (
+            <div className="flex items-center justify-end gap-3 mt-5 pt-4 border-t border-slate-100">
+              {saveError && <p className="mr-auto text-xs font-medium text-red-600">{saveError}</p>}
+              <button
+                onClick={handleProcessClick}
+                disabled={isSaving}
+                className={`px-5 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                  isReprocess
+                    ? "border border-blue-200 text-blue-700 hover:bg-blue-50"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
+              >
+                <LuListChecks size={15} strokeWidth={2} />
+                {isSaving ? (isReprocess ? "Re-Processing…" : "Processing…") : (isReprocess ? "Re-Process" : "Process")}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1200,48 +1433,85 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
   onProcessed: () => void;
 }) {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isReprocessing, setIsReprocessing] = useState(false);
   const [processError, setProcessError] = useState("");
 
   const reviewedCount   = rows.filter((r) => r.status === "Reviewed").length;
   const forReviewCount  = rows.filter((r) => r.status === "For Review").length;
   const noActivityCount = rows.filter((r) => r.status === "No Activity").length;
+  const processedCount  = rows.filter((r) => r.status === "Processed").length;
 
+  // First-time processing only ever targets "Reviewed" rows — once a row is
+  // "Processed" it's excluded here (see Re-Process below for revisiting it).
   const eligibleRows = rows.filter((r) => r.status === "Reviewed");
+  // Already-"Processed" rows — re-saved on demand via Re-Process, e.g. if a
+  // payroll adjustment was edited after the original processing run.
+  const alreadyProcessedRows = rows.filter((r) => r.status === "Processed");
 
-  async function handleProcess() {
-    setIsProcessing(true);
+  function buildItems(rowsToProcess: PayrollRow[]): ProcessedPayrollRow[] {
+    return rowsToProcess.map((r) => {
+      const live = computePayComponents(r.hourlyRate, {
+        totalEvaluatedRegularMinutes: r.totalEvaluatedRegularMinutes,
+        totalRegularOtMinutes: r.totalRegularOtMinutes,
+        totalRdOtMinutes: r.totalRdOtMinutes,
+        totalUsHoMinutes: r.totalUsHoMinutes,
+        totalHoOtMinutes: r.totalHoOtMinutes,
+        localHolidayMinutes: r.localHolidayMinutes,
+      });
+      const ptoPay = r.ptoHours * r.hourlyRate;
+      return {
+        email: r.email,
+        weekStart: rangeFrom,
+        weekEnd: rangeTo,
+        name: r.name,
+        role: r.role,
+        restDay: r.restDay,
+        department: r.department,
+        country: r.country,
+        payCategory: r.payCategory,
+        shiftType: r.shiftType,
+        currency: r.currency,
+        hourlyRate: r.hourlyRate,
+        monthlyRate: r.monthlyRate,
+        weeklyRate: r.weeklyRate,
+        actualMinutes: r.actualMinutes,
+        completionMinutes: r.completionMinutes,
+        hours: r.hours,
+        gross: r.gross ?? 0,
+        deductions: r.deductions ?? 0,
+        net: r.net ?? 0,
+        status: r.status,
+        bonus: r.bonus,
+        misc: r.misc,
+        retroPay: r.retroPay,
+        reim: r.reim,
+        cashAdvance: r.cashAdvance,
+        hmo: r.hmo,
+        tax: r.tax,
+        ptoHours: r.ptoHours,
+        regHours: live.regHours,
+        regOtHours: live.regOtHours,
+        rdOtHours: live.rdOtHours,
+        usHolidayHours: live.usHolidayHours,
+        hoOtHours: live.hoOtHours,
+        localHolidayHours: live.localHolidayHours,
+        ptoPay,
+        regPay: live.regPay,
+        regOtPay: live.regOtPay,
+        rdOtPay: live.rdOtPay,
+        usHolidayPay: live.usHolidayPay,
+        hoOtPay: live.hoOtPay,
+        localHolidayPay: live.localHolidayPay,
+        evaluatedDailyMinutes: r.evaluatedDailyMinutes,
+      };
+    });
+  }
+
+  async function runProcess(rowsToProcess: PayrollRow[], setBusy: (v: boolean) => void) {
+    setBusy(true);
     setProcessError("");
 
-    const items: ProcessedPayrollRow[] = eligibleRows.map((r) => ({
-      email: r.email,
-      weekStart: rangeFrom,
-      weekEnd: rangeTo,
-      name: r.name,
-      role: r.role,
-      department: r.department,
-      country: r.country,
-      payCategory: r.payCategory,
-      shiftType: r.shiftType,
-      currency: r.currency,
-      hourlyRate: r.hourlyRate,
-      monthlyRate: r.monthlyRate,
-      weeklyRate: r.weeklyRate,
-      actualMinutes: r.actualMinutes,
-      completionMinutes: r.completionMinutes,
-      hours: r.hours,
-      gross: r.gross ?? 0,
-      deductions: r.deductions ?? 0,
-      net: r.net ?? 0,
-      status: r.status,
-      bonus: r.bonus,
-      misc: r.misc,
-      retroPay: r.retroPay,
-      reim: r.reim,
-      cashAdvance: r.cashAdvance,
-      hmo: r.hmo,
-      tax: r.tax,
-    }));
-
+    const items = buildItems(rowsToProcess);
     try {
       const result = await processWeeklyPayroll(items);
       if (!result.ok) {
@@ -1254,19 +1524,27 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
     } catch (err) {
       setProcessError(err instanceof Error ? err.message : "Failed to process payroll. Please try again.");
     } finally {
-      setIsProcessing(false);
+      setBusy(false);
     }
+  }
+
+  function handleProcess() {
+    return runProcess(eligibleRows, setIsProcessing);
+  }
+
+  function handleReprocess() {
+    return runProcess(alreadyProcessedRows, setIsReprocessing);
   }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isProcessing && onClose()} />
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isProcessing && !isReprocessing && onClose()} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-1">
           <h3 className="text-lg font-bold text-[#003527]">Process Payroll</h3>
           <button
             onClick={onClose}
-            disabled={isProcessing}
+            disabled={isProcessing || isReprocessing}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <LuX size={18} strokeWidth={2} />
@@ -1289,25 +1567,38 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
             <span className="text-sm font-medium text-slate-600">No Activity</span>
             <span className="text-sm font-bold text-slate-600">{noActivityCount}</span>
           </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-blue-50 border border-blue-100">
+            <span className="text-sm font-medium text-blue-700">Processed</span>
+            <span className="text-sm font-bold text-blue-700">{processedCount}</span>
+          </div>
         </div>
 
         {processError && <p className="text-xs text-red-600 mb-3">{processError}</p>}
 
         <p className="text-xs text-slate-400 mb-5">
           {eligibleRows.length} record{eligibleRows.length !== 1 ? "s" : ""} will be saved to process_weekly_payroll.
+          {processedCount > 0 && ` Re-Process will re-save the ${processedCount} already-processed record${processedCount !== 1 ? "s" : ""}.`}
         </p>
 
         <div className="flex justify-end gap-3">
           <button
             onClick={onClose}
-            disabled={isProcessing}
+            disabled={isProcessing || isReprocessing}
             className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
+            onClick={handleReprocess}
+            disabled={isProcessing || isReprocessing || alreadyProcessedRows.length === 0}
+            title="Re-save the already-processed records — e.g. if a payroll adjustment changed since they were processed"
+            className="px-4 py-2 border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-semibold rounded-lg transition-colors flex items-center gap-2"
+          >
+            {isReprocessing ? "Re-Processing…" : "Re-Process"}
+          </button>
+          <button
             onClick={handleProcess}
-            disabled={isProcessing || eligibleRows.length === 0}
+            disabled={isProcessing || isReprocessing || eligibleRows.length === 0}
             className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2"
           >
             {isProcessing ? "Processing…" : "Process"}
