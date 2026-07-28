@@ -285,7 +285,7 @@ export default function ContractorsPage() {
       if (failed === 0) {
         toast.success(`${ok} contractor${ok !== 1 ? "s" : ""} imported successfully`, { id: tid });
       } else {
-        toast.warning(`${ok} imported, ${failed} failed — check for duplicate emails`, { id: tid });
+        toast.warning(`${ok} imported, ${failed} failed — check for duplicate emails or Contractor IDs`, { id: tid });
       }
     } catch (err) {
       toast.error(`Import failed: ${err instanceof Error ? err.message : "Unknown error"}`, { id: tid });

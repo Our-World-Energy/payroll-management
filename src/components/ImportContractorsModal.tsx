@@ -10,7 +10,7 @@ import type { Contractor } from "@/app/admin/contractors/types";
 // ── CSV column spec (matches modal fields) ────────────────────────────────────
 const CSV_COLUMNS = [
   "first_name", "middle_name", "surname", "dob", "gender", "email",
-  "department", "sub_department", "role", "country", "state",
+  "department", "sub_department", "role", "country", "contractor_id",
   "office_location", "manager", "hire_date", "status", "pay_category",
   "shift_from", "shift_to", "rest_days", "currency", "monthly_rate",
 ];
@@ -19,14 +19,14 @@ const SAMPLE_ROWS = [
   [
     "John", "Paul", "Smith", "1990-06-15", "Male", "john.smith@company.com",
     "Solar Engineering", "Field Inspection", "Lead Inspector",
-    "USA", "California", "OWE [AZ, Phoenix]", "Colten Warnock",
+    "USA", "#C-1001", "OWE [AZ, Phoenix]", "Colten Warnock",
     "2023-01-10", "Active", "Hourly", "8:00 AM", "5:00 PM",
     "Saturday, Sunday", "USD", "5200",
   ],
   [
     "Maria", "Elena", "Lopez", "1994-03-22", "Female", "m.lopez@company.com",
     "Grid Maintenance", "High Voltage", "HV Technician",
-    "Mexico", "Jalisco", "Allied Energy Solutions [TX, Midland]", "Dillard Blanton",
+    "Mexico", "#C-1002", "Allied Energy Solutions [TX, Midland]", "Dillard Blanton",
     "2023-04-01", "Active", "Fixed", "7:00 AM", "4:00 PM",
     "Sunday", "MXN", "32000",
   ],
@@ -159,7 +159,7 @@ function rowToContractor(data: Record<string, string>): Contractor {
 
   return {
     uid:           `UID-${Math.floor(10000 + Math.random() * 89999)}`,
-    contractorId:  `#C-${Math.floor(1000 + Math.random() * 8999)}`,
+    contractorId:  data.contractor_id?.trim() || `#C-${Math.floor(1000 + Math.random() * 8999)}`,
     avatar:        ((firstName[0] ?? "") + (surname[0] ?? "")).toUpperCase(),
     fullName:      [firstName, middleName, surname].filter(Boolean).join(" "),
     createdOn:     new Date().toISOString().split("T")[0],
@@ -172,7 +172,7 @@ function rowToContractor(data: Record<string, string>): Contractor {
     department:    data.department     ?? "",
     subDepartment: data.sub_department ?? "",
     role:          data.role           ?? "",
-    location:      data.state ? `${data.state}, ${data.country}` : (data.country ?? ""),
+    location:      data.country ?? "",
     officeLocation:data.office_location ?? "",
     manager:       data.manager        ?? "",
     hireDate:      data.hire_date      ?? "",
@@ -368,6 +368,7 @@ export function ImportContractorsModal({ onClose, onImport }: Props) {
                 <p className="text-xs text-slate-400 mt-2">
                   weekly_rate and hourly_rate are auto-calculated from monthly_rate — do not include them.
                   Dates accept YYYY-MM-DD, MM/DD/YYYY, or DD-MM-YYYY formats.
+                  contractor_id is optional — leave it blank to auto-generate one; duplicate IDs will fail to import.
                 </p>
               </div>
             </div>

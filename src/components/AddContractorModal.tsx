@@ -24,7 +24,7 @@ const COUNTRY_STATES: Record<string, string[]> = {
 const FALLBACK_COUNTRIES = Object.keys(COUNTRY_STATES);
 
 const PAY_CATEGORIES = ["Hourly", "Fixed-Ind", "Fixed-Mex"];
-const CURRENCIES     = ["PHP", "INR", "MXN", "USD"];
+const FALLBACK_CURRENCIES = ["PHP", "INR", "MXN", "USD"];
 const STATUSES       = ["Active", "Dismissed"] as const;
 const GENDERS        = ["Not Specified", "Male", "Female"];
 const WEEK_DAYS      = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -68,9 +68,10 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
-  const { officeLocations, deptTree, managers, countryLocations } = useContractorConfig();
+  const { officeLocations, deptTree, managers, countryLocations, currencies } = useContractorConfig();
   const DEPARTMENTS = Object.keys(deptTree);
   const COUNTRIES = countryLocations.length ? countryLocations : FALLBACK_COUNTRIES;
+  const CURRENCIES = currencies.length ? currencies : FALLBACK_CURRENCIES;
 
   const parseLocation = (loc?: string) => {
     if (!loc) return { country: COUNTRIES[0], state: "" };

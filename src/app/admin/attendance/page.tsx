@@ -672,6 +672,7 @@ function buildBulkApproveDaySnapshots(
       rdOtMinutes: allocation.rdOtMinutes,
       hoOtMinutes,
       completionMinutes,
+      timeOffMinutes: timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)),
     };
   });
 }
@@ -968,13 +969,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? regularOtMinutes : 0);
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
       }, 0);
-  const details = [
-    ["Shift Type", shiftType],
-    ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
-    ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
-    ["Ind Time", completionTotalMinutes > 0 ? formatMinutesAsMins(completionTotalMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
-  ];
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Ind Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
     .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Request" || heading === "Time Off Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
@@ -1036,6 +1031,17 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
   const totalAdjustedRdOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.rdOtMinutes ?? 0), 0);
+  // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT + US HO +
+  // Local HO + Time Off Request Time — same formula as the table's Total
+  // Completion Time column/footer, now shown in the scorecard too.
+  const totalCompletionTimeMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalAdjustedRdOtMinutes
+    + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
+  const details = [
+    ["Shift Type", shiftType],
+    ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
+    ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
+    ["Total Completion Time", totalCompletionTimeMinutes > 0 ? formatMinutesAsMins(totalCompletionTimeMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
+  ];
 
   // Resets the locally-edited review fields whenever a different
   // contractor/week is opened (or the carried-over offset credit changes).
@@ -1197,6 +1203,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             regularOtMinutes: allocation.regularOtMinutes,
             rdOtMinutes: allocation.rdOtMinutes,
             hoOtMinutes,
+            timeOffMinutes: timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)),
           };
         });
 
@@ -1474,6 +1481,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`px-4 py-2 ${conflictCellClass}`}>
                           {completionTime}
                         </td>
+                        <td className={`px-4 py-2 font-semibold border-l border-slate-100 ${conflictCellClass}`}>
+                          {(() => {
+                            const totalCompletionMinutes = regularAllocation.evaluatedRegularTime + regularAllocation.regularOtMinutes + regularAllocation.rdOtMinutes
+                              + displayedUsHoMinutes + (localHolidayMinutes ?? 0) + timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests));
+                            return totalCompletionMinutes > 0 ? formatMinutesAsMins(totalCompletionMinutes) : "-";
+                          })()}
+                        </td>
                         <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
                           hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
                         }`}>
@@ -1541,6 +1555,13 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-2 font-bold text-slate-900">
                       {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
+                    <td className="px-4 py-2 font-bold text-slate-900 border-l border-slate-100">
+                      {(() => {
+                        const totalCompletionMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalAdjustedRdOtMinutes
+                          + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
+                        return totalCompletionMinutes > 0 ? formatMinutesAsMins(totalCompletionMinutes) : "-";
+                      })()}
+                    </td>
                     <td className="sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 shadow-[-1px_0_0_0_#e2e8f0]">
                       -
                     </td>
@@ -1568,6 +1589,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`px-4 py-2 font-bold ${appliedOffsetCredit > 0 ? "text-red-600" : "text-slate-900"}`}>
                           {formatMinutesAsMins(offsetCredit || appliedOffsetCredit)}
                         </td>
+                        <td className="px-4 py-2 text-slate-500 border-l border-slate-100">-</td>
                         <td className="sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 shadow-[-1px_0_0_0_#e2e8f0]">-</td>
                       </tr>
                       <tr>
@@ -1589,6 +1611,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`px-4 py-2 font-bold ${appliedOffsetCredit > 0 && offsetCredit === 0 ? "text-red-600" : "text-[#003527]"}`}>
                           {formatMinutesAsMins(offsetCredit > 0 ? indiaTotalMinutes + offsetCredit + totalHolidayMins : indiaNetCompletionMinutes + totalHolidayMins)}
                         </td>
+                        <td className="px-4 py-2 text-slate-500 border-l border-slate-100">-</td>
                         <td className="sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 shadow-[-1px_0_0_0_#e2e8f0]">-</td>
                       </tr>
                     </>
@@ -2592,7 +2615,7 @@ export default function AttendancePage() {
     const matchesStatus = statusFilter === "All" || row.weeklyStatus === statusFilter;
 
     return matchesName && matchesPayCategory && matchesCountry && matchesShiftType && matchesDepartment && matchesStatus;
-  });
+  }).sort((a, b) => a.name.localeCompare(b.name));
   const departmentOptions = Array.from(new Set(attendanceRows.map(departmentForAttendanceRow))).sort();
   const countryOptions = Array.from(new Set(attendanceRows.map((r) => r.region).filter(Boolean))).sort();
   const shiftTypeOptions = Array.from(new Set(attendanceRows.map((r) => r.shiftType ?? "").filter(Boolean))).sort();

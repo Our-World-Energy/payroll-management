@@ -7,6 +7,7 @@ import {
   addOfficeLocation, removeOfficeLocation,
   addManager, removeManager,
   addCountryLocation, removeCountryLocation,
+  addCurrency, removeCurrency,
   addDepartment, removeDepartment,
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
@@ -33,6 +34,7 @@ export default function SettingsPage() {
     deptTree, setDeptTree,
     managers, setManagers,
     countryLocations, setCountryLocations,
+    currencies, setCurrencies,
   } = useContractorConfig();
 
   // ── Busy/error state ──────────────────────────────────────────────────────
@@ -46,6 +48,7 @@ export default function SettingsPage() {
     managers: false,
     countryLocations: false,
     departments: false,
+    currencies: false,
     timeOff: false,
     notifications: false,
   });
@@ -183,6 +186,24 @@ export default function SettingsPage() {
     const prev = countryLocations;
     setCountryLocations(countryLocations.filter((x) => x !== c));
     await run(() => removeCountryLocation(c), () => setCountryLocations(prev));
+  }
+
+  // ── Currency handlers ──────────────────────────────────────────────────────
+  const [newCurrency, setNewCurrency] = useState("");
+
+  async function handleAddCurrency() {
+    const v = newCurrency.trim();
+    if (!v || currencies.includes(v)) return;
+    const prev = currencies;
+    setCurrencies([...currencies, v]);
+    setNewCurrency("");
+    await run(() => addCurrency(v), () => setCurrencies(prev));
+  }
+
+  async function handleRemoveCurrency(c: string) {
+    const prev = currencies;
+    setCurrencies(currencies.filter((x) => x !== c));
+    await run(() => removeCurrency(c), () => setCurrencies(prev));
   }
 
   // ── Dept/sub/role state ───────────────────────────────────────────────────
@@ -575,6 +596,47 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
+        )}
+      </section>
+
+      {/* Currency */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <button onClick={() => toggleSection("currencies")} className="flex items-start gap-2 text-left flex-1">
+            {openSections.currencies ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
+            <div>
+              <h4 className="text-base font-semibold text-[#003527]">Currency</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the Currency dropdown when adding a contractor.</p>
+            </div>
+          </button>
+          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{currencies.length} currencies</span>
+        </div>
+        {openSections.currencies && (
+          <div className="px-6 py-5 space-y-4">
+            <div className="flex gap-2">
+              <input
+                value={newCurrency}
+                onChange={(e) => setNewCurrency(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCurrency()}
+                placeholder="e.g. CAD"
+                className={INPUT}
+              />
+              <button onClick={handleAddCurrency} disabled={busy}
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+                <LuPlus size={15} strokeWidth={2.5} />Add
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+              {currencies.map((c) => (
+                <span key={c} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
+                  {c}
+                  <button onClick={() => askConfirm(c, () => handleRemoveCurrency(c))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
+                    <LuX size={13} strokeWidth={2.5} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
         )}
       </section>
 

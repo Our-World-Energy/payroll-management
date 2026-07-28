@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   if (!userId && from && to) {
     const rows = await prisma.attendanceDayStatus.findMany({
       where: { date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } },
-      select: { worksnapUserId: true, email: true, date: true, decisionStatus: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, adjustedMinutes: true },
+      select: { worksnapUserId: true, email: true, date: true, decisionStatus: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, adjustedMinutes: true, totalCompletionTime: true },
     });
     return Response.json({
       days: rows.map((r) => ({
@@ -45,6 +45,7 @@ export async function GET(request: Request) {
         evaluatedMinutes: r.evaluatedMinutes,
         evaluatedRegularMinutes: r.evaluatedRegularMinutes,
         adjustedMinutes: r.adjustedMinutes,
+        totalCompletionTime: r.totalCompletionTime,
       })),
     });
   }
@@ -85,6 +86,7 @@ export async function GET(request: Request) {
         hoOtMinutes: true,
         timeOffStatus: true,
         timeOffMinutes: true,
+        totalCompletionTime: true,
         manualAdjustmentTime: true,
         note: true,
       },
@@ -122,6 +124,7 @@ export async function GET(request: Request) {
       hoOtMinutes: st?.hoOtMinutes ?? 0,
       timeOffStatus: st?.timeOffStatus ?? null,
       timeOffMinutes: st?.timeOffMinutes ?? 0,
+      totalCompletionTime: st?.totalCompletionTime ?? 0,
       manualAdjustmentTime: st?.manualAdjustmentTime ?? 0,
       note: st?.note ?? "",
     };

@@ -160,6 +160,7 @@ export type ProcessedPayrollRow = {
   weekEnd: string;
   name: string;
   role: string;
+  restDay: string;
   department: string;
   country: string;
   payCategory: string;
@@ -182,6 +183,23 @@ export type ProcessedPayrollRow = {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  // Per-bucket hours/pay breakdown and the Sun→Sat daily grid — stored so a
+  // "Processed" voucher can render fully frozen, with nothing computed live.
+  ptoHours: number;
+  regHours: number;
+  regOtHours: number;
+  rdOtHours: number;
+  usHolidayHours: number;
+  hoOtHours: number;
+  localHolidayHours: number;
+  ptoPay: number;
+  regPay: number;
+  regOtPay: number;
+  rdOtPay: number;
+  usHolidayPay: number;
+  hoOtPay: number;
+  localHolidayPay: number;
+  evaluatedDailyMinutes: Record<string, number>;
 };
 
 type ProcessRowResult = { email: string; ok: true } | { email: string; ok: false; error: string };
@@ -218,12 +236,97 @@ export async function processWeeklyPayroll(
   return { ok: failed.length === 0, processed: results.length - failed.length, failed };
 }
 
-export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Record<string, string>> {
+// Everything the Voucher needs to render fully frozen (no live computation)
+// once a contractor is "Processed", plus everything the "changed since
+// processed" check in the main table compares against — gross/deductions/net
+// alone already cover Contractor Details/Time Off/Attendance drift, the rest
+// here is purely for the frozen voucher display.
+export type ProcessedSnapshot = {
+  processedAt: string;
+  department: string;
+  role: string;
+  restDay: string;
+  country: string;
+  payCategory: string;
+  shiftType: string;
+  currency: string;
+  hourlyRate: number;
+  monthlyRate: number;
+  weeklyRate: number;
+  actualMinutes: number;
+  completionMinutes: number | null;
+  gross: number;
+  deductions: number;
+  net: number;
+  bonus: number;
+  misc: number;
+  retroPay: number;
+  reim: number;
+  cashAdvance: number;
+  hmo: number;
+  tax: number;
+  ptoHours: number;
+  regHours: number;
+  regOtHours: number;
+  rdOtHours: number;
+  usHolidayHours: number;
+  hoOtHours: number;
+  localHolidayHours: number;
+  ptoPay: number;
+  regPay: number;
+  regOtPay: number;
+  rdOtPay: number;
+  usHolidayPay: number;
+  hoOtPay: number;
+  localHolidayPay: number;
+  evaluatedDailyMinutes: Record<string, number>;
+};
+
+export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Record<string, ProcessedSnapshot>> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from(PROCESS_TABLE)
-    .select("email, processedAt")
+    .select("email, processedAt, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
     .eq("weekStart", weekStart);
   if (error || !data) return {};
-  return Object.fromEntries(data.map((r) => [String(r.email), String(r.processedAt)]));
+  return Object.fromEntries(data.map((r) => [String(r.email), {
+    processedAt: String(r.processedAt),
+    department: String(r.department),
+    role: String(r.role),
+    restDay: String(r.restDay ?? ""),
+    country: String(r.country),
+    payCategory: String(r.payCategory),
+    shiftType: String(r.shiftType),
+    currency: String(r.currency),
+    hourlyRate: Number(r.hourlyRate),
+    monthlyRate: Number(r.monthlyRate),
+    weeklyRate: Number(r.weeklyRate),
+    actualMinutes: Number(r.actualMinutes),
+    completionMinutes: r.completionMinutes == null ? null : Number(r.completionMinutes),
+    gross: Number(r.gross),
+    deductions: Number(r.deductions),
+    net: Number(r.net),
+    bonus: Number(r.bonus ?? 0),
+    misc: Number(r.misc ?? 0),
+    retroPay: Number(r.retroPay ?? 0),
+    reim: Number(r.reim ?? 0),
+    cashAdvance: Number(r.cashAdvance ?? 0),
+    hmo: Number(r.hmo ?? 0),
+    tax: Number(r.tax ?? 0),
+    ptoHours: Number(r.ptoHours ?? 0),
+    regHours: Number(r.regHours ?? 0),
+    regOtHours: Number(r.regOtHours ?? 0),
+    rdOtHours: Number(r.rdOtHours ?? 0),
+    usHolidayHours: Number(r.usHolidayHours ?? 0),
+    hoOtHours: Number(r.hoOtHours ?? 0),
+    localHolidayHours: Number(r.localHolidayHours ?? 0),
+    ptoPay: Number(r.ptoPay ?? 0),
+    regPay: Number(r.regPay ?? 0),
+    regOtPay: Number(r.regOtPay ?? 0),
+    rdOtPay: Number(r.rdOtPay ?? 0),
+    usHolidayPay: Number(r.usHolidayPay ?? 0),
+    hoOtPay: Number(r.hoOtPay ?? 0),
+    localHolidayPay: Number(r.localHolidayPay ?? 0),
+    evaluatedDailyMinutes: (r.evaluatedDailyMinutes ?? {}) as Record<string, number>,
+  }]));
 }

@@ -17,14 +17,16 @@ export async function fetchOrgConfig(): Promise<{
   officeLocations: string[];
   managers: string[];
   countryLocations: string[];
+  currencies: string[];
   deptTree: DeptTree;
 }> {
   const sb = getSupabase();
 
-  const [locRes, mgrRes, countryRes, deptRes, subRes, roleRes] = await Promise.all([
+  const [locRes, mgrRes, countryRes, currencyRes, deptRes, subRes, roleRes] = await Promise.all([
     sb.from("org_office_locations").select("name").order("name"),
     sb.from("org_managers").select("name").order("name"),
     sb.from("org_country").select("country").order("country"),
+    sb.from("org_currency").select("currency").order("currency"),
     sb.from("org_departments").select("id, name").order("name"),
     sb.from("org_sub_departments").select("id, departmentId, name").order("name"),
     sb.from("org_roles").select("subDepartmentId, name").order("name"),
@@ -33,6 +35,7 @@ export async function fetchOrgConfig(): Promise<{
   const officeLocations: string[] = (locRes.data ?? []).map((r: { name: string }) => r.name);
   const managers: string[] = (mgrRes.data ?? []).map((r: { name: string }) => r.name);
   const countryLocations: string[] = (countryRes.data ?? []).map((r: { country: string }) => r.country);
+  const currencies: string[] = (currencyRes.data ?? []).map((r: { currency: string }) => r.currency);
 
   const deptTree: DeptTree = {};
   for (const dept of (deptRes.data ?? []) as { id: string; name: string }[]) {
@@ -47,7 +50,7 @@ export async function fetchOrgConfig(): Promise<{
     }
   }
 
-  return { officeLocations, managers, countryLocations, deptTree };
+  return { officeLocations, managers, countryLocations, currencies, deptTree };
 }
 
 // ── Office locations ──────────────────────────────────────────────────────────
@@ -83,6 +86,24 @@ export async function addCountryLocation(name: string): Promise<{ ok: boolean; e
 export async function removeCountryLocation(name: string): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
   const { error } = await sb.from("org_country").delete().eq("country", name);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+// ── Currencies ─────────────────────────────────────────────────────────────────
+
+export async function addCurrency(name: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("org_currency")
+    .insert({ currency: name.trim() });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function removeCurrency(name: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb.from("org_currency").delete().eq("currency", name);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
@@ -236,6 +257,7 @@ export async function seedOrgDefaults(
   managers: string[],
   deptTree: DeptTree,
   countryLocations: string[] = [],
+  currencies: string[] = [],
 ): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
   const now = new Date().toISOString();
@@ -262,6 +284,13 @@ export async function seedOrgDefaults(
   if (countryLocations.length) {
     await sb.from("org_country").insert(
       countryLocations.map((country) => ({ country })),
+    );
+  }
+
+  // Insert currencies
+  if (currencies.length) {
+    await sb.from("org_currency").insert(
+      currencies.map((currency) => ({ currency })),
     );
   }
 
