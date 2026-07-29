@@ -75,6 +75,11 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
   const parseLocation = (loc?: string) => {
     if (!loc) return { country: COUNTRIES[0], state: "" };
+    // Current save format is just the plain country (see location: form.country
+    // below) — check for an exact match first so a saved country always round-trips
+    // back into the form instead of falling through to COUNTRIES[0] below.
+    if (COUNTRIES.includes(loc)) return { country: loc, state: "" };
+    // Legacy "State, Country" format from older records.
     const parts = loc.split(", ");
     if (parts.length >= 2) {
       const maybeCountry = parts[parts.length - 1];
