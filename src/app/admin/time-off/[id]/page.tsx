@@ -15,10 +15,6 @@ function roundBalance(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-function fmtMinutes(hours: number) {
-  return Math.round(hours * 60).toLocaleString();
-}
-
 function fmtDate(date: string) {
   if (!date) return "-";
   const [year, month, day] = date.split("-");
@@ -122,15 +118,16 @@ export default function ContractorTimeOffPage() {
   // trusting the stored snapshot — so a Cut Off Time change is reflected
   // immediately without waiting for this contractor to be saved again.
   const ptoBalance       = contractor ? calculatePtoBalance(contractor.hireDate, cutoff) : 0;
-  const ptoUsed          = contractor?.ptoUsed           ?? 0;
-  const ptoAvailable     = roundBalance(Math.max(ptoBalance - ptoUsed, 0));
+  // Same formula as the main Time Off Management page: an imported/legacy
+  // baseline supersedes the computed value wherever it's set, and Advance
+  // PTO/Sick Leave Used is always added on top so this matches what's shown
+  // there instead of only reflecting the normal (non-advance) usage.
+  const ptoUsed          = contractor ? (contractor.ptoUsedImport > 0 ? contractor.ptoUsedImport : contractor.ptoUsed) + contractor.birthdayLeaveUsed : 0;
+  // Not floored at 0 — a negative Available (Used exceeds Accrual) is shown as-is.
+  const ptoAvailable     = roundBalance(ptoBalance - ptoUsed);
   const sickBalance      = contractor ? calculateSickLeaveBalance(contractor.hireDate, cutoff) : 0;
-  const sickUsed         = contractor?.sickLeaveUsed     ?? 0;
-  const sickAvailable    = roundBalance(Math.max(sickBalance - sickUsed, 0));
-  const ptoAvailableLow  = ptoAvailable < 8;
-  const sickAvailableLow = sickAvailable < 8;
-  const advancePto       = contractor?.birthdayLeave     ?? 0;
-  const advanceSickLeave = contractor?.advanceSickLeave  ?? 0;
+  const sickUsed         = contractor ? (contractor.sickUsedImport > 0 ? contractor.sickUsedImport : contractor.sickLeaveUsed) + contractor.advanceSickLeaveUsed : 0;
+  const sickAvailable    = roundBalance(sickBalance - sickUsed);
 
   if (!loading && !contractor) {
     return (
@@ -159,49 +156,42 @@ export default function ContractorTimeOffPage() {
         <p className="text-slate-500 text-sm mt-1">{fullName}</p>
       </div>
 
-      {/* Score Cards */}
-      <div className={`grid grid-cols-2 ${isIndia ? "md:grid-cols-4" : "md:grid-cols-4 lg:grid-cols-8"} gap-4 mb-8`}>
-        {!isIndia && <>
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Accrual</p>
-            <p className="text-2xl font-black text-[#003527]">{fmtBalance(ptoBalance)}h</p>
-            <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(ptoBalance)} min</p>
+      {/* Score Cards — same PTO/Sick Leave 3-card layout as the Contractor
+          Time-Off Detail tab in Time Off Management, with the same
+          red-when-negative Available treatment. */}
+      <div className="space-y-4 mb-8">
+        {!isIndia && (
+          <div>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                ["PTO Accrual",           `${fmtBalance(ptoBalance)}h`,   false],
+                ["PTO Used",              `${fmtBalance(ptoUsed)}h`,      false],
+                ["PTO Accrual Available", `${fmtBalance(ptoAvailable)}h`, ptoAvailable < 0],
+              ] as [string, string, boolean][]).map(([label, value, negative]) => (
+                <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-teal-100 bg-teal-50"}`}>
+                  <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-teal-700"}`}>{label}</p>
+                  <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-[#003527]"}`}>{value}</p>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-            <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">PTO Used</p>
-            <p className="text-2xl font-black text-slate-700">{fmtBalance(ptoUsed)}h</p>
-            <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(ptoUsed)} min</p>
+        )}
+
+        <div>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              ["Sick Leave Accrual",     `${fmtBalance(sickBalance)}h`,   false],
+              ["Sick Leave Used",        `${fmtBalance(sickUsed)}h`,      false],
+              ["Sick Accrual Available", `${fmtBalance(sickAvailable)}h`, sickAvailable < 0],
+            ] as [string, string, boolean][]).map(([label, value, negative]) => (
+              <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-orange-100 bg-orange-50"}`}>
+                <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-orange-700"}`}>{label}</p>
+                <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-orange-700"}`}>{value}</p>
+              </div>
+            ))}
           </div>
-          <div className={`rounded-2xl border shadow-sm px-5 py-4 ${ptoAvailableLow ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200"}`}>
-            <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${ptoAvailableLow ? "text-red-600" : "text-emerald-600"}`}>PTO Available</p>
-            <p className={`text-2xl font-black ${ptoAvailableLow ? "text-red-700" : "text-emerald-700"}`}>{fmtBalance(ptoAvailable)}h</p>
-            <p className={`text-[11px] font-medium mt-0.5 ${ptoAvailableLow ? "text-red-400" : "text-emerald-400"}`}>{fmtMinutes(ptoAvailable)} min</p>
-          </div>
-          <div className="bg-pink-50 rounded-2xl border border-pink-200 shadow-sm px-5 py-4">
-            <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1">Advance PTO</p>
-            <p className="text-2xl font-black text-pink-700">{fmtBalance(advancePto)}h</p>
-            <p className="text-[11px] font-medium text-pink-400 mt-0.5">{fmtMinutes(advancePto)} min</p>
-          </div>
-        </>}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Accrual</p>
-          <p className="text-2xl font-black text-[#003527]">{fmtBalance(sickBalance)}h</p>
-          <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(sickBalance)} min</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Sick Leave Used</p>
-          <p className="text-2xl font-black text-slate-700">{fmtBalance(sickUsed)}h</p>
-          <p className="text-[11px] font-medium text-slate-400 mt-0.5">{fmtMinutes(sickUsed)} min</p>
-        </div>
-        <div className={`rounded-2xl border shadow-sm px-5 py-4 ${sickAvailableLow ? "bg-red-50 border-red-200" : "bg-amber-50 border-amber-200"}`}>
-          <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${sickAvailableLow ? "text-red-600" : "text-amber-600"}`}>Sick Leave Available</p>
-          <p className={`text-2xl font-black ${sickAvailableLow ? "text-red-700" : "text-amber-700"}`}>{fmtBalance(sickAvailable)}h</p>
-          <p className={`text-[11px] font-medium mt-0.5 ${sickAvailableLow ? "text-red-400" : "text-amber-400"}`}>{fmtMinutes(sickAvailable)} min</p>
-        </div>
-        <div className="bg-blue-50 rounded-2xl border border-blue-200 shadow-sm px-5 py-4">
-          <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1">Advance Sick Leave</p>
-          <p className="text-2xl font-black text-blue-700">{fmtBalance(advanceSickLeave)}h</p>
-          <p className="text-[11px] font-medium text-blue-400 mt-0.5">{fmtMinutes(advanceSickLeave)} min</p>
         </div>
       </div>
 
@@ -250,11 +240,11 @@ export default function ContractorTimeOffPage() {
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
                     {!isIndia && (
-                      <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
+                      <td className={`px-5 py-4 text-sm whitespace-nowrap font-medium ${ptoAvailable < 0 ? "text-red-600" : "text-slate-700"}`}>
                         {fmtBalance(ptoAvailable)}h
                       </td>
                     )}
-                    <td className="px-5 py-4 text-sm text-slate-700 whitespace-nowrap font-medium">
+                    <td className={`px-5 py-4 text-sm whitespace-nowrap font-medium ${sickAvailable < 0 ? "text-red-600" : "text-slate-700"}`}>
                       {fmtBalance(sickAvailable)}h
                     </td>
                     {/* Type badge */}
