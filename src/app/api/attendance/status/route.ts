@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth";
-import { buildAttendanceStatusOps, type AttendanceStatusInput } from "@/lib/attendanceStatusOps";
+import { buildAttendanceStatusOps, runOpsSequentially, type AttendanceStatusInput } from "@/lib/attendanceStatusOps";
 
 /**
  * Save an employee's attendance edits for a week (admin-only, session + 2FA):
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const result = buildAttendanceStatusOps(prisma, body);
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
 
-  await Promise.all(result.ops);
+  await runOpsSequentially(result.ops);
 
   const days = Array.isArray(body.days) ? body.days : [];
   return Response.json({ ok: true, savedDays: days.length });

@@ -138,3 +138,14 @@ export function buildAttendanceStatusOps(
 
   return { ok: true, ops };
 }
+
+// Runs Prisma ops one at a time instead of Promise.all — the pooled
+// DATABASE_URL's connection_limit can be as low as 1 (pgbouncer transaction
+// pooling), so firing several ops concurrently just queues them against the
+// pool_timeout instead of actually running them in parallel. Sequential is
+// slower but never exceeds whatever connection budget is available.
+export async function runOpsSequentially(ops: Prisma.PrismaPromise<unknown>[]) {
+  for (const op of ops) {
+    await op;
+  }
+}
