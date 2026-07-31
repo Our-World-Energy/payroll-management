@@ -189,16 +189,12 @@ function worksnapTimeForDate(dailyWorksnapMinutes: Record<string, number>, date:
 // below 480 it passes through as-is, at or above 480 it's capped to 480.
 // Rest days never carry Regular Time — that worked time is RD OT Time instead.
 // Full-day PTO/Sick Leave days don't carry Regular Time either — that worked
-// time is Regular OT Time instead (see isFullTimeOffStatus). Same for a US
-// Holiday worked under 240 min — that time is HO OT Time instead (see
-// otMinutesFor and weeklyEvaluatedRegularAllocation's isHoOtDayByDate skip).
-// A US Holiday worked at least 240 min but under the 480-min standard shift is
-// boosted to the full 480-min Regular Time credit (worked half a shift, paid
-// the full shift) — otherwise identical to a regular day's cap-at-480 rule.
+// time is Regular OT Time instead (see isFullTimeOffStatus).
+// A US Holiday is treated the same as a regular day here — worked time up to
+// 480 min is Regular Time as-is; only time beyond 480 min is HO OT Time
+// instead of Regular OT Time (see otMinutesFor).
 function regularTimeMinutesFor(worksnapMinutes: number, isRestDay: boolean, isFullTimeOffDay = false, isHolidayDay = false) {
   if (isRestDay || isFullTimeOffDay) return 0;
-  if (isHolidayDay && worksnapMinutes < 240) return 0;
-  if (isHolidayDay && worksnapMinutes < 480) return 480;
   return worksnapMinutes >= 480 ? 480 : worksnapMinutes;
 }
 
@@ -428,16 +424,10 @@ function otMinutesFor(
     return { regularOtMinutes: isApproved && worksnapMinutes > 0 ? worksnapMinutes : 0, rdOtMinutes: 0, hoOtMinutes: 0 };
   }
   if (isHolidayDay) {
-    // Worked under 240 min on a US Holiday is credited entirely as HO OT
-    // Time — not folded into Regular/Evaluated Regular Time (see
-    // regularTimeMinutesFor). US HO Time itself (the flat 480-min holiday
-    // credit) is unaffected and still assigned by holidayTimeFor.
-    if (worksnapMinutes < 240) {
-      return { regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: worksnapMinutes };
-    }
     // Time worked beyond the 480-min (8h) standard shift on a Holiday is OT
-    // credited as HO OT Time too, not Regular OT Time — a Holiday's overtime
-    // doesn't feed the week's Regular OT pool.
+    // credited as HO OT Time, not Regular OT Time — a Holiday's overtime
+    // doesn't feed the week's Regular OT pool. Worked time up to 480 min is
+    // plain Regular Time (see regularTimeMinutesFor), same as a normal day.
     return { regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: evaluatedMinutes > 480 ? evaluatedMinutes - 480 : 0 };
   }
   return { regularOtMinutes: evaluatedMinutes > 480 ? evaluatedMinutes - 480 : 0, rdOtMinutes: 0, hoOtMinutes: 0 };
@@ -470,7 +460,10 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 // only what's actually available gets added (Evaluated Regular Time is never
 // forced up to 480 — it's Regular Time + whatever OT was actually borrowed).
 // Rest days never carry Evaluated Regular Time and never trigger borrowing —
-// that's not a scheduled shift.
+// that's not a scheduled shift. Same for a US Holiday (US HO Time set) — its
+// Regular Time is left exactly as worked, never topped up from the week's OT
+// pools. This is specifically the US Holiday flag (US HO Time > 0), not the
+// broader local-holiday isHolidayDay check used elsewhere.
 function weeklyEvaluatedRegularAllocation(
   weekDates: string[],
   regularTimeByDate: Record<string, number>,
@@ -479,7 +472,7 @@ function weeklyEvaluatedRegularAllocation(
   approvedByDate: Record<string, boolean>,
   isRestDayByDate: Record<string, boolean>,
   isFullTimeOffDayByDate: Record<string, boolean> = {},
-  isHoOtDayByDate: Record<string, boolean> = {}
+  isUsHolidayByDate: Record<string, boolean> = {}
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
   const remainingRdOt: Record<string, number> = {};
@@ -494,10 +487,9 @@ function weeklyEvaluatedRegularAllocation(
     const regularTime = regularTimeByDate[date] ?? 0;
     // A full-time-off day's Regular Time is intentionally 0 (it's already
     // credited via Time Off Time) — it must never borrow OT from other days
-    // to inflate its own Evaluated Regular Time back up to 480. Same for a
-    // US Holiday worked under 240 min (isHoOtDayByDate) — that time is HO OT
-    // Time, not Regular/Evaluated Regular Time.
-    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || isHoOtDayByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
+    // to inflate its own Evaluated Regular Time back up to 480. A US Holiday
+    // day is skipped the same way — no offsetting/borrowing against it.
+    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || isUsHolidayByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
 
     let missing = 480 - regularTime;
 
@@ -610,7 +602,7 @@ function buildBulkApproveDaySnapshots(
   const approvedByDate: Record<string, boolean> = {};
   const isRestDayByDate: Record<string, boolean> = {};
   const isFullTimeOffDayByDate: Record<string, boolean> = {};
-  const isHoOtDayByDate: Record<string, boolean> = {};
+  const isUsHolidayByDate: Record<string, boolean> = {};
 
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -632,10 +624,10 @@ function buildBulkApproveDaySnapshots(
     approvedByDate[date] = dailyDecisionStatus === "Approved";
     isRestDayByDate[date] = isRestDay;
     isFullTimeOffDayByDate[date] = isFullTimeOffDay;
-    isHoOtDayByDate[date] = isHolidayDay && timeValueToMinutes(worksnapTime) < 240;
+    isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isHoOtDayByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -1008,7 +1000,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const approvedByDate: Record<string, boolean> = {};
     const isRestDayByDate: Record<string, boolean> = {};
     const isFullTimeOffDayByDate: Record<string, boolean> = {};
-    const isHoOtDayByDate: Record<string, boolean> = {};
+    const isUsHolidayByDate: Record<string, boolean> = {};
 
     weekDates.forEach((date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1027,10 +1019,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       approvedByDate[date] = dailyDecisionStatus === "Approved";
       isRestDayByDate[date] = isRestDay;
       isFullTimeOffDayByDate[date] = isFullTimeOffDay;
-      isHoOtDayByDate[date] = isHolidayDay && timeValueToMinutes(worksnapTime) < 240;
+      isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isHoOtDayByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
