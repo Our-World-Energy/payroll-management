@@ -228,6 +228,33 @@ export function applyAdvancePtoRepayment(
   };
 }
 
+// Once a contractor's real PTO accrual has a full day (>=8h) available,
+// any outstanding Advance PTO/Birthday Leave balance is wiped entirely —
+// both the remaining pool (Time) and the running Used total — since the
+// advance mechanism exists only to cover a shortfall and there's nothing
+// left to cover once PTO has caught up. Independent of the Sick Leave
+// bucket (mirrors the independent PTO/Sick eligibility check that gates
+// granting a NEW advance leave request in the first place).
+export function resetAdvancePtoIfCaughtUp(
+  ptoAvailable: number,
+  currentBirthdayLeave: number,
+  currentBirthdayLeaveUsed: number
+): { birthdayLeave: number; birthdayLeaveUsed: number } {
+  if (ptoAvailable >= 8) return { birthdayLeave: 0, birthdayLeaveUsed: 0 };
+  return { birthdayLeave: currentBirthdayLeave, birthdayLeaveUsed: currentBirthdayLeaveUsed };
+}
+
+// Mirrors resetAdvancePtoIfCaughtUp for the Advance Sick Leave bucket —
+// resets once Sick Leave accrual alone has a full day (>=8h) available.
+export function resetAdvanceSickLeaveIfCaughtUp(
+  sickLeaveAvailable: number,
+  currentAdvanceSickLeave: number,
+  currentAdvanceSickLeaveUsed: number
+): { advanceSickLeave: number; advanceSickLeaveUsed: number } {
+  if (sickLeaveAvailable >= 8) return { advanceSickLeave: 0, advanceSickLeaveUsed: 0 };
+  return { advanceSickLeave: currentAdvanceSickLeave, advanceSickLeaveUsed: currentAdvanceSickLeaveUsed };
+}
+
 export function calculateUnusedSickLeaveBalance(
   name: string,
   hireDate: string,

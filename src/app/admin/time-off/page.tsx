@@ -1,10 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
+  LuShieldCheck, LuChevronLeft, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks,
 } from "react-icons/lu";
 import {
@@ -13,7 +13,7 @@ import {
 } from "../contractors/actions";
 import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 
 const HOURS_PER_DAY = 8;
@@ -28,6 +28,128 @@ function fmtDate(date: string) {
 function parseDate(date: string) {
   const [year, month, day] = date.split("-").map(Number);
   return year && month && day ? new Date(year, month - 1, day) : null;
+}
+
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+function toDateStr(d: Date) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
+
+const CALENDAR_DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const CALENDAR_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function buildMonthCells(year: number, month: number) {
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+  return cells;
+}
+
+// Calendar-popup date input for Leave Override's Start/End Date fields — a
+// plain <input type="date"> can't render arbitrary individual dates in red,
+// only a single continuous min/max range, so this renders its own month grid
+// instead. Dates before `minDate` and dates in `blockedDates` (already
+// covered by an existing request for this contractor, Current or Historical,
+// any status) show red/disabled and can't be picked.
+function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
+  value: string;
+  onChange: (date: string) => void;
+  minDate?: string;
+  blockedDates: Set<string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchor = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
+  const [viewYear, setViewYear] = useState(anchor.getFullYear());
+  const [viewMonth, setViewMonth] = useState(anchor.getMonth());
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onOutsideClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onOutsideClick);
+    return () => document.removeEventListener("mousedown", onOutsideClick);
+  }, [open]);
+
+  function openPicker() {
+    const target = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
+    setViewYear(target.getFullYear());
+    setViewMonth(target.getMonth());
+    setOpen(true);
+  }
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
+    else setViewMonth((m) => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
+    else setViewMonth((m) => m + 1);
+  }
+
+  const cells = buildMonthCells(viewYear, viewMonth);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => (open ? setOpen(false) : openPicker())}
+        className="w-full text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-500 text-left"
+      >
+        {value ? fmtDate(value) : <span className="text-slate-400">Select date</span>}
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-52">
+          <div className="flex items-center justify-between mb-1.5">
+            <button type="button" onClick={prevMonth} className="p-0.5 rounded hover:bg-slate-100 text-slate-500">
+              <LuChevronLeft size={12} />
+            </button>
+            <span className="text-[11px] font-bold text-[#003527]">{CALENDAR_MONTH_NAMES[viewMonth]} {viewYear}</span>
+            <button type="button" onClick={nextMonth} className="p-0.5 rounded hover:bg-slate-100 text-slate-500">
+              <LuChevronRight size={12} />
+            </button>
+          </div>
+          <div className="grid grid-cols-7 mb-0.5">
+            {CALENDAR_DAY_HEADERS.map((d) => (
+              <div key={d} className="text-center text-[9px] font-semibold text-slate-400">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-0.5">
+            {cells.map((day, i) => {
+              if (!day) return <div key={i} className="h-6" />;
+              const dateStr = `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
+              const isSelected = dateStr === value;
+              const isBeforeMin = !!minDate && dateStr < minDate;
+              const isBlocked = !isSelected && blockedDates.has(dateStr);
+              const isDisabled = isBeforeMin || isBlocked;
+              return (
+                <button
+                  type="button"
+                  key={i}
+                  disabled={isDisabled}
+                  title={isBlocked ? "Already requested for this contractor" : undefined}
+                  onClick={() => { onChange(dateStr); setOpen(false); }}
+                  className={`h-6 rounded text-[10px] font-medium transition-colors ${
+                    isSelected ? "bg-[#003527] text-white"
+                    : isBlocked ? "bg-red-100 text-red-500 cursor-not-allowed"
+                    : isBeforeMin ? "text-slate-300 cursor-not-allowed"
+                    : "text-slate-700 hover:bg-teal-50"
+                  }`}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function addMonths(date: Date, months: number) {
@@ -323,16 +445,23 @@ export default function TimeOffPage() {
     const ptoAvailable       = roundBalance(ptoBalance - ptoUsed);
     const sickLeaveAvailable = roundBalance(sickLeaveBalance - sickLeaveUsed);
     const specialLeaveAvailable = roundBalance(Math.max(c.specialLeaveCredits - c.specialLeaveUsed, 0));
+    // Live-computed the same way as ptoAvailable/sickLeaveAvailable above —
+    // once accrual alone covers a full day, the stale advance balance is
+    // masked to 0 here immediately rather than waiting for this contractor
+    // to be saved again (which is the only other place this actually resets
+    // in the stored data — see updateContractor/backfillLeaveBalances).
+    const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoAvailable, c.birthdayLeave, c.birthdayLeaveUsed);
+    const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveAvailable, c.advanceSickLeave, c.advanceSickLeaveUsed);
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, role: c.role, hireDate: c.hireDate,
       ptoBalance, ptoUsed, ptoUsedImport: c.ptoUsedImport, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickUsedImport: c.sickUsedImport, sickLeaveAvailable,
-      birthdayLeave:    c.birthdayLeave,
-      birthdayLeaveUsed: c.birthdayLeaveUsed,
-      advanceSickLeave: c.advanceSickLeave,
-      advanceSickLeaveUsed: c.advanceSickLeaveUsed,
+      birthdayLeave:    ptoAdvanceReset.birthdayLeave,
+      birthdayLeaveUsed: ptoAdvanceReset.birthdayLeaveUsed,
+      advanceSickLeave: sickAdvanceReset.advanceSickLeave,
+      advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
       specialLeaveCredits: c.specialLeaveCredits,
       specialLeaveUsed:    c.specialLeaveUsed,
       specialLeaveAvailable,
@@ -918,20 +1047,34 @@ export default function TimeOffPage() {
                     await submitOverride();
                   }
 
+                  // Every date already covered by an existing request for this
+                  // contractor — Current (Pending) or Historical (Approved/Rejected),
+                  // any status — so the Start/End Date calendars can red it out.
+                  const requestedDates = new Set<string>();
+                  for (const r of leaveRequests) {
+                    if (r.email !== selectedRow.email) continue;
+                    const start = parseDate(r.startDate);
+                    const end = parseDate(r.endDate);
+                    if (!start || !end) continue;
+                    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                      requestedDates.add(toDateStr(d));
+                    }
+                  }
+
                   return (
                     <div className="space-y-4">
                       {!isRowIndia && (
                         <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
-                          <div className="grid grid-cols-3 gap-2">
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">PTO</p>
+                          <div className="grid grid-cols-3 gap-1.5">
                             {([
                               ["PTO Accrual",           `${fmtBalance(selectedRow.ptoBalance)}h`],
                               ["PTO Used",              `${fmtBalance(selectedRow.ptoUsed)}h`],
                               ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`],
                             ] as [string, string][]).map(([label, value]) => (
-                              <div key={label} className="rounded-xl border border-teal-100 bg-teal-50 px-3 py-2.5">
-                                <p className="text-[10px] font-semibold text-teal-700 uppercase tracking-wider">{label}</p>
-                                <p className="text-lg font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
+                              <div key={label} className="rounded-lg border border-teal-100 bg-teal-50 px-2 py-1.5">
+                                <p className="text-[9px] font-semibold text-teal-700 uppercase tracking-wider truncate">{label}</p>
+                                <p className="text-sm font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
                               </div>
                             ))}
                           </div>
@@ -939,16 +1082,16 @@ export default function TimeOffPage() {
                       )}
 
                       <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
-                        <div className="grid grid-cols-3 gap-2">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Sick Leave</p>
+                        <div className="grid grid-cols-3 gap-1.5">
                           {([
                             ["Sick Leave Accrual",     `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
                             ["Sick Leave Used",        `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
                             ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
                           ] as [string, string][]).map(([label, value]) => (
-                            <div key={label} className="rounded-xl border border-orange-100 bg-orange-50 px-3 py-2.5">
-                              <p className="text-[10px] font-semibold text-orange-700 uppercase tracking-wider">{label}</p>
-                              <p className="text-lg font-bold text-orange-700 mt-0.5 tabular-nums">{value}</p>
+                            <div key={label} className="rounded-lg border border-orange-100 bg-orange-50 px-2 py-1.5">
+                              <p className="text-[9px] font-semibold text-orange-700 uppercase tracking-wider truncate">{label}</p>
+                              <p className="text-sm font-bold text-orange-700 mt-0.5 tabular-nums">{value}</p>
                             </div>
                           ))}
                         </div>
@@ -961,19 +1104,34 @@ export default function TimeOffPage() {
                           onChange={(e) => setOverrideType(e.target.value as typeof OVERRIDE_TYPES[number])}
                           className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                         >
-                          {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) && t !== "Advance PTO/Birthday Leave" : true).map((t) => <option key={t} value={t}>{t}</option>)}
+                          {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) && t !== "Advance PTO/Birthday Leave" : true)
+                            .filter((t) => t !== "Advance PTO/Birthday Leave" || selectedRow.ptoAvailable < 8)
+                            .filter((t) => t !== "Advance Sick Leave" || selectedRow.sickLeaveAvailable < 8)
+                            .map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
                         <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
-                          <input type="date" value={overrideStartDate} onChange={(e) => setOverrideStartDate(e.target.value)}
-                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          <CalendarDateInput
+                            value={overrideStartDate}
+                            blockedDates={requestedDates}
+                            onChange={(newStart) => {
+                              setOverrideStartDate(newStart);
+                              // Keep an already-picked End Date from silently sitting before the
+                              // new Start Date once it's moved later.
+                              if (overrideEndDate && overrideEndDate < newStart) setOverrideEndDate(newStart);
+                            }}
+                          />
                         </div>
                         <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">End Date</p>
-                          <input type="date" value={overrideEndDate} onChange={(e) => setOverrideEndDate(e.target.value)}
-                            className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                          <CalendarDateInput
+                            value={overrideEndDate}
+                            minDate={overrideStartDate || undefined}
+                            blockedDates={requestedDates}
+                            onChange={setOverrideEndDate}
+                          />
                         </div>
                       </div>
                       <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">

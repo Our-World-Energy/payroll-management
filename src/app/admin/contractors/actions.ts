@@ -4,10 +4,41 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvancePtoRepayment, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvancePtoRepayment, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 
 const TABLE = "contractor_profiles";
+const LOG_TABLE = "time_off_request_logs";
+
+// Append-only audit trail — one row per decision (Approved/Rejected) a leave
+// request lands on, separate from contractor_leave_requests (which the
+// Current/Historical Request Data tables still read from — this table is
+// purely additive and never read by that UI). Never throws: a logging
+// failure must not block the actual leave decision it's recording.
+async function logTimeOffRequestHistory(
+  sb: ReturnType<typeof getSupabase>,
+  entry: {
+    requestId: string;
+    email: string;
+    type: string;
+    startDate: string;
+    endDate: string;
+    durationDays: number;
+    reason: string;
+    status: string;
+    ptoUsedHours: number;
+    sickLeaveUsedHours: number;
+    specialLeaveUsedHours: number;
+  }
+): Promise<void> {
+  const now = new Date().toISOString();
+  await sb.from(LOG_TABLE).insert({
+    id: crypto.randomUUID(),
+    ...entry,
+    decidedAt: now,
+    createdAt: now,
+  });
+}
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -29,22 +60,37 @@ async function logAdvanceRepayment(
   hours: number
 ): Promise<void> {
   if (hours <= 0) return;
+  const id = crypto.randomUUID();
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString();
+  const reason = "Automatic repayment of outstanding Advance PTO/Birthday Leave from newly-accrued PTO.";
   await sb.from("contractor_leave_requests").insert({
-    id: crypto.randomUUID(),
+    id,
     email,
     type: "Advance PTO Repayment",
     startDate: today,
     endDate: today,
     durationDays: 0,
-    reason: "Automatic repayment of outstanding Advance PTO/Birthday Leave from newly-accrued PTO.",
+    reason,
     status: "Approved",
     ptoUsedHours: hours,
     sickLeaveUsedHours: 0,
     specialLeaveUsedHours: 0,
     createdAt: now,
     updatedAt: now,
+  });
+  await logTimeOffRequestHistory(sb, {
+    requestId: id,
+    email,
+    type: "Advance PTO Repayment",
+    startDate: today,
+    endDate: today,
+    durationDays: 0,
+    reason,
+    status: "Approved",
+    ptoUsedHours: hours,
+    sickLeaveUsedHours: 0,
+    specialLeaveUsedHours: 0,
   });
 }
 
@@ -313,6 +359,9 @@ export async function updateContractor(c: Contractor): Promise<void> {
   );
   const ptoRepayment = birthdayLeaveUsed - (existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0));
 
+  const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
+  const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
+
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -349,10 +398,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
     ptoUsed,
     sickLeaveBalance,
     sickLeaveUsed,
-    birthdayLeave,
-    birthdayLeaveUsed,
-    advanceSickLeave,
-    advanceSickLeaveUsed,
+    birthdayLeave:        ptoAdvanceReset.birthdayLeave,
+    birthdayLeaveUsed:    ptoAdvanceReset.birthdayLeaveUsed,
+    advanceSickLeave:     sickAdvanceReset.advanceSickLeave,
+    advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
     specialLeaveCredits: c.specialLeaveCredits ?? 0,
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   }).eq("uid", c.uid);
@@ -424,7 +473,15 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
       row.birthdayLeave ?? 0,
       row.birthdayLeaveUsed ?? 0
     );
-    await sb.from(TABLE).update({ ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed, birthdayLeave, birthdayLeaveUsed, advanceSickLeave, advanceSickLeaveUsed }).eq("uid", row.uid);
+    const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
+    const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
+    await sb.from(TABLE).update({
+      ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed,
+      birthdayLeave: ptoAdvanceReset.birthdayLeave,
+      birthdayLeaveUsed: ptoAdvanceReset.birthdayLeaveUsed,
+      advanceSickLeave: sickAdvanceReset.advanceSickLeave,
+      advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
+    }).eq("uid", row.uid);
     if (row.email) {
       await logAdvanceRepayment(sb, row.email, birthdayLeaveUsed - (row.birthdayLeaveUsed ?? 0));
     }
@@ -483,7 +540,7 @@ export async function updateLeaveRequestStatus(
   // Fetch the request so we know email, type, its stored hours, and prior status
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours, startDate, endDate, durationDays, reason")
     .eq("id", id)
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
@@ -539,6 +596,20 @@ export async function updateLeaveRequestStatus(
 
   if (reqErr)           return { ok: false, error: reqErr.message };
   if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+
+  await logTimeOffRequestHistory(sb, {
+    requestId: id,
+    email,
+    type,
+    startDate: String(req.startDate),
+    endDate: String(req.endDate),
+    durationDays: Number(req.durationDays),
+    reason: String(req.reason ?? ""),
+    status,
+    ptoUsedHours: hoursColumn === "ptoUsedHours" ? hours : Number(req.ptoUsedHours ?? 0),
+    sickLeaveUsedHours: hoursColumn === "sickLeaveUsedHours" ? hours : Number(req.sickLeaveUsedHours ?? 0),
+    specialLeaveUsedHours: hoursColumn === "specialLeaveUsedHours" ? hours : Number(req.specialLeaveUsedHours ?? 0),
+  });
 
   return { ok: true };
 }
@@ -605,6 +676,20 @@ export async function createLeaveOverride(params: {
       .eq("email", params.email);
     if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
   }
+
+  await logTimeOffRequestHistory(sb, {
+    requestId: id,
+    email: params.email,
+    type: params.type,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    durationDays,
+    reason: params.reason,
+    status: "Approved",
+    ptoUsedHours,
+    sickLeaveUsedHours,
+    specialLeaveUsedHours,
+  });
 
   return {
     ok: true,
@@ -698,6 +783,20 @@ export async function createAdvanceLeaveOverride(params: {
     ? await sb.from(TABLE).update({ birthdayLeaveUsed: alreadyUsed + hours }).eq("email", params.email)
     : await sb.from(TABLE).update({ advanceSickLeaveUsed: alreadyUsed + hours }).eq("email", params.email);
   if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+
+  await logTimeOffRequestHistory(sb, {
+    requestId: id,
+    email: params.email,
+    type: params.type,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    durationDays,
+    reason: params.reason,
+    status: "Approved",
+    ptoUsedHours: 0,
+    sickLeaveUsedHours: hours,
+    specialLeaveUsedHours: 0,
+  });
 
   return {
     ok: true,

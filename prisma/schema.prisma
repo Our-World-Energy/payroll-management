@@ -405,6 +405,33 @@ model ContractorLeaveRequest {
   @@map("contractor_leave_requests")
 }
 
+/// Append-only historical log of every decided (Approved/Rejected) time-off
+/// request — written alongside contractor_leave_requests whenever a request
+/// leaves "current" (Pending) and becomes "historical", or is created
+/// already-decided (Leave Override / Advance Leave Override / advance-PTO
+/// auto-repayment). Purely additive audit trail; contractor_leave_requests
+/// remains the single source of truth the Current/Historical tables read from.
+model TimeOffRequestLog {
+  id                    String   @id @default(uuid()) @db.Uuid
+  requestId             String   @db.Uuid // contractor_leave_requests.id this log entry is for
+  email                 String
+  type                  String
+  startDate             String
+  endDate               String
+  durationDays          Int
+  reason                String   @default("")
+  status                String   // "Approved" | "Rejected" at the time this was logged
+  ptoUsedHours          Float    @default(0)
+  sickLeaveUsedHours    Float    @default(0)
+  specialLeaveUsedHours Float    @default(0)
+  decidedAt             DateTime @default(now()) // when this decision was logged
+  createdAt             DateTime @default(now())
+
+  @@index([email, decidedAt])
+  @@index([requestId])
+  @@map("time_off_request_logs")
+}
+
 /// Manual per-employee per-WEEK payroll adjustments entered by an admin from
 /// the Payroll Voucher's "Review" action — these have no other data source
 /// anywhere in the system. Earnings: Bonus, MISC, Retro Pay, Reimbursement.
