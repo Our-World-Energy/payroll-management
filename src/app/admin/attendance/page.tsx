@@ -153,6 +153,16 @@ function isRestDayDate(date: string, restDaysStr: string) {
   return restDaysStr.split(",").map((d) => d.trim()).includes(dayName);
 }
 
+// Whether `date` falls before a mid-week new hire's own hire date — such a
+// day was never a scheduled shift for them (they weren't employed yet), so
+// it's excluded from the week's Regular/OT model the same way a rest day is
+// (see weeklyEvaluatedRegularAllocation's isBeforeHireByDate skip and
+// holidayTimeFor's hireDate param) — this is what prorates a mid-week hire's
+// weekly Required Regular Time down from the full-week total.
+function isBeforeHireDate(date: string, hireDate?: string) {
+  return !!hireDate && date < hireDate;
+}
+
 // Hourly contractors are evaluated the same way regardless of Shift Type
 // (Fixed or Flexible) — there is no Flexible-specific rule, so this is the
 // one shared computation for both.
@@ -321,13 +331,19 @@ function holidayTimeFor(
   usaHolidays: HolidayEntry[],
   dailyWorksnapMinutes: Record<string, number> = {},
   restDaysStr = "",
-  weekDates: string[] = []
+  weekDates: string[] = [],
+  hireDate = ""
 ) {
   if (!usaHolidays.some((h) => h.date.slice(0, 10) === date)) return "-";
   if (isRestDayDate(date, restDaysStr)) return "-";
-  // All other working days in the week must have login time
+  // No Holiday pay for a day before the contractor was even hired.
+  if (isBeforeHireDate(date, hireDate)) return "-";
+  // All other working days in the week must have login time — a mid-week
+  // new hire's pre-hire days are excluded from this fairness check too, or
+  // their (correctly) empty login time would wrongly deny this Holiday's
+  // credit for the days they actually were employed that week.
   const otherWorkingDays = weekDates.filter(
-    (d) => d !== date && !isRestDayDate(d, restDaysStr) && !usaHolidays.some((h) => h.date.slice(0, 10) === d)
+    (d) => d !== date && !isRestDayDate(d, restDaysStr) && !isBeforeHireDate(d, hireDate) && !usaHolidays.some((h) => h.date.slice(0, 10) === d)
   );
   if (otherWorkingDays.some((d) => (dailyWorksnapMinutes[d] ?? 0) === 0)) return "-";
   return "480 mins";
@@ -463,7 +479,13 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 // that's not a scheduled shift. Same for a US Holiday (US HO Time set) — its
 // Regular Time is left exactly as worked, never topped up from the week's OT
 // pools. This is specifically the US Holiday flag (US HO Time > 0), not the
-// broader local-holiday isHolidayDay check used elsewhere.
+// broader local-holiday isHolidayDay check used elsewhere. A mid-week new
+// hire's pre-hire days (isBeforeHireByDate) are skipped the same way — they
+// were never a scheduled shift for this contractor, so they must never
+// borrow OT to inflate Evaluated Regular Time up to a full 480 for a day
+// before employment even started. This is what prorates a mid-week hire's
+// weekly Required Regular Time down to their actual remaining scheduled
+// workdays × 480, instead of the full-week total.
 function weeklyEvaluatedRegularAllocation(
   weekDates: string[],
   regularTimeByDate: Record<string, number>,
@@ -472,7 +494,8 @@ function weeklyEvaluatedRegularAllocation(
   approvedByDate: Record<string, boolean>,
   isRestDayByDate: Record<string, boolean>,
   isFullTimeOffDayByDate: Record<string, boolean> = {},
-  isUsHolidayByDate: Record<string, boolean> = {}
+  isUsHolidayByDate: Record<string, boolean> = {},
+  isBeforeHireByDate: Record<string, boolean> = {}
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
   const remainingRdOt: Record<string, number> = {};
@@ -488,8 +511,9 @@ function weeklyEvaluatedRegularAllocation(
     // A full-time-off day's Regular Time is intentionally 0 (it's already
     // credited via Time Off Time) — it must never borrow OT from other days
     // to inflate its own Evaluated Regular Time back up to 480. A US Holiday
-    // day is skipped the same way — no offsetting/borrowing against it.
-    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || isUsHolidayByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
+    // day is skipped the same way — no offsetting/borrowing against it. So
+    // is a day before the contractor's own hire date.
+    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || isUsHolidayByDate[date] || isBeforeHireByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
 
     let missing = 480 - regularTime;
 
@@ -603,6 +627,7 @@ function buildBulkApproveDaySnapshots(
   const isRestDayByDate: Record<string, boolean> = {};
   const isFullTimeOffDayByDate: Record<string, boolean> = {};
   const isUsHolidayByDate: Record<string, boolean> = {};
+  const isBeforeHireByDate: Record<string, boolean> = {};
 
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -613,7 +638,7 @@ function buildBulkApproveDaySnapshots(
     // Approve save leaves the same per-day decisions "Approve All" would.
     const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate);
     const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
     const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -625,9 +650,10 @@ function buildBulkApproveDaySnapshots(
     isRestDayByDate[date] = isRestDay;
     isFullTimeOffDayByDate[date] = isFullTimeOffDay;
     isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
+    isBeforeHireByDate[date] = isBeforeHireDate(date, row.hireDate);
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate, isBeforeHireByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -636,7 +662,7 @@ function buildBulkApproveDaySnapshots(
     const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates);
+    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate);
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
     const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
@@ -905,6 +931,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   }, {});
   const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
   const isIndia = isFixedContractor((record as AttendanceRow).payCategory);
+  const hireDate = (record as AttendanceRow).hireDate;
   const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
   const [offsetCredit, setOffsetCredit] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
@@ -914,7 +941,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const indiaTotalMinutes = Math.min(effectiveTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
 const totalHolidayMins = weekDates.reduce(
-    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates)),
+    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate)),
     0
   );
   // Displayed US HO Time total — unlike totalHolidayMins (used for Completion
@@ -926,7 +953,7 @@ const totalHolidayMins = weekDates.reduce(
     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
     const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
     const { rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -943,7 +970,7 @@ const totalHolidayMins = weekDates.reduce(
       isRestDayDate(date, restDaysStr),
       isApprovedFullTimeOffRequestDay(date, leaveRequests),
       isHolidayDayFor(
-        holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates),
+        holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate),
         localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays)
       )
     ),
@@ -958,7 +985,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
         const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
-        const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+        const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
         const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
         const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
         const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -975,7 +1002,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   const otTotals = weekDates.reduce(
     (totals, date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
-      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const isRestDay = isRestDayDate(date, restDaysStr);
@@ -1001,6 +1028,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const isRestDayByDate: Record<string, boolean> = {};
     const isFullTimeOffDayByDate: Record<string, boolean> = {};
     const isUsHolidayByDate: Record<string, boolean> = {};
+    const isBeforeHireByDate: Record<string, boolean> = {};
 
     weekDates.forEach((date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1008,7 +1036,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
       const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
       const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -1020,9 +1048,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       isRestDayByDate[date] = isRestDay;
       isFullTimeOffDayByDate[date] = isFullTimeOffDay;
       isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
+      isBeforeHireByDate[date] = isBeforeHireDate(date, hireDate);
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate, isBeforeHireByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
@@ -1176,7 +1205,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
           const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
           const adjustedTime = adjustedTimes[date] ?? "";
-          const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+          const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
           const adjustedMinutesParsed = timeValueToMinutes(adjustedTime);
           const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
           const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
@@ -1338,7 +1367,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
                     const adjustedTime = adjustedTimes[date] ?? "";
-                    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates);
+                    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
                     const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
                     const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
                     const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
@@ -1818,7 +1847,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       const userLogs = dailyLogs.filter((l) => l.worksnapUserId === r.worksnapUserId);
       cache.set(r.contractorId, {
         weeklyTotals: rowWeeklyTotals(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), rowLeave),
-        holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates)), 0),
+        holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates, r.hireDate)), 0),
         localHolidayMins: modalWeekDates.reduce((sum, date) => sum + (localHolidayMinutesFor(date, userLogs, r.region, allHolidays) ?? 0), 0),
         timeOffRequestMins: email ? totalTimeOffRequestMinutesFor(modalWeekDates, rowLeave) : 0,
       });
@@ -2933,7 +2962,7 @@ export default function AttendancePage() {
                 const rowDailyMins = row.dailyWorksnapMinutes ?? {};
                 const rowRestDays = restDaysForAttendanceRow(row);
                 const holidayBonusMins = weekDates.reduce(
-                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates)),
+                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate)),
                   0
                 );
                 const completionMins = row.completionMinutes ?? (

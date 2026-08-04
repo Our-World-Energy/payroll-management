@@ -1,8 +1,9 @@
 "use client";
 
-import { LuSearch, LuBell, LuMenu } from "react-icons/lu";
+import { LuSearch, LuMenu } from "react-icons/lu";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
+import { NotificationBell } from "./NotificationBell";
 
 export function AdminTopbar() {
   const { toggle } = useSidebar();
@@ -41,13 +42,7 @@ export function AdminTopbar() {
 
       {/* Right */}
       <div className="flex items-center gap-3 ml-3">
-        <button
-          aria-label="Notifications"
-          className={`relative p-2 rounded-full transition-colors ${dark ? "text-white/60 hover:bg-white/10" : "text-slate-600 hover:bg-slate-50"}`}
-        >
-          <LuBell size={20} strokeWidth={1.75} />
-          <span className={`absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 ${dark ? "border-[#0f1a15]" : "border-white"}`} />
-        </button>
+        <NotificationBell dark={dark} />
 
         <div className={`flex items-center gap-2.5 pl-3 border-l ${dark ? "border-white/10" : "border-slate-200"}`}>
           <div className="text-right hidden sm:block">
