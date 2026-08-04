@@ -208,6 +208,16 @@ function regularTimeMinutesFor(worksnapMinutes: number, isRestDay: boolean, isFu
   return worksnapMinutes >= 480 ? 480 : worksnapMinutes;
 }
 
+// Once an approved half-day PTO/Sick Leave day borrows Regular OT to
+// complete the day (see weeklyEvaluatedRegularAllocation), that borrowed
+// amount is credited to Evaluated Time too, not just Evaluated Regular
+// Time — the delta between the day's allocated Evaluated Regular Time and
+// its own raw Regular Time is exactly what was borrowed (0 on any day that
+// didn't borrow), so the two columns stay consistent with each other.
+function evaluatedMinutesWithBorrow(evaluatedTime: string, regularTimeMinutes: number, evaluatedRegularTime: number): number {
+  return timeValueToMinutes(evaluatedTime) + Math.max(evaluatedRegularTime - regularTimeMinutes, 0);
+}
+
 function defaultAdjustedTimesFor(weekDates: string[], attendanceStatus = "No Status") {
   return weekDates.reduce<Record<string, string>>((times, date) => {
     times[date] = "";
@@ -280,6 +290,18 @@ function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeav
 // contractor's submitted requests instead).
 function isApprovedFullTimeOffRequestDay(date: string, leaveRequests: AdminLeaveRequest[]) {
   return timeValueToMinutes(approvedTimeOffRequestMinutesFor(date, leaveRequests)) === 480;
+}
+
+const HALF_DAY_LEAVE_TYPES = ["PTO Half Day", "Sick Leave Half Day"];
+
+// Whether an approved PTO Half Day / Sick Leave Half Day request (240 min)
+// covers `date` — the one case where Regular OT can still be borrowed to
+// complete the day (see weeklyEvaluatedRegularAllocation), capped at exactly
+// the 240 min still needed. No other shortfall day borrows OT at all.
+function isApprovedHalfDayLeaveDate(date: string, leaveRequests: AdminLeaveRequest[]) {
+  return leaveRequests.some((r) =>
+    HALF_DAY_LEAVE_TYPES.includes(r.type) && r.status === "Approved" && date >= r.startDate && date <= r.endDate
+  );
 }
 
 const APPROVED_LEAVE_CONFLICT_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day"];
@@ -468,54 +490,44 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
   return isRestDay && isUsHoliday && isApproved ? base + rdOtMinutes : base;
 }
 
-// Once a day is Approved and its Regular Time falls short of the 480-min (8h)
-// standard, the shortfall is covered from the WEEK's pool of Regular OT Time
-// first, then — if that pool still isn't enough — from the WEEK's pool of RD
-// OT Time, working through the week's days in order and depleting each pool
-// as it's borrowed from. If neither pool can fully cover a day's shortfall,
-// only what's actually available gets added (Evaluated Regular Time is never
-// forced up to 480 — it's Regular Time + whatever OT was actually borrowed).
-// Rest days never carry Evaluated Regular Time and never trigger borrowing —
-// that's not a scheduled shift. Same for a US Holiday (US HO Time set) — its
-// Regular Time is left exactly as worked, never topped up from the week's OT
-// pools. This is specifically the US Holiday flag (US HO Time > 0), not the
-// broader local-holiday isHolidayDay check used elsewhere. A mid-week new
-// hire's pre-hire days (isBeforeHireByDate) are skipped the same way — they
-// were never a scheduled shift for this contractor, so they must never
-// borrow OT to inflate Evaluated Regular Time up to a full 480 for a day
-// before employment even started. This is what prorates a mid-week hire's
-// weekly Required Regular Time down to their actual remaining scheduled
-// workdays × 480, instead of the full-week total.
+// OT is never redistributed between days, with exactly ONE exception: a day
+// that is itself Approved (approvedByDate — Attendance Review's own daily
+// decision, not the leave request's approval) AND covered by an approved
+// PTO Half Day / Sick Leave Half Day (240 min, via halfDayOffByDate) may
+// still borrow from the WEEK's Regular OT pool — but only the remaining 240
+// min actually needed to complete the day, never more, and only from
+// Regular OT (RD OT is never touched). If the day itself isn't Approved yet,
+// nothing is borrowed and it stays blank/unfilled, same as any other
+// not-yet-approved day. Any OT a lending day doesn't actually give up stays
+// credited to that same day. Every other shortfall day (no leave, full-day
+// PTO/Sick Leave, rest day, US Holiday, before a mid-week hire's start)
+// never borrows and never lends — its Regular OT / RD OT Time stays exactly
+// where it was earned. This guarantees a later re-save of an already-approved
+// week can never retroactively shift OT away from the day it was earned,
+// beyond this one bounded exception.
 function weeklyEvaluatedRegularAllocation(
   weekDates: string[],
   regularTimeByDate: Record<string, number>,
   regularOtByDate: Record<string, number>,
   rdOtByDate: Record<string, number>,
-  approvedByDate: Record<string, boolean>,
-  isRestDayByDate: Record<string, boolean>,
-  isFullTimeOffDayByDate: Record<string, boolean> = {},
-  isUsHolidayByDate: Record<string, boolean> = {},
-  isBeforeHireByDate: Record<string, boolean> = {}
+  approvedByDate: Record<string, boolean> = {},
+  halfDayOffByDate: Record<string, number> = {}
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
-  const remainingRdOt: Record<string, number> = {};
-  weekDates.forEach((d) => {
-    remainingRegularOt[d] = regularOtByDate[d] ?? 0;
-    remainingRdOt[d] = rdOtByDate[d] ?? 0;
-  });
+  weekDates.forEach((d) => { remainingRegularOt[d] = regularOtByDate[d] ?? 0; });
 
   const borrowedByDate: Record<string, number> = {};
   weekDates.forEach((date) => {
     borrowedByDate[date] = 0;
-    const regularTime = regularTimeByDate[date] ?? 0;
-    // A full-time-off day's Regular Time is intentionally 0 (it's already
-    // credited via Time Off Time) — it must never borrow OT from other days
-    // to inflate its own Evaluated Regular Time back up to 480. A US Holiday
-    // day is skipped the same way — no offsetting/borrowing against it. So
-    // is a day before the contractor's own hire date.
-    if (isRestDayByDate[date] || isFullTimeOffDayByDate[date] || isUsHolidayByDate[date] || isBeforeHireByDate[date] || regularTime >= 480 || !approvedByDate[date]) return;
+    const halfDayCredit = halfDayOffByDate[date] ?? 0;
+    if (halfDayCredit <= 0 || !approvedByDate[date]) return; // only an Approved half-day leave day ever borrows
 
-    let missing = 480 - regularTime;
+    const regularTime = regularTimeByDate[date] ?? 0;
+    const alreadyCovered = regularTime + halfDayCredit;
+    if (alreadyCovered >= 480) return;
+    // Hard-capped at 240 — halfDayCredit is always 240, so 480 minus that
+    // (minus any of the day's own worked minutes) can never exceed 240.
+    let missing = Math.min(480 - alreadyCovered, 240);
 
     for (const otDate of weekDates) {
       if (missing <= 0) break;
@@ -526,16 +538,6 @@ function weeklyEvaluatedRegularAllocation(
       missing -= take;
       borrowedByDate[date] += take;
     }
-
-    for (const otDate of weekDates) {
-      if (missing <= 0) break;
-      const available = remainingRdOt[otDate];
-      if (available <= 0) continue;
-      const take = Math.min(missing, available);
-      remainingRdOt[otDate] -= take;
-      missing -= take;
-      borrowedByDate[date] += take;
-    }
   });
 
   const result: Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> = {};
@@ -543,7 +545,7 @@ function weeklyEvaluatedRegularAllocation(
     result[date] = {
       evaluatedRegularTime: (regularTimeByDate[date] ?? 0) + borrowedByDate[date],
       regularOtMinutes: remainingRegularOt[date],
-      rdOtMinutes: remainingRdOt[date],
+      rdOtMinutes: rdOtByDate[date] ?? 0,
     };
   });
   return result;
@@ -624,10 +626,7 @@ function buildBulkApproveDaySnapshots(
   const regularOtByDate: Record<string, number> = {};
   const rdOtByDate: Record<string, number> = {};
   const approvedByDate: Record<string, boolean> = {};
-  const isRestDayByDate: Record<string, boolean> = {};
-  const isFullTimeOffDayByDate: Record<string, boolean> = {};
-  const isUsHolidayByDate: Record<string, boolean> = {};
-  const isBeforeHireByDate: Record<string, boolean> = {};
+  const halfDayOffByDate: Record<string, number> = {};
 
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -647,13 +646,10 @@ function buildBulkApproveDaySnapshots(
     regularOtByDate[date] = regularOtMinutes;
     rdOtByDate[date] = rdOtMinutes;
     approvedByDate[date] = dailyDecisionStatus === "Approved";
-    isRestDayByDate[date] = isRestDay;
-    isFullTimeOffDayByDate[date] = isFullTimeOffDay;
-    isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
-    isBeforeHireByDate[date] = isBeforeHireDate(date, row.hireDate);
+    halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate, isBeforeHireByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -671,6 +667,7 @@ function buildBulkApproveDaySnapshots(
       dailyDecisionStatus === "Approved", isFullTimeOffDay
     );
     const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+    const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
     // Same week-total formula Attendance Review actually saves as
     // completionMinutes (see completionTotalMinutes in ReviewModal) — not the
     // weekly-reallocated allocation above, which only feeds the day snapshot's
@@ -682,7 +679,7 @@ function buildBulkApproveDaySnapshots(
     return {
       date,
       decisionStatus: decisionStatusToApi(dailyDecisionStatus),
-      evaluatedMinutes: timeValueToMinutes(evaluatedTime),
+      evaluatedMinutes: evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, allocation.evaluatedRegularTime),
       adjustedMinutes: adjustedDaily?.[date] ?? null,
       holidayMinutes: boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rawRdOtMinutes),
       localHoliday: localHoliday || null,
@@ -959,11 +956,6 @@ const totalHolidayMins = weekDates.reduce(
     const { rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
     return sum + boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
   }, 0);
-  const totalEvaluatedMinutes = weekDates.reduce((sum, date) => {
-    const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDayDate(date, restDaysStr), isApprovedFullTimeOffRequestDay(date, leaveRequests));
-    return sum + timeValueToMinutes(evaluatedTime);
-  }, 0);
   const totalRegularMinutes = weekDates.reduce(
     (sum, date) => sum + regularTimeMinutesFor(
       timeValueToMinutes(worksnapTimeForDate(effectiveDailyMinutes, date)),
@@ -1025,10 +1017,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const regularOtByDate: Record<string, number> = {};
     const rdOtByDate: Record<string, number> = {};
     const approvedByDate: Record<string, boolean> = {};
-    const isRestDayByDate: Record<string, boolean> = {};
-    const isFullTimeOffDayByDate: Record<string, boolean> = {};
-    const isUsHolidayByDate: Record<string, boolean> = {};
-    const isBeforeHireByDate: Record<string, boolean> = {};
+    const halfDayOffByDate: Record<string, number> = {};
 
     weekDates.forEach((date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1045,17 +1034,30 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       regularOtByDate[date] = regularOtMinutes;
       rdOtByDate[date] = rdOtMinutes;
       approvedByDate[date] = dailyDecisionStatus === "Approved";
-      isRestDayByDate[date] = isRestDay;
-      isFullTimeOffDayByDate[date] = isFullTimeOffDay;
-      isUsHolidayByDate[date] = timeValueToMinutes(holidayTime) > 0;
-      isBeforeHireByDate[date] = isBeforeHireDate(date, hireDate);
+      halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, isRestDayByDate, isFullTimeOffDayByDate, isUsHolidayByDate, isBeforeHireByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
   const totalAdjustedRdOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.rdOtMinutes ?? 0), 0);
+  // Evaluated Time includes whatever Regular OT a half-day leave day
+  // borrowed to complete itself (see evaluatedMinutesWithBorrow), so this
+  // total stays consistent with the per-day Evaluated Time column.
+  const totalEvaluatedMinutes = weekDates.reduce((sum, date) => {
+    const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
+    const isRestDay = isRestDayDate(date, restDaysStr);
+    const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDay, isFullTimeOffDay);
+    const isHolidayDay = isHolidayDayFor(
+      holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate),
+      localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays)
+    );
+    const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
+    const evaluatedRegularTime = regularAllocationByDate[date]?.evaluatedRegularTime ?? 0;
+    return sum + evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, evaluatedRegularTime);
+  }, 0);
   // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT + US HO +
   // Local HO + Time Off Request Time — same formula as the table's Total
   // Completion Time column/footer, now shown in the scorecard too.
@@ -1215,11 +1217,12 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             dailyDecisionStatus === "Approved", isFullTimeOffDay
           );
           const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+          const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
 
           return {
             date,
             decisionStatus: decisionStatusToApi(dailyDecisionStatus),
-            evaluatedMinutes: timeValueToMinutes(evaluatedTime),
+            evaluatedMinutes: evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, allocation.evaluatedRegularTime),
             adjustedMinutes: adjustedMinutesParsed > 0 ? adjustedMinutesParsed : null,
             holidayMinutes: boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rawRdOtMinutes),
             localHoliday: localHoliday || null,
@@ -1379,6 +1382,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const completionTime = completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold));
                     const displayedUsHoMinutes = boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
                     const regularAllocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+                    // Includes whatever Regular OT a half-day leave day borrowed to
+                    // complete itself, so Evaluated Time stays consistent with
+                    // Evaluated Regular Time (see evaluatedMinutesWithBorrow).
+                    const displayedEvaluatedMinutes = evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, regularAllocation.evaluatedRegularTime);
 
                     return (
                       <tr key={date}>
@@ -1483,7 +1490,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {regularAllocation.rdOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.rdOtMinutes) : "-"}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 ${conflictHighlightCellClass}`}>
-                          {evaluatedTime}
+                          {displayedEvaluatedMinutes > 0 ? formatMinutesAsMins(displayedEvaluatedMinutes) : "-"}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}

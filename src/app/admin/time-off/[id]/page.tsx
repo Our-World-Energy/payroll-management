@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleDot, LuCircleAlert, LuX, LuTrash2 } from "react-icons/lu";
+import {
+  LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2,
+  LuCalendarDays, LuShieldCheck, LuSearch, LuSlidersHorizontal, LuChevronDown,
+} from "react-icons/lu";
 import {
   fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin,
   type AdminLeaveRequest,
@@ -10,6 +13,7 @@ import {
 import type { Contractor } from "../../contractors/types";
 import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../../settings/actions";
+import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 
 function roundBalance(value: number) {
   return Math.round(value * 100) / 100;
@@ -30,6 +34,39 @@ function fmtDateTime(iso: string) {
   }
 }
 
+function fmtDateRange(start: string, end: string) {
+  return start === end ? fmtDate(start) : `${fmtDate(start)} – ${fmtDate(end)}`;
+}
+
+function initialsFor(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const initials = [parts[0], parts[parts.length - 1]].filter(Boolean).map((p) => p[0]?.toUpperCase());
+  return initials.join("") || "?";
+}
+
+// A request's hours draw from exactly one bucket (PTO, Sick Leave, or
+// Special Leave) — whichever one is actually stamped with a nonzero value.
+function hoursFor(req: AdminLeaveRequest): number {
+  if (req.ptoUsedHours > 0) return req.ptoUsedHours;
+  if (req.sickLeaveUsedHours > 0) return req.sickLeaveUsedHours;
+  return req.specialLeaveUsedHours;
+}
+
+function matchesQuery(req: AdminLeaveRequest, query: string) {
+  if (!query.trim()) return true;
+  const q = query.trim().toLowerCase();
+  return req.type.toLowerCase().includes(q) || (req.reason || "").toLowerCase().includes(q);
+}
+
+function typeBadgeClass(type: string) {
+  return type.startsWith("PTO")
+    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : "bg-amber-50 text-amber-700 border-amber-200";
+}
+
+const HISTORY_FILTERS = ["All", "Approved", "Rejected"] as const;
+type HistoryFilter = typeof HISTORY_FILTERS[number];
+
 // Split into "current" (pending) and "historical" (decided) buckets
 const CUTOFF_DATE = "2026-01-01"; // requests from before this treated as historical even if pending
 
@@ -44,6 +81,9 @@ export default function ContractorTimeOffPage() {
   const [deleteTarget, setDeleteTarget] = useState<AdminLeaveRequest | null>(null);
   const [deleting,     setDeleting]     = useState(false);
   const [cutoff,       setCutoff]       = useState<CutoffDate>(DEFAULT_CUTOFF);
+  const [pendingSearch, setPendingSearch] = useState("");
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("All");
   const [, startTransition] = useTransition();
 
   const loadData = useCallback(async () => {
@@ -83,6 +123,17 @@ export default function ContractorTimeOffPage() {
   // Current = Pending requests; Historical = Approved or Rejected
   const currentRequests    = allRequests.filter((r) => r.status === "Pending");
   const historicalRequests = allRequests.filter((r) => r.status !== "Pending");
+
+  const filteredCurrentRequests = useMemo(
+    () => currentRequests.filter((r) => matchesQuery(r, pendingSearch)),
+    [currentRequests, pendingSearch]
+  );
+  const filteredHistoricalRequests = useMemo(
+    () => historicalRequests
+      .filter((r) => historyFilter === "All" || r.status === historyFilter)
+      .filter((r) => matchesQuery(r, historySearch)),
+    [historicalRequests, historyFilter, historySearch]
+  );
 
   async function decide(reqId: string, decision: "Approved" | "Rejected") {
     // Optimistic update
@@ -156,86 +207,101 @@ export default function ContractorTimeOffPage() {
         <p className="text-slate-500 text-sm mt-1">{fullName}</p>
       </div>
 
-      {/* Score Cards — same PTO/Sick Leave 3-card layout as the Contractor
-          Time-Off Detail tab in Time Off Management, with the same
-          red-when-negative Available treatment. */}
-      <div className="space-y-4 mb-8">
+      {/* Balance Cards */}
+      <div className={`grid gap-4 mb-8 ${isIndia ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
         {!isIndia && (
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                ["PTO Accrual",           `${fmtBalance(ptoBalance)}h`,   false],
-                ["PTO Used",              `${fmtBalance(ptoUsed)}h`,      false],
-                ["PTO Accrual Available", `${fmtBalance(ptoAvailable)}h`, ptoAvailable < 0],
-              ] as [string, string, boolean][]).map(([label, value, negative]) => (
-                <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-teal-100 bg-teal-50"}`}>
-                  <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-teal-700"}`}>{label}</p>
-                  <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-[#003527]"}`}>{value}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+          <TimeOffBalanceCard
+            icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
+            title="PTO Balance"
+            tone={ptoAvailable < 0 ? "red" : "teal"}
+            accrued={ptoBalance}
+            used={ptoUsed}
+            available={ptoAvailable}
+          />
         )}
-
-        <div>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
-          <div className="grid grid-cols-3 gap-2">
-            {([
-              ["Sick Leave Accrual",     `${fmtBalance(sickBalance)}h`,   false],
-              ["Sick Leave Used",        `${fmtBalance(sickUsed)}h`,      false],
-              ["Sick Accrual Available", `${fmtBalance(sickAvailable)}h`, sickAvailable < 0],
-            ] as [string, string, boolean][]).map(([label, value, negative]) => (
-              <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-orange-100 bg-orange-50"}`}>
-                <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-orange-700"}`}>{label}</p>
-                <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-orange-700"}`}>{value}</p>
-              </div>
-            ))}
-          </div>
-        </div>
+        <TimeOffBalanceCard
+          icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
+          title="Sick Leave Balance"
+          tone={sickAvailable < 0 ? "red" : "orange"}
+          accrued={sickBalance}
+          used={sickUsed}
+          available={sickAvailable}
+        />
       </div>
 
-      {/* Current Requests Table */}
+      {/* Pending Requests */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-bold text-[#003527]">Pending Requests</h2>
+          <span className="inline-flex min-w-[24px] h-6 items-center justify-center rounded-full bg-teal-100 px-2 text-xs font-bold text-teal-700">
+            {currentRequests.length}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <LuSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={pendingSearch}
+              onChange={(e) => setPendingSearch(e.target.value)}
+              placeholder="Search requests"
+              className="w-52 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+            All Status <LuChevronDown size={14} />
+          </button>
+          <button className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors">
+            <LuSlidersHorizontal size={14} /> Filters
+          </button>
+        </div>
+      </div>
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead>
-              <tr className="border-b border-slate-200 bg-slate-50">
-                {["Name", "Start Date", "End Date",
-                  ...(!isIndia ? ["PTO Used"] : []),
-                  "Sick Leave Used", "Reason",
-                  ...(!isIndia ? ["PTO Available"] : []),
-                  "Sick Leave Available", "Type", "Action Status", "Action"
-                ].map((h) => (
-                  <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {currentRequests.length === 0 ? (
-                <tr>
-                  <td colSpan={isIndia ? 9 : 11} className="px-5 py-16 text-center text-sm text-slate-400">
-                    <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
-                    No pending time-off requests.
-                  </td>
+        {filteredCurrentRequests.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="mb-4 grid size-14 place-items-center rounded-2xl border border-slate-100 bg-slate-50">
+              <LuClock size={26} className="text-slate-300" strokeWidth={1.5} />
+            </div>
+            <p className="text-sm font-bold text-slate-700">
+              {currentRequests.length === 0 ? "No pending time-off requests" : "No requests match your search"}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {currentRequests.length === 0 ? "New requests will appear here for review." : "Try a different search term."}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  {["Employee", "Dates", "Leave Type", "Hours", "Reason",
+                    ...(!isIndia ? ["PTO Available"] : []),
+                    "Sick Leave Available", "Actions",
+                  ].map((h) => (
+                    <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ) : currentRequests.map((req) => {
-                const isSick = !req.type.startsWith("PTO");
-                return (
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredCurrentRequests.map((req) => (
                   <tr key={req.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
-                    {!isIndia && (
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
-                        {req.ptoUsedHours > 0 ? `${fmtBalance(req.ptoUsedHours)}h` : "-"}
-                      </td>
-                    )}
-                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
-                      {req.sickLeaveUsedHours > 0 ? `${fmtBalance(req.sickLeaveUsedHours)}h` : "-"}
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2.5">
+                        <div className="grid size-8 shrink-0 place-items-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">
+                          {initialsFor(fullName)}
+                        </div>
+                        <span className="text-sm font-semibold text-[#003527]">{fullName}</span>
+                      </div>
                     </td>
+                    <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDateRange(req.startDate, req.endDate)}</td>
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${typeBadgeClass(req.type)}`}>
+                        {req.type}
+                      </span>
+                    </td>
+                    <td className="px-5 py-4 text-sm font-medium text-slate-700 whitespace-nowrap">{fmtBalance(hoursFor(req))}h</td>
                     <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
                       <span className="line-clamp-2">{req.reason || "-"}</span>
                     </td>
@@ -247,23 +313,6 @@ export default function ContractorTimeOffPage() {
                     <td className={`px-5 py-4 text-sm whitespace-nowrap font-medium ${sickAvailable < 0 ? "text-red-600" : "text-slate-700"}`}>
                       {fmtBalance(sickAvailable)}h
                     </td>
-                    {/* Type badge */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                        isSick
-                          ? "bg-amber-50 text-amber-700 border border-amber-200"
-                          : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                      }`}>
-                        {req.type}
-                      </span>
-                    </td>
-                    {/* Action Status */}
-                    <td className="px-5 py-4 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600 border border-amber-200">
-                        <LuCircleDot size={11} /> Pending
-                      </span>
-                    </td>
-                    {/* Action buttons */}
                     <td className="px-5 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2">
                         <button
@@ -281,96 +330,125 @@ export default function ContractorTimeOffPage() {
                       </div>
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Historical Data Table */}
-      <div className="mt-10">
-        <div className="mb-4">
-          <h2 className="text-xl font-bold text-[#003527]">Historical Request Data</h2>
-          <p className="text-slate-400 text-sm mt-0.5">Previous time-off requests for {fullName}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  {["Name", "Start Date", "End Date",
-                    ...(!isIndia ? ["PTO Used"] : []),
-                    "Sick Leave Used", "Reason", "Submitted", "Type", "Review", "Delete"
-                  ].map((h) => (
-                    <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {historicalRequests.length === 0 ? (
-                  <tr>
-                    <td colSpan={isIndia ? 9 : 10} className="px-5 py-16 text-center text-sm text-slate-400">
-                      <LuClock size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
-                      No historical requests found.
-                    </td>
-                  </tr>
-                ) : historicalRequests.map((req) => {
-                  const isSick = !req.type.startsWith("PTO");
-                  const isApproved = req.status === "Approved";
-                  return (
-                    <tr key={req.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-4 text-sm font-semibold text-[#003527] whitespace-nowrap">{fullName}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.startDate)}</td>
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDate(req.endDate)}</td>
-                      {!isIndia && (
-                        <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
-                          {req.ptoUsedHours > 0 ? `${fmtBalance(req.ptoUsedHours)}h` : "-"}
-                        </td>
-                      )}
-                      <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">
-                        {req.sickLeaveUsedHours > 0 ? `${fmtBalance(req.sickLeaveUsedHours)}h` : "-"}
-                      </td>
-                      <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
-                        <span className="line-clamp-2">{req.reason || "-"}</span>
-                      </td>
-                      <td className="px-5 py-4 text-sm text-slate-400 whitespace-nowrap">{fmtDateTime(req.createdAt)}</td>
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          isSick
-                            ? "bg-amber-50 text-amber-700 border border-amber-200"
-                            : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                        }`}>
-                          {req.type}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
-                          isApproved
-                            ? "bg-green-50 text-green-700 border border-green-200"
-                            : "bg-red-50 text-red-600 border border-red-200"
-                        }`}>
-                          {isApproved ? <LuCircleCheck size={11} /> : <LuCircleX size={11} />}
-                          {req.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4 whitespace-nowrap">
-                        <button
-                          onClick={() => setDeleteTarget(req)}
-                          title="Delete request"
-                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                        >
-                          <LuTrash2 size={15} strokeWidth={1.75} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Request History */}
+      <div className="mt-10">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-[#003527]">Request History</h2>
+            <p className="text-slate-400 text-sm mt-0.5">Previous time-off requests for {fullName}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-1">
+              {HISTORY_FILTERS.map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setHistoryFilter(f)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                    historyFilter === f
+                      ? f === "Approved" ? "bg-emerald-100 text-emerald-700"
+                        : f === "Rejected" ? "bg-red-100 text-red-600"
+                        : "bg-white text-slate-700 shadow-sm"
+                      : "text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <div className="relative">
+              <LuSearch size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                placeholder="Search history"
+                className="w-52 rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+          </div>
+        </div>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {filteredHistoricalRequests.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="mb-4 grid size-14 place-items-center rounded-2xl border border-slate-100 bg-slate-50">
+                <LuClock size={26} className="text-slate-300" strokeWidth={1.5} />
+              </div>
+              <p className="text-sm font-bold text-slate-700">
+                {historicalRequests.length === 0 ? "No historical requests found" : "No requests match your filters"}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                {historicalRequests.length === 0 ? "Decided requests will appear here." : "Try a different search term or status."}
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    {["Employee", "Dates", "Leave Type", "Hours", "Reason", "Submitted", "Status", "Actions"].map((h) => (
+                      <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredHistoricalRequests.map((req) => {
+                    const isApproved = req.status === "Approved";
+                    return (
+                      <tr key={req.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2.5">
+                            <div className="grid size-8 shrink-0 place-items-center rounded-full bg-teal-100 text-xs font-bold text-teal-700">
+                              {initialsFor(fullName)}
+                            </div>
+                            <span className="text-sm font-semibold text-[#003527]">{fullName}</span>
+                          </div>
+                        </td>
+                        <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDateRange(req.startDate, req.endDate)}</td>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${typeBadgeClass(req.type)}`}>
+                            {req.type}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 text-sm font-medium text-slate-700 whitespace-nowrap">{fmtBalance(hoursFor(req))}h</td>
+                        <td className="px-5 py-4 text-sm text-slate-500 max-w-xs">
+                          <span className="line-clamp-2">{req.reason || "-"}</span>
+                        </td>
+                        <td className="px-5 py-4 text-sm text-slate-400 whitespace-nowrap">{fmtDateTime(req.createdAt)}</td>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
+                            isApproved
+                              ? "bg-green-50 text-green-700 border border-green-200"
+                              : "bg-red-50 text-red-600 border border-red-200"
+                          }`}>
+                            {isApproved ? <LuCircleCheck size={11} /> : <LuCircleX size={11} />}
+                            {req.status}
+                          </span>
+                        </td>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          <button
+                            onClick={() => setDeleteTarget(req)}
+                            title="Delete request"
+                            className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                          >
+                            <LuTrash2 size={15} strokeWidth={1.75} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
@@ -15,6 +16,7 @@ import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
+import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -65,21 +67,44 @@ function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
   const anchor = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
   const [viewYear, setViewYear] = useState(anchor.getFullYear());
   const [viewMonth, setViewMonth] = useState(anchor.getMonth());
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Popup coordinates in viewport space (for the fixed-position portal below).
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
+  // The popup is portaled to document.body (fixed-positioned) instead of
+  // rendered inline — an inline absolutely-positioned popup still counts
+  // toward the scrollable modal body's content height, which can grow the
+  // modal (up to its max-h cap) and re-center it on open, making everything
+  // above — including the balance scorecards — visibly jump. Portaling keeps
+  // it completely outside that layout.
   useEffect(() => {
     if (!open) return;
     function onOutsideClick(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (buttonRef.current?.contains(target) || popupRef.current?.contains(target)) return;
+      setOpen(false);
     }
+    // Closes on scroll (capture catches scroll from any ancestor, including
+    // the modal body) rather than repositioning — simpler and avoids a
+    // stale-position popup left floating after the page moves under it.
+    function onScroll() { setOpen(false); }
     document.addEventListener("mousedown", onOutsideClick);
-    return () => document.removeEventListener("mousedown", onOutsideClick);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onOutsideClick);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
   }, [open]);
 
   function openPicker() {
     const target = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
     setViewYear(target.getFullYear());
     setViewMonth(target.getMonth());
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
     setOpen(true);
   }
 
@@ -95,16 +120,21 @@ function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
   const cells = buildMonthCells(viewYear, viewMonth);
 
   return (
-    <div className="relative" ref={containerRef}>
+    <>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => (open ? setOpen(false) : openPicker())}
         className="w-full text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-500 text-left"
       >
         {value ? fmtDate(value) : <span className="text-slate-400">Select date</span>}
       </button>
-      {open && (
-        <div className="absolute z-20 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-52">
+      {open && coords && createPortal(
+        <div
+          ref={popupRef}
+          className="fixed z-[60] bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-52"
+          style={{ top: coords.top, left: coords.left }}
+        >
           <div className="flex items-center justify-between mb-1.5">
             <button type="button" onClick={prevMonth} className="p-0.5 rounded hover:bg-slate-100 text-slate-500">
               <LuChevronLeft size={12} />
@@ -146,9 +176,10 @@ function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
               );
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 
@@ -609,40 +640,26 @@ export default function TimeOffPage() {
                       ))}
                     </div>
 
-                    {/* PTO section — hidden for India */}
-                    {!isRowIndia && (
-                      <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">PTO</p>
-                        <div className="grid grid-cols-3 gap-2">
-                          {([
-                            ["PTO Accrual",           `${fmtBalance(selectedRow.ptoBalance)}h`,   false],
-                            ["PTO Used",              `${fmtBalance(selectedRow.ptoUsed)}h`,      false],
-                            ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`, selectedRow.ptoAvailable < 0],
-                          ] as [string, string, boolean][]).map(([label, value, negative]) => (
-                            <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-teal-100 bg-teal-50"}`}>
-                              <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-teal-700"}`}>{label}</p>
-                              <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-[#003527]"}`}>{value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Sick Leave section */}
-                    <div>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Sick Leave</p>
-                      <div className="grid grid-cols-3 gap-2">
-                        {([
-                          ["Sick Leave Accrual",     `${fmtBalance(selectedRow.sickLeaveBalance)}h`,   false],
-                          ["Sick Leave Used",        `${fmtBalance(selectedRow.sickLeaveUsed)}h`,      false],
-                          ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`, selectedRow.sickLeaveAvailable < 0],
-                        ] as [string, string, boolean][]).map(([label, value, negative]) => (
-                          <div key={label} className={`rounded-xl border px-3 py-2.5 ${negative ? "border-red-200 bg-red-50" : "border-orange-100 bg-orange-50"}`}>
-                            <p className={`text-[10px] font-semibold uppercase tracking-wider ${negative ? "text-red-600" : "text-orange-700"}`}>{label}</p>
-                            <p className={`text-lg font-bold mt-0.5 tabular-nums ${negative ? "text-red-700" : "text-orange-700"}`}>{value}</p>
-                          </div>
-                        ))}
-                      </div>
+                    {/* PTO / Sick Leave balance cards — PTO hidden for India */}
+                    <div className={`grid gap-3 ${isRowIndia ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
+                      {!isRowIndia && (
+                        <TimeOffBalanceCard
+                          icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
+                          title="PTO Balance"
+                          tone={selectedRow.ptoAvailable < 0 ? "red" : "teal"}
+                          accrued={selectedRow.ptoBalance}
+                          used={selectedRow.ptoUsed}
+                          available={selectedRow.ptoAvailable}
+                        />
+                      )}
+                      <TimeOffBalanceCard
+                        icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
+                        title="Sick Leave Balance"
+                        tone={selectedRow.sickLeaveAvailable < 0 ? "red" : "orange"}
+                        accrued={selectedRow.sickLeaveBalance}
+                        used={selectedRow.sickLeaveUsed}
+                        available={selectedRow.sickLeaveAvailable}
+                      />
                     </div>
 
                     {/* Current review status + eye icon to go to full page */}
@@ -809,55 +826,27 @@ export default function TimeOffPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-2"} gap-2`}>
+                        <div className={`grid ${isRowIndia ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"} gap-3`}>
                           {!isRowIndia && (
-                            <div className="bg-pink-50 rounded-xl border border-pink-200 px-3 py-2.5">
-                              <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1.5">Advance PTO/Birthday Leave</p>
-                              <div className="grid grid-cols-3 gap-2">
-                                <div>
-                                  <p className="text-[9px] font-semibold text-pink-500 uppercase tracking-wider">Time</p>
-                                  <p className="text-lg font-black text-pink-700 leading-tight mt-0.5 tabular-nums">
-                                    {fmtBalance(selectedRow.birthdayLeave)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span>
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-[9px] font-semibold text-pink-500 uppercase tracking-wider">Used</p>
-                                  <p className="text-lg font-black text-pink-700 leading-tight mt-0.5 tabular-nums">
-                                    {fmtBalance(selectedRow.birthdayLeaveUsed)}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span>
-                                  </p>
-                                </div>
-                                <div>
-                                  <p className="text-[9px] font-semibold text-pink-500 uppercase tracking-wider">Available</p>
-                                  <p className="text-lg font-black text-pink-700 leading-tight mt-0.5 tabular-nums">
-                                    {fmtBalance(Math.max(selectedRow.birthdayLeave - selectedRow.birthdayLeaveUsed, 0))}<span className="text-xs font-semibold ml-0.5 text-pink-400">hrs</span>
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
+                            <TimeOffBalanceCard
+                              icon={<LuCalendarPlus size={18} strokeWidth={1.75} />}
+                              title="Advance PTO/Birthday Leave"
+                              tone="pink"
+                              accruedLabel="Time"
+                              accrued={selectedRow.birthdayLeave}
+                              used={selectedRow.birthdayLeaveUsed}
+                              available={Math.max(selectedRow.birthdayLeave - selectedRow.birthdayLeaveUsed, 0)}
+                            />
                           )}
-                          <div className="bg-blue-50 rounded-xl border border-blue-200 px-3 py-2.5">
-                            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1.5">Advance Sick Leave</p>
-                            <div className="grid grid-cols-3 gap-2">
-                              <div>
-                                <p className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider">Time</p>
-                                <p className="text-lg font-black text-blue-700 leading-tight mt-0.5 tabular-nums">
-                                  {fmtBalance(selectedRow.advanceSickLeave)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span>
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider">Used</p>
-                                <p className="text-lg font-black text-blue-700 leading-tight mt-0.5 tabular-nums">
-                                  {fmtBalance(selectedRow.advanceSickLeaveUsed)}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span>
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-[9px] font-semibold text-blue-500 uppercase tracking-wider">Available</p>
-                                <p className="text-lg font-black text-blue-700 leading-tight mt-0.5 tabular-nums">
-                                  {fmtBalance(Math.max(selectedRow.advanceSickLeave - selectedRow.advanceSickLeaveUsed, 0))}<span className="text-xs font-semibold ml-0.5 text-blue-400">hrs</span>
-                                </p>
-                              </div>
-                            </div>
-                          </div>
+                          <TimeOffBalanceCard
+                            icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
+                            title="Advance Sick Leave"
+                            tone="blue"
+                            accruedLabel="Time"
+                            accrued={selectedRow.advanceSickLeave}
+                            used={selectedRow.advanceSickLeaveUsed}
+                            available={Math.max(selectedRow.advanceSickLeave - selectedRow.advanceSickLeaveUsed, 0)}
+                          />
                         </div>
                       )}
 
@@ -1063,38 +1052,25 @@ export default function TimeOffPage() {
 
                   return (
                     <div className="space-y-4">
-                      {!isRowIndia && (
-                        <div>
-                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">PTO</p>
-                          <div className="grid grid-cols-3 gap-1.5">
-                            {([
-                              ["PTO Accrual",           `${fmtBalance(selectedRow.ptoBalance)}h`],
-                              ["PTO Used",              `${fmtBalance(selectedRow.ptoUsed)}h`],
-                              ["PTO Accrual Available", `${fmtBalance(selectedRow.ptoAvailable)}h`],
-                            ] as [string, string][]).map(([label, value]) => (
-                              <div key={label} className="rounded-lg border border-teal-100 bg-teal-50 px-2 py-1.5">
-                                <p className="text-[9px] font-semibold text-teal-700 uppercase tracking-wider truncate">{label}</p>
-                                <p className="text-sm font-bold text-[#003527] mt-0.5 tabular-nums">{value}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1.5">Sick Leave</p>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {([
-                            ["Sick Leave Accrual",     `${fmtBalance(selectedRow.sickLeaveBalance)}h`],
-                            ["Sick Leave Used",        `${fmtBalance(selectedRow.sickLeaveUsed)}h`],
-                            ["Sick Accrual Available", `${fmtBalance(selectedRow.sickLeaveAvailable)}h`],
-                          ] as [string, string][]).map(([label, value]) => (
-                            <div key={label} className="rounded-lg border border-orange-100 bg-orange-50 px-2 py-1.5">
-                              <p className="text-[9px] font-semibold text-orange-700 uppercase tracking-wider truncate">{label}</p>
-                              <p className="text-sm font-bold text-orange-700 mt-0.5 tabular-nums">{value}</p>
-                            </div>
-                          ))}
-                        </div>
+                      <div className={`grid gap-3 ${isRowIndia ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2"}`}>
+                        {!isRowIndia && (
+                          <TimeOffBalanceCard
+                            icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
+                            title="PTO Balance"
+                            tone={selectedRow.ptoAvailable < 0 ? "red" : "teal"}
+                            accrued={selectedRow.ptoBalance}
+                            used={selectedRow.ptoUsed}
+                            available={selectedRow.ptoAvailable}
+                          />
+                        )}
+                        <TimeOffBalanceCard
+                          icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
+                          title="Sick Leave Balance"
+                          tone={selectedRow.sickLeaveAvailable < 0 ? "red" : "orange"}
+                          accrued={selectedRow.sickLeaveBalance}
+                          used={selectedRow.sickLeaveUsed}
+                          available={selectedRow.sickLeaveAvailable}
+                        />
                       </div>
 
                       <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
@@ -1230,18 +1206,15 @@ export default function TimeOffPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-3 gap-2">
-                          {([
-                            ["Special Leave Credits",   `${fmtBalance(selectedRow.specialLeaveCredits)}h`],
-                            ["Special Leave Used",      `${fmtBalance(selectedRow.specialLeaveUsed)}h`],
-                            ["Special Leave Available", `${fmtBalance(selectedRow.specialLeaveAvailable)}h`],
-                          ] as [string, string][]).map(([label, value]) => (
-                            <div key={label} className="rounded-xl border border-purple-100 bg-purple-50 px-3 py-2.5">
-                              <p className="text-[10px] font-semibold text-purple-700 uppercase tracking-wider">{label}</p>
-                              <p className="text-lg font-bold text-purple-700 mt-0.5 tabular-nums">{value}</p>
-                            </div>
-                          ))}
-                        </div>
+                        <TimeOffBalanceCard
+                          icon={<LuGift size={18} strokeWidth={1.75} />}
+                          title="Special Leave Credits"
+                          tone="purple"
+                          accruedLabel="Credits"
+                          accrued={selectedRow.specialLeaveCredits}
+                          used={selectedRow.specialLeaveUsed}
+                          available={selectedRow.specialLeaveAvailable}
+                        />
                       )}
 
                       <div>
