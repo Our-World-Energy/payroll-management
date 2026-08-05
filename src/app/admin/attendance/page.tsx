@@ -490,28 +490,33 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
   return isRestDay && isUsHoliday && isApproved ? base + rdOtMinutes : base;
 }
 
-// OT is never redistributed between days, with exactly ONE exception: a day
-// that is itself Approved (approvedByDate — Attendance Review's own daily
-// decision, not the leave request's approval) AND covered by an approved
-// PTO Half Day / Sick Leave Half Day (240 min, via halfDayOffByDate) may
-// still borrow from the WEEK's Regular OT pool — but only the remaining 240
-// min actually needed to complete the day, never more, and only from
-// Regular OT (RD OT is never touched). If the day itself isn't Approved yet,
-// nothing is borrowed and it stays blank/unfilled, same as any other
-// not-yet-approved day. Any OT a lending day doesn't actually give up stays
-// credited to that same day. Every other shortfall day (no leave, full-day
-// PTO/Sick Leave, rest day, US Holiday, before a mid-week hire's start)
-// never borrows and never lends — its Regular OT / RD OT Time stays exactly
-// where it was earned. This guarantees a later re-save of an already-approved
-// week can never retroactively shift OT away from the day it was earned,
-// beyond this one bounded exception.
+// OT is never redistributed between days, with two exceptions, both drawing
+// from the same WEEK's Regular OT pool (RD OT is never touched):
+//   1. A day that is itself Approved (approvedByDate — Attendance Review's
+//      own daily decision, not the leave request's approval) AND covered by
+//      an approved PTO Half Day / Sick Leave Half Day (240 min, via
+//      halfDayOffByDate) may borrow the remaining 240 min actually needed
+//      to complete the day, never more.
+//   2. A day that is itself Approved, has no leave request of any kind
+//      covering it (halfDayOffByDate <= 0), and isn't a rest day, full-day
+//      PTO/Sick Leave, US Holiday, or before a mid-week hire's start
+//      (shortfallEligibleByDate) may borrow whatever's still needed to
+//      reach the full 480-min day — this covers a day with no Worksnap
+//      Time logged at all, or logged time still short of 480.
+// If the day itself isn't Approved yet, nothing is borrowed and it stays
+// blank/unfilled, same as any other not-yet-approved day. Any OT a lending
+// day doesn't actually give up stays credited to that same day. This
+// guarantees a later re-save of an already-approved week can never
+// retroactively shift OT away from the day it was earned, beyond these two
+// bounded exceptions.
 function weeklyEvaluatedRegularAllocation(
   weekDates: string[],
   regularTimeByDate: Record<string, number>,
   regularOtByDate: Record<string, number>,
   rdOtByDate: Record<string, number>,
   approvedByDate: Record<string, boolean> = {},
-  halfDayOffByDate: Record<string, number> = {}
+  halfDayOffByDate: Record<string, number> = {},
+  shortfallEligibleByDate: Record<string, boolean> = {}
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
   weekDates.forEach((d) => { remainingRegularOt[d] = regularOtByDate[d] ?? 0; });
@@ -519,15 +524,21 @@ function weeklyEvaluatedRegularAllocation(
   const borrowedByDate: Record<string, number> = {};
   weekDates.forEach((date) => {
     borrowedByDate[date] = 0;
-    const halfDayCredit = halfDayOffByDate[date] ?? 0;
-    if (halfDayCredit <= 0 || !approvedByDate[date]) return; // only an Approved half-day leave day ever borrows
+    if (!approvedByDate[date]) return; // not-yet-approved days never borrow
 
     const regularTime = regularTimeByDate[date] ?? 0;
-    const alreadyCovered = regularTime + halfDayCredit;
-    if (alreadyCovered >= 480) return;
-    // Hard-capped at 240 — halfDayCredit is always 240, so 480 minus that
-    // (minus any of the day's own worked minutes) can never exceed 240.
-    let missing = Math.min(480 - alreadyCovered, 240);
+    const halfDayCredit = halfDayOffByDate[date] ?? 0;
+    let missing: number;
+    if (halfDayCredit > 0) {
+      const alreadyCovered = regularTime + halfDayCredit;
+      if (alreadyCovered >= 480) return;
+      // Hard-capped at 240 — halfDayCredit is always 240, so 480 minus that
+      // (minus any of the day's own worked minutes) can never exceed 240.
+      missing = Math.min(480 - alreadyCovered, 240);
+    } else {
+      if (!shortfallEligibleByDate[date] || regularTime >= 480) return;
+      missing = 480 - regularTime;
+    }
 
     for (const otDate of weekDates) {
       if (missing <= 0) break;
@@ -627,6 +638,7 @@ function buildBulkApproveDaySnapshots(
   const rdOtByDate: Record<string, number> = {};
   const approvedByDate: Record<string, boolean> = {};
   const halfDayOffByDate: Record<string, number> = {};
+  const shortfallEligibleByDate: Record<string, boolean> = {};
 
   weekDates.forEach((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -647,9 +659,10 @@ function buildBulkApproveDaySnapshots(
     rdOtByDate[date] = rdOtMinutes;
     approvedByDate[date] = dailyDecisionStatus === "Approved";
     halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
+    shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, row.hireDate) && timeValueToMinutes(holidayTime) <= 0;
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -1018,6 +1031,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const rdOtByDate: Record<string, number> = {};
     const approvedByDate: Record<string, boolean> = {};
     const halfDayOffByDate: Record<string, number> = {};
+    const shortfallEligibleByDate: Record<string, boolean> = {};
 
     weekDates.forEach((date) => {
       const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1035,9 +1049,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       rdOtByDate[date] = rdOtMinutes;
       approvedByDate[date] = dailyDecisionStatus === "Approved";
       halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
+      shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, hireDate) && timeValueToMinutes(holidayTime) <= 0;
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
