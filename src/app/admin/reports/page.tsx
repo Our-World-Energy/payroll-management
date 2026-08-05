@@ -1,4 +1,4 @@
-import { LuDownload, LuUsers, LuWallet, LuFingerprint, LuCalendarX } from "react-icons/lu";
+import { LuDownload, LuUsers, LuWallet, LuFingerprint, LuCalendarX, LuChartColumn } from "react-icons/lu";
 
 const SUMMARY = [
   { label: "Total Contractors", value: "124", change: "+4%", positive: true },
@@ -23,10 +23,15 @@ const REPORTS = [
 
 export default function ReportsPage() {
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h2 className="text-4xl font-bold text-[#003527] tracking-tight">Reports</h2>
-        <p className="text-base text-slate-500 mt-1">Workforce analytics and downloadable reports.</p>
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
+      <div className="flex items-center gap-3 mb-3 md:mb-4">
+        <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+          <LuChartColumn size={18} strokeWidth={2} />
+        </div>
+        <div>
+          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Reports</h2>
+          <p className="text-xs md:text-sm text-slate-600 mt-0.5">Workforce analytics and downloadable reports.</p>
+        </div>
       </div>
 
       {/* KPI summary */}
@@ -47,37 +52,39 @@ export default function ReportsPage() {
         <div className="px-6 py-4 border-b border-slate-100">
           <h4 className="text-lg font-semibold text-[#003527]">Regional Breakdown</h4>
         </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-100 bg-slate-50">
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Region</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contractors</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Payroll (May)</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Attendance Rate</th>
-              <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Share</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {REGION_BREAKDOWN.map((r) => (
-              <tr key={r.region} className="hover:bg-slate-50 transition-colors">
-                <td className="px-5 py-3.5 font-semibold text-slate-800">{r.region}</td>
-                <td className="px-5 py-3.5 text-slate-600 tabular-nums">{r.contractors}</td>
-                <td className="px-5 py-3.5 text-slate-600 tabular-nums">${r.payroll.toLocaleString()}</td>
-                <td className="px-5 py-3.5">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[80px]">
-                      <div className="h-full bg-teal-500 rounded-full" style={{ width: `${r.attendance}%` }} />
-                    </div>
-                    <span className="text-slate-600 tabular-nums text-xs">{r.attendance}%</span>
-                  </div>
-                </td>
-                <td className="px-5 py-3.5 text-slate-500 tabular-nums text-xs">
-                  {Math.round((r.contractors / 124) * 100)}%
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" style={{ minWidth: 640 }}>
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50">
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Region</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Contractors</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Payroll (May)</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Attendance Rate</th>
+                <th className="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wider">Share</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {REGION_BREAKDOWN.map((r) => (
+                <tr key={r.region} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-5 py-3.5 font-semibold text-slate-800">{r.region}</td>
+                  <td className="px-5 py-3.5 text-slate-600 tabular-nums">{r.contractors}</td>
+                  <td className="px-5 py-3.5 text-slate-600 tabular-nums">${r.payroll.toLocaleString()}</td>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[80px]">
+                        <div className="h-full bg-teal-500 rounded-full" style={{ width: `${r.attendance}%` }} />
+                      </div>
+                      <span className="text-slate-600 tabular-nums text-xs">{r.attendance}%</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-slate-500 tabular-nums text-xs">
+                    {Math.round((r.contractors / 124) * 100)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Downloadable reports */}

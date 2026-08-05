@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight,
+  LuDownload, LuUserPlus, LuChevronLeft, LuChevronRight, LuHardHat,
   LuPencil, LuChevronRight as LuBreadcrumb,
   LuSlidersHorizontal, LuX, LuUpload, LuRefreshCw, LuTrash2, LuTriangle, LuSearch,
 } from "react-icons/lu";
@@ -380,9 +380,14 @@ export default function ContractorsPage() {
                 <li className="text-teal-600">Contractor Details</li>
               </ol>
             </nav>
-            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Contractor Details</h2>
+            <div className="flex items-center gap-3">
+              <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+                <LuHardHat size={18} strokeWidth={2} />
+              </div>
+              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Contractor Details</h2>
+            </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true }); }}
               disabled={loading}

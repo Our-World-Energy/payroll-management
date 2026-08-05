@@ -277,11 +277,10 @@ export function HolidayCalendar() {
     ? holidays
     : holidays.filter(h => h.country === filterCountry);
 
-  // Widget card shows every holiday in the CURRENT calendar month (not just
-  // upcoming ones), sorted chronologically.
-  const currentMonthPrefix = todayStr.slice(0, 7);
-  const thisMonthHolidays = [...holidays]
-    .filter(h => h.date.startsWith(currentMonthPrefix))
+  // Widget card shows holidays still ahead — today or later — sorted
+  // chronologically, not just whatever's left in the current calendar month.
+  const upcomingHolidays = [...holidays]
+    .filter(h => h.date.slice(0, 10) >= todayStr)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const calendarModal = (
@@ -643,18 +642,18 @@ export function HolidayCalendar() {
     <>
       {/* Widget card */}
       <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-        <div className="flex items-center justify-between mb-5">
-          <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Holidays</h4>
+        <div className="flex items-center gap-2 mb-5">
           <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
+          <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Upcoming holidays</h4>
         </div>
         <div className="space-y-3 flex-1 max-h-64 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-6">
               <LuLoader size={22} className="text-slate-300 animate-spin" />
             </div>
-          ) : thisMonthHolidays.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">No holidays this month.</p>
-          ) : thisMonthHolidays.map((h) => {
+          ) : upcomingHolidays.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">No upcoming holidays.</p>
+          ) : upcomingHolidays.map((h) => {
             const [y, mo, d] = h.date.split("-");
             const dateLabel = `${MONTHS[parseInt(mo)-1].slice(0,3)} ${parseInt(d)}, ${y}`;
             return (
@@ -673,9 +672,9 @@ export function HolidayCalendar() {
         </div>
         <button
           onClick={() => setShowModal(true)}
-          className="w-full mt-5 py-3 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors uppercase tracking-widest"
+          className="w-full mt-5 py-3 border border-slate-200 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors flex items-center justify-center gap-1.5"
         >
-          View Full Calendar
+          View full calendar <LuChevronRight size={15} strokeWidth={2} />
         </button>
       </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { LuTrendingUp, LuTriangleAlert, LuX, LuClock } from "react-icons/lu";
+import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser } from "react-icons/lu";
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
@@ -64,6 +64,15 @@ const EMPTY_COUNTRY_COUNTS: CountryCounts = {
 };
 
 export default function AdminPage() {
+  // Computed client-side after mount (not during the SSR/first-paint render)
+  // to avoid a server-vs-client time zone mismatch — starts as a neutral
+  // greeting that's replaced within the same tick on real browsers.
+  const [greeting, setGreeting] = useState("Good day");
+  useEffect(() => {
+    const hour = new Date().getHours();
+    setGreeting(hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening");
+  }, []);
+
   const [showAbsentModal, setShowAbsentModal] = useState(false);
   const [showLateModal, setShowLateModal] = useState(false);
   const [showPtoModal, setShowPtoModal] = useState(false);
@@ -219,15 +228,17 @@ export default function AdminPage() {
   ];
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
       {/* Header */}
       <div className="mb-6 md:mb-8">
-        <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Dashboard</h2>
-        <p className="text-sm md:text-base text-slate-500 mt-1">Real-time overview of global workforce and operations.</p>
+        <h2 className="text-xl md:text-2xl font-bold text-[#003527] tracking-tight flex items-center gap-2">
+          {greeting} <span aria-hidden>👋</span>
+        </h2>
+        <p className="text-sm md:text-base text-slate-500 mt-1">Here&apos;s your global workforce overview</p>
       </div>
 
       {/* Metrics grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3 md:gap-4 mb-6 md:mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 md:gap-4 mb-6 md:mb-8">
         {METRICS.map((card) => {
           if (card.highlight) {
             return (
@@ -254,47 +265,44 @@ export default function AdminPage() {
           );
         })}
 
-        {/* PTO/Sick Leave Today */}
-        <button
-          onClick={() => setShowPtoModal(true)}
-          className="text-left bg-blue-50 hover:bg-blue-100 p-2 rounded-xl border border-blue-200 shadow-sm flex flex-col justify-between transition-colors cursor-pointer"
-        >
-          <div>
-            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider">PTO/Sick Leave</p>
-            <p className="text-xl font-bold text-blue-700 mt-0.5">{ptoRows.length}</p>
-          </div>
-          <p className="mt-1 text-[10px] text-blue-400">Approved today</p>
-        </button>
-
-        {/* Absent Today + Late Today — stacked in one grid cell */}
+        {/* PTO/Sick Leave + Absent Today + Late Today — one slim stacked column */}
         <div className="flex flex-col gap-1.5">
-          {/* Absent Today */}
           <button
-            onClick={() => setShowAbsentModal(true)}
-            className="text-left bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            onClick={() => setShowPtoModal(true)}
+            className="text-left bg-blue-50 hover:bg-blue-100 rounded-xl px-2.5 py-1.5 flex items-center gap-2 transition-colors flex-1"
           >
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider">Absent Today</p>
-              <p className="text-base font-black mt-0 text-red-600">{absentRows.length}</p>
+            <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-600 grid place-items-center shrink-0">
+              <LuBriefcase size={13} strokeWidth={2} />
             </div>
-            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
-              <LuTriangleAlert size={10} strokeWidth={2} />
-              No time logged
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">PTO/Sick Leave</p>
+              <p className="text-sm font-bold text-blue-700 leading-tight mt-0.5">{ptoRows.length}</p>
             </div>
           </button>
 
-          {/* Late Today */}
+          <button
+            onClick={() => setShowAbsentModal(true)}
+            className="text-left bg-red-50 hover:bg-red-100 rounded-xl px-2.5 py-1.5 flex items-center gap-2 transition-colors flex-1"
+          >
+            <div className="w-7 h-7 rounded-lg bg-red-100 text-red-600 grid place-items-center shrink-0">
+              <LuUser size={13} strokeWidth={2} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold text-red-600 uppercase tracking-wider leading-none truncate">Absent Today</p>
+              <p className="text-sm font-bold text-red-700 leading-tight mt-0.5">{absentRows.length}</p>
+            </div>
+          </button>
+
           <button
             onClick={() => setShowLateModal(true)}
-            className="text-left bg-amber-50 hover:bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl shadow-sm flex flex-col justify-between transition-colors cursor-pointer w-full flex-1"
+            className="text-left bg-amber-50 hover:bg-amber-100 rounded-xl px-2.5 py-1.5 flex items-center gap-2 transition-colors flex-1"
           >
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider">Late Today</p>
-              <p className="text-base font-black mt-0 text-amber-600">{lateRows.length}</p>
+            <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-600 grid place-items-center shrink-0">
+              <LuClock size={13} strokeWidth={2} />
             </div>
-            <div className="mt-0.5 flex items-center gap-1 text-[10px]">
-              <LuClock size={10} strokeWidth={2} />
-              Partial time logged
+            <div className="min-w-0">
+              <p className="text-[9px] font-semibold text-amber-600 uppercase tracking-wider leading-none truncate">Late Today</p>
+              <p className="text-sm font-bold text-amber-700 leading-tight mt-0.5">{lateRows.length}</p>
             </div>
           </button>
         </div>
@@ -329,8 +337,8 @@ export default function AdminPage() {
                 <LuX size={18} strokeWidth={2} />
               </button>
             </div>
-            <div className="overflow-y-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-auto">
+              <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
                     {["Name", "Department", "Date", "Status"].map((h) => (
@@ -386,8 +394,8 @@ export default function AdminPage() {
                 <LuX size={18} strokeWidth={2} />
               </button>
             </div>
-            <div className="overflow-y-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-auto">
+              <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
                     {["Name", "Department", "Date", "Detail"].map((h) => (
@@ -441,8 +449,8 @@ export default function AdminPage() {
                 <LuX size={18} strokeWidth={2} />
               </button>
             </div>
-            <div className="overflow-y-auto">
-              <table className="w-full text-left text-sm">
+            <div className="overflow-auto">
+              <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
                     {["Name", "Department", "Date", "Status"].map((h) => (

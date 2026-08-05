@@ -567,7 +567,7 @@ export default function TimeOffPage() {
   }
 
   return (
-    <div className="p-4 sm:p-5 md:p-6 max-w-full">
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
 
       {/* ── Detail Modal ── */}
       {selectedRow && (() => {
@@ -581,7 +581,7 @@ export default function TimeOffPage() {
             <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
 
               {/* Header */}
-              <div className="px-6 py-5 bg-gradient-to-r from-[#003527] to-[#006b5f] flex items-start justify-between gap-4">
+              <div className="px-6 py-5 bg-linear-to-r from-[#003527] to-[#006b5f] flex items-start justify-between gap-4">
                 <div className="flex items-center gap-4">
                   <div className={`size-12 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${avatarColor(selectedRow.id)}`}>
                     {avatarInitials(selectedRow.fullName)}
@@ -1346,15 +1346,24 @@ export default function TimeOffPage() {
               <li className="text-teal-600">Time-Off Management</li>
             </ol>
           </nav>
-          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+              <LuCalendarDays size={18} strokeWidth={2} />
+            </div>
+            <div>
+              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
+            </div>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             onClick={() => setShowProcessTimeOffModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors"
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <LuListChecks size={13} strokeWidth={2} /> Process Time Off
+            {loading ? <LuLoader size={13} strokeWidth={2} className="animate-spin" /> : <LuListChecks size={13} strokeWidth={2} />}
+            Process Time Off
           </button>
           <button
             onClick={() => setShowUsedImportModal(true)}

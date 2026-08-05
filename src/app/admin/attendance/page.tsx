@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 
 import { useState, useEffect, useMemo } from "react";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuChartColumn, LuListChecks } from "react-icons/lu";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
@@ -2714,11 +2714,16 @@ export default function AttendancePage() {
   }
 
   return (
-    <div className="p-4 sm:p-5 md:p-6 max-w-400 mx-auto">
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
-        <div>
-          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
-          <p className="text-xs md:text-sm text-slate-600 mt-0.5">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+            <LuFingerprint size={18} strokeWidth={2} />
+          </div>
+          <div>
+            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
+            <p className="text-xs md:text-sm text-slate-600 mt-0.5">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap gap-2 sm:gap-3">
@@ -2774,35 +2779,30 @@ export default function AttendancePage() {
         <div className="px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 bg-linear-to-b from-slate-50/80 to-white">
           {/* Row 1: title + week selector */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div className="flex items-start gap-3">
-              <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
-                <LuChartColumn size={18} strokeWidth={2} />
-              </div>
-              <div>
-                <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
-                <p className="mt-0.5 text-xs font-medium text-slate-500">
-                  Summed from Worksnap entries · <span className="font-semibold text-slate-600">{formatRangeLabel(rangeFrom, rangeTo)}</span>
+            <div>
+              <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
+              <p className="mt-0.5 text-xs font-medium text-slate-500">
+                Summed from Worksnap entries · <span className="font-semibold text-slate-600">{formatRangeLabel(rangeFrom, rangeTo)}</span>
+              </p>
+              {isLoadingWorksnap && (
+                <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                  <LuRefreshCw size={12} className="animate-spin" /> Loading Worksnap entries…
                 </p>
-                {isLoadingWorksnap && (
-                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
-                    <LuRefreshCw size={12} className="animate-spin" /> Loading Worksnap entries…
-                  </p>
-                )}
-                {!isLoadingWorksnap && worksnapError && (
-                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-red-600">
-                    Unable to load attendance data. {worksnapError}
-                    <button
-                      onClick={() => setReloadKey((key) => key + 1)}
-                      className="font-bold underline hover:no-underline"
-                    >
-                      Retry
-                    </button>
-                  </p>
-                )}
-                {!isLoadingWorksnap && !worksnapError && attendanceRows.length === 0 && (
-                  <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
-                )}
-              </div>
+              )}
+              {!isLoadingWorksnap && worksnapError && (
+                <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-red-600">
+                  Unable to load attendance data. {worksnapError}
+                  <button
+                    onClick={() => setReloadKey((key) => key + 1)}
+                    className="font-bold underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </p>
+              )}
+              {!isLoadingWorksnap && !worksnapError && attendanceRows.length === 0 && (
+                <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
+              )}
             </div>
             <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-full md:w-auto overflow-x-auto">
               <div className="flex gap-1">

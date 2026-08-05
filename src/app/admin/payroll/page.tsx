@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks } from "react-icons/lu";
+import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks, LuBanknote } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
 import {
@@ -432,34 +432,42 @@ export default function PayrollPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6 md:mb-8">
-        <div>
-          <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Payroll</h2>
-          <p className="text-sm md:text-base text-slate-500 mt-1">
-            Pay period: <span className="font-semibold text-slate-600">{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
-          </p>
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+            <LuBanknote size={18} strokeWidth={2} />
+          </div>
+          <div>
+            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Payroll</h2>
+            <p className="text-xs md:text-sm text-slate-600 mt-0.5">
+              Pay period: <span className="font-semibold text-slate-600">{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => setShowProcessModal(true)}
             disabled={!isSelectedWeekEnded}
             title={!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             <LuListChecks size={16} strokeWidth={2} />
-            Process Payroll
+            <span className="hidden sm:inline">Process Payroll</span>
+            <span className="sm:hidden">Process</span>
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm"
+            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50"
           >
             <LuUpload size={16} strokeWidth={2} />
-            Import Earnings & Deductions
+            <span className="hidden sm:inline">Import Earnings & Deductions</span>
+            <span className="sm:hidden">Import</span>
           </button>
-          <button className="flex items-center gap-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors shadow-sm">
+          <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
             <LuDownload size={16} strokeWidth={2} />
-            Export CSV
+            <span className="hidden sm:inline">Export CSV</span>
+            <span className="sm:hidden">Export</span>
           </button>
         </div>
       </div>
@@ -476,18 +484,18 @@ export default function PayrollPage() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Toolbar */}
-        <div className="px-4 md:px-6 py-5 border-b border-slate-100 flex flex-col gap-5 bg-linear-to-b from-slate-50/80 to-white">
+        <div className="px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 bg-linear-to-b from-slate-50/80 to-white">
           {/* Week selector */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
               <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Payroll</h3>
               {isLoading && (
-                <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                <p className="mt-0.5 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
                   <LuRefreshCw size={12} className="animate-spin" /> Loading payroll data…
                 </p>
               )}
               {!isLoading && loadError && (
-                <p className="mt-1 text-xs font-medium text-red-600">{loadError}</p>
+                <p className="mt-0.5 text-xs font-medium text-red-600">{loadError}</p>
               )}
             </div>
             <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-full md:w-auto overflow-x-auto">
@@ -573,7 +581,7 @@ export default function PayrollPage() {
                   "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
-                    className={`text-left px-4 md:px-5 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
+                    className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
                       h === "Status" || h === "Action" ? "text-center" : ""
                     } ${
                       i === 0 ? "sticky left-0 z-20 w-[180px] min-w-[180px] shadow-[1px_0_0_0_#e2e8f0]" : ""
@@ -601,7 +609,7 @@ export default function PayrollPage() {
                 </tr>
               ) : filteredRows.map((r) => (
                 <tr key={r.email} className="group hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-5 py-3.5 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-6 py-3 md:py-4 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                     <span className="inline-flex items-center gap-1.5">
                       {r.name}
                       {r.status === "Processed" && r.hasChangedSinceProcessed && (
@@ -614,26 +622,26 @@ export default function PayrollPage() {
                       )}
                     </span>
                   </td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.country}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.shiftType}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.localHoliday}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.currency} {r.hourlyRate.toFixed(2)}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.hourlyRate.toFixed(2)}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-slate-700 font-medium tabular-nums whitespace-nowrap border-r border-slate-100">{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-red-500 tabular-nums whitespace-nowrap border-r border-slate-100">{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
-                  <td className="px-4 md:px-5 py-3.5 text-teal-700 font-semibold tabular-nums whitespace-nowrap border-r border-slate-100">{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.country}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.shiftType}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.localHoliday}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.currency} {r.hourlyRate.toFixed(2)}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.hourlyRate.toFixed(2)}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-700 font-medium tabular-nums whitespace-nowrap border-r border-slate-100">{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-red-500 tabular-nums whitespace-nowrap border-r border-slate-100">{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
+                  <td className="px-4 md:px-6 py-3 md:py-4 text-teal-700 font-semibold tabular-nums whitespace-nowrap border-r border-slate-100">{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
                   <td
-                    className="text-center sticky right-[90px] z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-5 py-3.5"
+                    className="text-center sticky right-[90px] z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-6 py-3 md:py-4"
                     style={{ minWidth: 150, width: 150, maxWidth: 150 }}
                   >
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATUS_STYLES[r.status]}`}>
@@ -642,7 +650,7 @@ export default function PayrollPage() {
                     </span>
                   </td>
                   <td
-                    className="text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-5 py-3.5"
+                    className="text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-6 py-3 md:py-4"
                     style={{ minWidth: 90, width: 90, maxWidth: 90 }}
                   >
                     <div className="flex items-center justify-center gap-3">
