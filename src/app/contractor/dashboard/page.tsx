@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type ContractorProfile, type BirthdayEntry } from "../profile/actions";
+import { sendBirthdayWish, fetchWishState, type ReceivedWish } from "./wishes";
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
 import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
 import { PageHeader } from "../_components/portal";
@@ -279,6 +280,17 @@ export default function ContractorDashboardPage() {
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
+  // Birthday wishes: my email, colleagues I've already wished today, and wishes
+  // I've received today (shown when it's my own birthday).
+  const [myEmail,       setMyEmail]       = useState("");
+  const [wishedEmails,  setWishedEmails]  = useState<Set<string>>(new Set());
+  const [receivedWishes, setReceivedWishes] = useState<ReceivedWish[]>([]);
+
+  // Local calendar date (YYYY-MM-DD) — the wishDate key for today's birthdays.
+  const todayIso = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  })();
 
   useEffect(() => {
     const supabase = createClient();
@@ -297,6 +309,15 @@ export default function ContractorDashboardPage() {
       setProfile(prof);
       setAllHolidays(hols);
       setBirthdays(bdays);
+      setMyEmail(email);
+
+      // Load today's birthday-wish state (sent + received).
+      fetchWishState(email, todayIso)
+        .then(({ sentTo, received }) => {
+          setWishedEmails(new Set(sentTo));
+          setReceivedWishes(received);
+        })
+        .catch(() => { /* leave empty */ });
 
       // Country comes from the location field: "City, Country" → last segment
       const country = prof?.location?.split(",").pop()?.trim() ?? "";
@@ -323,6 +344,21 @@ export default function ContractorDashboardPage() {
     })();
   }, [router]);
 
+  // Live-refresh wishes ONLY on the viewer's own birthday — that's the only day
+  // they can receive wishes, so there's nothing to poll for otherwise.
+  const isMyBirthdayToday = !!myEmail && birthdays.some(
+    (b) => b.email.trim().toLowerCase() === myEmail.trim().toLowerCase() && b.dob.slice(5, 10) === todayIso.slice(5, 10)
+  );
+  useEffect(() => {
+    if (!isMyBirthdayToday || !myEmail) return;
+    const id = setInterval(() => {
+      fetchWishState(myEmail, todayIso)
+        .then(({ sentTo, received }) => { setWishedEmails(new Set(sentTo)); setReceivedWishes(received); })
+        .catch(() => { /* ignore */ });
+    }, 30000);
+    return () => clearInterval(id);
+  }, [isMyBirthdayToday, myEmail, todayIso]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -333,9 +369,21 @@ export default function ContractorDashboardPage() {
 
   const firstName = profile?.firstName || profile?.fullName?.split(" ")[0] || "there";
   const country   = profile?.location?.split(",").pop()?.trim() ?? "";
+  const myName    = profile?.fullName || firstName;
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
+
+  // One-click birthday wish → record it and optimistically mark as wished.
+  async function handleSendWish(toEmail: string) {
+    if (!myEmail || !toEmail) return;
+    setWishedEmails((prev) => new Set(prev).add(toEmail.toLowerCase()));
+    const res = await sendBirthdayWish({ fromEmail: myEmail, fromName: myName, toEmail, wishDate: todayIso });
+    if (!res.ok) {
+      // roll back on failure
+      setWishedEmails((prev) => { const next = new Set(prev); next.delete(toEmail.toLowerCase()); return next; });
+    }
+  }
 
   const statusChip = profile?.status === "Active" ? (
     <span className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-full text-sm font-semibold shadow-sm">
@@ -440,73 +488,108 @@ export default function ContractorDashboardPage() {
       </div>
 
       {/* ── Birthday Calendar ── */}
-      <BirthdaySection birthdays={birthdays} />
+      <BirthdaySection
+        birthdays={birthdays}
+        myEmail={myEmail}
+        wishedEmails={wishedEmails}
+        receivedWishes={receivedWishes}
+        onSendWish={handleSendWish}
+      />
 
     </div>
   );
 }
 
 // ── Birthday section component ────────────────────────────────────────────────
-function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
-
+function BirthdaySection({
+  birthdays, myEmail, wishedEmails, receivedWishes, onSendWish,
+}: {
+  birthdays: BirthdayEntry[];
+  myEmail: string;
+  wishedEmails: Set<string>;
+  receivedWishes: ReceivedWish[];
+  onSendWish: (toEmail: string) => void;
+}) {
   const today    = new Date();
-  const year     = today.getFullYear();
   const month    = today.getMonth();
   const todayDay = today.getDate();
+  const me       = myEmail.trim().toLowerCase();
 
-  // This month's birthdays, sorted by day.
+  // Only today's birthdays (same month + day as today).
   const items = birthdays
     .map((c) => {
       const [, mm, dd] = c.dob.split("-").map(Number);
       return { ...c, mm, dd };
     })
-    .filter((c) => c.mm && c.dd && c.mm - 1 === month)
-    .sort((a, b) => a.dd - b.dd);
+    .filter((c) => c.mm && c.dd && c.mm - 1 === month && c.dd === todayDay)
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const monthAbbr = MONTHS[month].slice(0, 3);
+  const todayLabel = today.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+  const wisherNames = receivedWishes.map((w) => w.fromName).filter(Boolean);
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xl font-bold text-[#003527]">Birthdays</h3>
+        <h3 className="text-xl font-bold text-[#003527]">Today&apos;s Birthdays</h3>
         <div className="flex items-center gap-2">
           <LuCake size={18} strokeWidth={1.75} className="text-pink-400" />
-          <span className="text-xs font-semibold text-slate-400">{MONTHS[month]} {year}</span>
+          <span className="text-xs font-semibold text-slate-400">{todayLabel}</span>
         </div>
       </div>
-    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
 
-      {items.length === 0 ? (
-        <p className="text-sm text-slate-400 text-center py-6">No birthdays this month.</p>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {items.map((c) => {
-            const isToday  = c.dd === todayDay;
-            const initials = c.fullName.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
-            return (
-              <div
-                key={`${c.fullName}-${c.dd}`}
-                className={[
-                  "flex items-center gap-3 p-3 rounded-xl border transition-colors",
-                  isToday ? "border-pink-200 bg-pink-50" : "border-slate-100 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-700 flex items-center justify-center text-sm font-bold shrink-0">
-                  {initials || "?"}
+        {/* It's my birthday — show the wishes I've received */}
+        {wisherNames.length > 0 && (
+          <div className="mb-5 rounded-xl bg-linear-to-r from-pink-50 to-rose-50 border border-pink-100 px-4 py-3">
+            <p className="text-sm font-bold text-pink-800 flex items-center gap-2">
+              <LuCake size={16} strokeWidth={2} className="text-pink-500" />
+              Happy Birthday! {wisherNames.length} colleague{wisherNames.length !== 1 ? "s" : ""} wished you 🎉
+            </p>
+            <p className="text-xs text-pink-600/80 mt-1 truncate">{wisherNames.join(", ")}</p>
+          </div>
+        )}
+
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-6">No birthdays today.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {items.map((c) => {
+              const initials = c.fullName.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
+              const email    = c.email.trim().toLowerCase();
+              const isMe     = !!email && email === me;
+              const wished   = wishedEmails.has(email);
+              return (
+                <div key={`${c.fullName}-${c.dd}`} className="flex flex-col gap-3 p-3 rounded-xl border border-pink-200 bg-pink-50">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-700 flex items-center justify-center text-sm font-bold shrink-0">
+                      {initials || "?"}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{c.fullName}</p>
+                      <p className="text-xs text-pink-600/80 tabular-nums">🎂 {monthAbbr} {c.dd}</p>
+                    </div>
+                  </div>
+                  {isMe ? (
+                    <span className="text-center text-[11px] font-bold text-pink-700 bg-pink-100 rounded-lg py-2">That&apos;s you 🎉</span>
+                  ) : wished ? (
+                    <span className="text-center text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg py-2">Wished ✓</span>
+                  ) : (
+                    <button
+                      onClick={() => onSendWish(c.email)}
+                      disabled={!email}
+                      className="flex items-center justify-center gap-1.5 text-[11px] font-bold text-white bg-[#003527] hover:opacity-90 active:scale-[0.98] rounded-lg py-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <LuCake size={13} strokeWidth={2.25} /> Send Wishes
+                    </button>
+                  )}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{c.fullName}</p>
-                  <p className="text-xs text-slate-400 tabular-nums">{monthAbbr} {c.dd}</p>
-                </div>
-                {isToday && (
-                  <span className="shrink-0 text-[9px] font-bold bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full uppercase tracking-wide">Today</span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
