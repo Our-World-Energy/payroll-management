@@ -6,10 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  LuLogOut, LuMenu, LuBell, LuUser, LuUmbrella,
+  LuLogOut, LuMenu, LuUser, LuUmbrella,
   LuClipboardCheck, LuLayoutDashboard, LuWallet,
   LuChevronLeft, LuChevronRight, LuSun, LuMoon,
 } from "react-icons/lu";
+import { ContractorBell } from "./_components/ContractorBell";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -217,9 +218,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
 
           {/* Right */}
           <div className="flex items-center gap-3">
-            <button className="relative p-2 rounded-full transition-colors hover:bg-black/5">
-              <LuBell size={20} strokeWidth={1.75} />
-            </button>
+            <ContractorBell dark={dark} />
             <div className={`flex items-center gap-2.5 pl-3 border-l ${dark ? "border-white/10" : "border-slate-200"}`}>
               <div className="text-right hidden sm:block">
                 <p className={`text-sm font-semibold leading-tight truncate max-w-40 ${dark ? "text-white" : "text-emerald-900"}`}>
