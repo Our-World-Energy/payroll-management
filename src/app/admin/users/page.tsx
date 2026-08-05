@@ -171,21 +171,28 @@ export default function UserManagementPage() {
   );
 
   return (
-    <div className="p-6 md:p-8 max-w-full">
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 gap-4">
+      <div className="flex flex-col md:flex-row md:items-end justify-between mb-3 md:mb-4 gap-3">
         <div>
-          <nav className="flex mb-2">
+          <nav className="flex mb-1">
             <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
               <li>Management</li>
               <li><LuChevronRight size={14} className="text-slate-400" /></li>
               <li className="text-teal-600">User Management</li>
             </ol>
           </nav>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">User Management</h2>
-          <p className="text-sm text-slate-500 mt-1">Create and manage admin and user accounts for portal access.</p>
+          <div className="flex items-center gap-3">
+            <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+              <LuUsers size={18} strokeWidth={2} />
+            </div>
+            <div>
+              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">User Management</h2>
+              <p className="text-xs md:text-sm text-slate-600 mt-0.5">Create and manage admin and user accounts for portal access.</p>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={load}
             disabled={loading}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader } from "react-icons/lu";
+import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader, LuSettings } from "react-icons/lu";
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
 import {
   addOfficeLocation, removeOfficeLocation,
@@ -272,7 +272,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden space-y-6">
 
       {/* Confirm delete modal */}
       {confirm && (
@@ -306,10 +306,15 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div className="mb-2 flex items-center justify-between">
-        <div>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight">Settings</h2>
-          <p className="text-sm text-slate-500 mt-1">Manage organisation-wide configuration.</p>
+      <div className="mb-3 md:mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+            <LuSettings size={18} strokeWidth={2} />
+          </div>
+          <div>
+            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Settings</h2>
+            <p className="text-xs md:text-sm text-slate-600 mt-0.5">Manage organisation-wide configuration.</p>
+          </div>
         </div>
         {busy && (
           <div className="flex items-center gap-2 text-sm text-slate-500">
