@@ -247,3 +247,25 @@
 }
 @page { size: A4 portrait; margin: 12mm; }
 
+/* ── Birthday delight ────────────────────────────────────────────────────────
+   A subtle wiggle for the cake badge, and a gradient border for birthday cards
+   (emerald→teal, the logo family). */
+@keyframes bday-wiggle {
+  0%, 100% { transform: rotate(-9deg) scale(1); }
+  50%      { transform: rotate(9deg) scale(1.12); }
+}
+.animate-bday-wiggle { animation: bday-wiggle 1.8s ease-in-out infinite; transform-origin: 70% 90%; }
+
+.bday-card {
+  border: 1.5px solid transparent;
+  border-radius: 0.75rem; /* rounded-xl */
+  background:
+    linear-gradient(#ecfdf5, #ecfdf5) padding-box,
+    linear-gradient(135deg, #34d399, #14b8a6) border-box;
+}
+[data-theme="dark"] .bday-card {
+  background:
+    linear-gradient(rgba(16,185,129,0.12), rgba(16,185,129,0.12)) padding-box,
+    linear-gradient(135deg, #34d399, #14b8a6) border-box;
+}
+

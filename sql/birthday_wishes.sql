@@ -6,7 +6,7 @@ create table if not exists public.birthday_wishes (
   "fromName"  text        not null default '',
   "toEmail"   text        not null,
   "wishDate"  text        not null,               -- YYYY-MM-DD (the birthday being celebrated)
-  message     text        not null default '',
+  message     text        not null default '',   -- optional note (may contain emojis)
   "createdAt" timestamptz not null default now(),
   constraint birthday_wishes_unique unique ("fromEmail", "toEmail", "wishDate")
 );

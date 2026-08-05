@@ -12,7 +12,7 @@ function getSupabase() {
 
 const TABLE = "birthday_wishes";
 
-export type ReceivedWish = { fromName: string; fromEmail: string };
+export type ReceivedWish = { fromName: string; fromEmail: string; message: string };
 
 // One click → one wish. Idempotent on (fromEmail, toEmail, wishDate) so a
 // contractor can't spam the same colleague twice on the same birthday.
@@ -58,13 +58,14 @@ export async function fetchWishState(
   const sb = getSupabase();
   const [sentRes, recvRes] = await Promise.all([
     sb.from(TABLE).select("toEmail").eq("wishDate", wishDate).ilike("fromEmail", email),
-    sb.from(TABLE).select("fromName, fromEmail").eq("wishDate", wishDate).ilike("toEmail", email),
+    sb.from(TABLE).select("fromName, fromEmail, message").eq("wishDate", wishDate).ilike("toEmail", email),
   ]);
 
   const sentTo = (sentRes.data ?? []).map((r) => String(r.toEmail).toLowerCase());
   const received = (recvRes.data ?? []).map((r) => ({
     fromName: String(r.fromName ?? "A colleague"),
     fromEmail: String(r.fromEmail ?? ""),
+    message: String(r.message ?? ""),
   }));
   return { sentTo, received };
 }
