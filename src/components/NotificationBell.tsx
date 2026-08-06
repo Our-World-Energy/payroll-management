@@ -9,10 +9,11 @@ import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "@/app/admin/con
 import { fetchAnnouncements } from "@/app/admin/announcements/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 
-type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string };
+type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
 type AlertRow = { name: string; department: string };
 type BirthdayRow = { name: string };
 type AnnouncementRow = { title: string; location: string };
+type NotificationItem = { text: string; href?: string };
 
 const LATE_GRACE_MINUTES = 15;
 
@@ -82,7 +83,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
             .filter((r) => r.status === "Pending")
             .map((r) => {
               const c = contractors.find((c) => c.email.trim().toLowerCase() === r.email.trim().toLowerCase());
-              return { name: c?.fullName || r.email, type: r.type, startDate: r.startDate, endDate: r.endDate };
+              return { name: c?.fullName || r.email, type: r.type, startDate: r.startDate, endDate: r.endDate, contractorId: c?.uid ?? "" };
             })
         );
 
@@ -163,31 +164,45 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
 
   const totalCount = pendingApprovals.length + absentRows.length + lateRows.length + birthdaysToday.length + announcementsToday.length;
 
+  // Each item links straight to that specific record — PTO into Time-Off's
+  // existing ?open= contractor-detail deep link, Absent/Late into Attendance
+  // filtered by that person's name via ?search=. Birthdays/Announcements have
+  // no per-contractor detail view to deep-link into, so those stay plain text
+  // under the section's own "view all" link.
   const sections = [
     {
       key: "pending", label: "Pending Approvals", icon: LuFileClock, count: pendingApprovals.length,
-      color: "text-amber-600 bg-amber-50", href: "/admin/time-off",
-      items: pendingApprovals.map((r) => `${r.name} — ${r.type} (${fmtLeaveDates(r.startDate, r.endDate)})`),
+      color: "text-amber-600 bg-amber-50", href: "/admin/time-off?status=Pending",
+      items: pendingApprovals.map((r): NotificationItem => ({
+        text: `${r.name} — ${r.type} (${fmtLeaveDates(r.startDate, r.endDate)})`,
+        href: r.contractorId ? `/admin/time-off?open=${encodeURIComponent(r.contractorId)}` : undefined,
+      })),
     },
     {
       key: "absent", label: "Absent Today", icon: LuUserX, count: absentRows.length,
-      color: "text-red-600 bg-red-50", href: "/admin",
-      items: absentRows.map((r) => `${r.name} — ${r.department}`),
+      color: "text-red-600 bg-red-50", href: "/admin/attendance",
+      items: absentRows.map((r): NotificationItem => ({
+        text: `${r.name} — ${r.department}`,
+        href: `/admin/attendance?search=${encodeURIComponent(r.name)}`,
+      })),
     },
     {
       key: "late", label: "Late Today", icon: LuClock, count: lateRows.length,
-      color: "text-orange-600 bg-orange-50", href: "/admin",
-      items: lateRows.map((r) => `${r.name} — ${r.department}`),
+      color: "text-orange-600 bg-orange-50", href: "/admin/attendance",
+      items: lateRows.map((r): NotificationItem => ({
+        text: `${r.name} — ${r.department}`,
+        href: `/admin/attendance?search=${encodeURIComponent(r.name)}`,
+      })),
     },
     {
       key: "birthday", label: "Birthdays Today", icon: LuCake, count: birthdaysToday.length,
       color: "text-pink-600 bg-pink-50", href: "/admin",
-      items: birthdaysToday.map((r) => r.name),
+      items: birthdaysToday.map((r): NotificationItem => ({ text: r.name })),
     },
     {
       key: "announcement", label: "Announcements Today", icon: LuMegaphone, count: announcementsToday.length,
       color: "text-teal-600 bg-teal-50", href: "/admin",
-      items: announcementsToday.map((r) => `${r.title} (${r.location})`),
+      items: announcementsToday.map((r): NotificationItem => ({ text: `${r.title} (${r.location})` })),
     },
   ];
 
@@ -224,28 +239,38 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
             ) : (
               <div className="divide-y divide-slate-100">
                 {sections.filter((s) => s.count > 0).map((s) => (
-                  <Link
-                    key={s.key}
-                    href={s.href}
-                    onClick={() => setOpen(false)}
-                    className="block px-4 py-3 hover:bg-slate-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 mb-1.5">
+                  <div key={s.key} className="px-4 py-3">
+                    <Link
+                      href={s.href}
+                      onClick={() => setOpen(false)}
+                      className="flex items-center gap-2.5 mb-1.5 -mx-1 px-1 py-0.5 rounded hover:bg-slate-50 transition-colors"
+                    >
                       <span className={`w-6 h-6 rounded-lg grid place-items-center shrink-0 ${s.color}`}>
                         <s.icon size={13} strokeWidth={2} />
                       </span>
                       <p className="text-xs font-bold text-slate-700 flex-1">{s.label}</p>
                       <span className="text-xs font-bold text-slate-400">{s.count}</span>
-                    </div>
+                    </Link>
                     <div className="pl-9 space-y-0.5">
                       {s.items.slice(0, 3).map((item, i) => (
-                        <p key={i} className="text-[11px] text-slate-500 truncate">{item}</p>
+                        item.href ? (
+                          <Link
+                            key={i}
+                            href={item.href}
+                            onClick={() => setOpen(false)}
+                            className="block text-[11px] text-slate-500 truncate hover:text-teal-700 hover:underline"
+                          >
+                            {item.text}
+                          </Link>
+                        ) : (
+                          <p key={i} className="text-[11px] text-slate-500 truncate">{item.text}</p>
+                        )
                       ))}
                       {s.items.length > 3 && (
                         <p className="text-[11px] text-slate-400 font-medium">+{s.items.length - 3} more</p>
                       )}
                     </div>
-                  </Link>
+                  </div>
                 ))}
               </div>
             )}

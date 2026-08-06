@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
@@ -1754,6 +1755,10 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   const [loadError, setLoadError] = useState("");
   const [retryNonce, setRetryNonce] = useState(0);
   const [savingElapsedSeconds, setSavingElapsedSeconds] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
+  const [processedCount, setProcessedCount] = useState(0);
+  const [totalToProcess, setTotalToProcess] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Ticks once a second while a save is in flight, purely to show elapsed
   // time in the "Saving…" overlay — resets whenever a save starts/stops.
@@ -1908,16 +1913,16 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     const rowsToSave = filteredRows.filter((r) => selectedIds.has(r.contractorId) && r.worksnapUserId != null);
     setIsSavingBulk(true);
+    setCancelling(false);
     setBulkSaveError("");
     setFailedContractorIds(new Map());
-    // One request for every selected contractor, instead of one request per
-    // contractor racing for the same DB connection pool — each contractor
-    // still gets its own transaction server-side, so one failing doesn't
-    // block the rest, and the response says exactly which ones failed.
-    const contractorIdByWorksnapUserId = new Map(rowsToSave.map((r) => [r.worksnapUserId as number, r.contractorId]));
+    setProcessedCount(0);
+    setTotalToProcess(rowsToSave.length);
+
     const items = rowsToSave.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
       return {
+        contractorId: r.contractorId,
         worksnapUserId: r.worksnapUserId,
         email,
         week: modalWeekDates[0],
@@ -1926,40 +1931,71 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
       };
     });
-    type BulkSaveResult = { worksnapUserId: number | null; ok: boolean; error?: string };
-    const response = await fetch("/api/attendance/status/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    })
-      .then(async (res) => (res.ok ? ((await res.json()) as { results: BulkSaveResult[] }) : null))
-      .catch(() => null);
 
-    setIsSavingBulk(false);
-
-    const results = response?.results ?? [];
+    // One request per contractor, awaited sequentially — never more than one
+    // save in flight, same DB-connection pressure as the previous single
+    // batched request, but this way the client actually knows how far it's
+    // gotten. That's what makes a real "N of M" counter possible (the old
+    // batched request was one opaque round trip with no progress inside it),
+    // and it also lets Cancel stop cleanly between contractors instead of
+    // aborting mid-write with no idea what the server already finished.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     const failedMap = new Map<string, string>();
-    for (const r of results) {
-      if (r.ok || r.worksnapUserId == null) continue;
-      const contractorId = contractorIdByWorksnapUserId.get(r.worksnapUserId);
-      if (contractorId) failedMap.set(contractorId, r.error ?? "Failed to save");
+    let processed = 0;
+    let savedCount = 0;
+    let wasAborted = false;
+
+    for (const item of items) {
+      if (controller.signal.aborted) { wasAborted = true; break; }
+      try {
+        const res = await fetch("/api/attendance/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+          signal: controller.signal,
+        });
+        if (res.ok) {
+          savedCount++;
+        } else {
+          const result = await res.json().catch(() => ({}));
+          failedMap.set(item.contractorId, result.error ?? "Failed to save");
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") { wasAborted = true; break; }
+        failedMap.set(item.contractorId, "Failed to save");
+      }
+      processed++;
+      setProcessedCount(processed);
     }
 
-    if (!response || failedMap.size > 0) {
+    abortControllerRef.current = null;
+    setIsSavingBulk(false);
+    setCancelling(false);
+
+    if (wasAborted) {
       setFailedContractorIds(failedMap);
-      setBulkSaveError(
-        failedMap.size > 0
-          ? `${failedMap.size} of ${results.length} approval${results.length !== 1 ? "s" : ""} failed to save — highlighted below. Please retry.`
-          : "Some approvals failed to save. Please try again."
-      );
+      setBulkSaveError(`Cancelled after ${processed} of ${items.length} — contractors already saved before cancelling stay saved. Retry the rest, or refresh to check.`);
+      if (processed > 0) onApprove();
+      return;
+    }
+
+    if (failedMap.size > 0) {
+      setFailedContractorIds(failedMap);
+      setBulkSaveError(`${failedMap.size} of ${items.length} approval${items.length !== 1 ? "s" : ""} failed to save — highlighted below. Please retry.`);
       // Some contractors may have saved successfully even though others
       // failed — refresh the main table so those aren't left stale.
-      if (results.some((r) => r.ok)) onApprove();
+      if (savedCount > 0) onApprove();
       return;
     }
 
     onApprove();
     onClose();
+  }
+
+  function handleCancelSave() {
+    setCancelling(true);
+    abortControllerRef.current?.abort();
   }
 
   return (
@@ -2157,8 +2193,26 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[240px]">
             <LuRefreshCw size={28} className="text-emerald-600 animate-spin" />
-            <p className="text-sm font-semibold text-slate-700">Saving approvals…</p>
+            <p className="text-sm font-semibold text-slate-700">{cancelling ? "Cancelling…" : "Saving approvals…"}</p>
+            <p className="text-xs font-semibold text-emerald-700 tabular-nums">
+              {processedCount} of {totalToProcess} contractor{totalToProcess !== 1 ? "s" : ""} processed
+            </p>
+            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-emerald-600 transition-all"
+                style={{ width: `${totalToProcess > 0 ? Math.round((processedCount / totalToProcess) * 100) : 0}%` }}
+              />
+            </div>
             <p className="text-xs text-slate-400 tabular-nums">{formatElapsedSeconds(savingElapsedSeconds)}</p>
+            <button
+              type="button"
+              onClick={handleCancelSave}
+              disabled={cancelling}
+              title="Contractors already saved before cancelling will stay saved — this only stops waiting on the rest"
+              className="mt-1 px-4 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
           </div>
         </div>
       )}
@@ -2478,6 +2532,8 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
 }
 
 export default function AttendancePage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
@@ -2491,6 +2547,19 @@ export default function AttendancePage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [breakdownTarget, setBreakdownTarget] = useState<AttendanceRow | null>(null);
   const [nameSearch, setNameSearch] = useState("");
+
+  // Deep link from the Notification bell's Absent/Late Today items (see
+  // NotificationBell.tsx) — pre-fills the name search so landing here shows
+  // just that contractor, then clears the param so it doesn't stick around
+  // on refresh/back-navigation.
+  useEffect(() => {
+    const search = searchParams.get("search");
+    if (search) {
+      setNameSearch(search);
+      router.replace("/admin/attendance");
+    }
+  }, [searchParams, router]);
+
   const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");

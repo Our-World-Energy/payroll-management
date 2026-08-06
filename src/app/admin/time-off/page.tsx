@@ -542,6 +542,16 @@ export default function TimeOffPage() {
     }
   }, [searchParams, rows, selectedRowId, router]);
 
+  // Deep link from the Notification bell's Pending Approvals section header
+  // (see NotificationBell.tsx) — pre-filters the review-status dropdown.
+  useEffect(() => {
+    const status = searchParams.get("status");
+    if (status) {
+      setReviewStatusFilter(status);
+      router.replace("/admin/time-off");
+    }
+  }, [searchParams, router]);
+
   const isIndia = countryFilter === "India";
 
   const COLS = [
