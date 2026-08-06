@@ -28,6 +28,25 @@ const FALLBACK_CURRENCIES = ["PHP", "INR", "MXN", "USD"];
 const STATUSES       = ["Active", "Dismissed"] as const;
 const GENDERS        = ["Not Specified", "Male", "Female"];
 const WEEK_DAYS      = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_ABBREVIATIONS: Record<string, string> = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
+
+// Rest Days is saved as "Monday, Tuesday" (this modal's own format), but a
+// contractor imported via CSV (see ImportContractorsModal) can carry its
+// rest_days column through with a different separator, spacing, casing, or
+// day abbreviation — a strict split(", ") on that value would silently match
+// nothing, leaving every day button unchecked even though the contractor
+// clearly has rest days saved. This normalizes any of those variants back to
+// the exact WEEK_DAYS strings the buttons compare against.
+function parseRestDays(raw?: string): string[] {
+  if (!raw || raw === "—" || raw === "-") return [];
+  return raw
+    .split(/[,;/]/)
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => WEEK_DAYS.find((w) => w.toLowerCase() === d.toLowerCase()) ?? DAY_ABBREVIATIONS[d.toLowerCase()] ?? d);
+}
 
 // 30-min time slots
 const TIME_OPTIONS: string[] = [];
@@ -111,7 +130,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     shiftType:      initial?.shiftType ?? "Fixed",
     shiftFrom:      initial?.shiftHours?.split(" to ")[0] ?? "9:00 AM",
     shiftTo:        initial?.shiftHours?.split(" to ")[1] ?? "6:00 PM",
-    restDays:       initial?.restDay && initial.restDay !== "—" ? initial.restDay.split(", ") : [] as string[],
+    restDays:       parseRestDays(initial?.restDay),
     currency:       initial?.currency       ?? CURRENCIES[0],
     monthlyRate:    initial?.monthlyRate    ?? "",
     weeklyRate:     initial?.weeklyRate     ?? "",

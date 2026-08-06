@@ -205,16 +205,17 @@ export default function UserManagementPage() {
             onClick={handleSync}
             disabled={syncing}
             title="Create login accounts for all existing contractors who don't have one yet"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm disabled:opacity-60"
           >
-            {syncing ? <LuLoader size={15} className="animate-spin" /> : <LuUserCheck size={15} strokeWidth={2} />}
-            {syncing ? "Syncing…" : "Sync Contractors"}
+            {syncing ? <LuLoader size={14} className="animate-spin" /> : <LuUserCheck size={14} strokeWidth={2} />}
+            <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync Contractors"}</span>
+            <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
           </button>
           <button
             onClick={() => setModal({ type: "create" })}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-xl transition-colors shadow-sm"
+            className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-[#003527] hover:bg-[#064e3b] text-white text-xs font-semibold rounded-xl transition-colors shadow-sm"
           >
-            <LuPlus size={16} strokeWidth={2.5} />
+            <LuPlus size={14} strokeWidth={2.5} />
             Add User
           </button>
         </div>

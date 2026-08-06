@@ -132,17 +132,17 @@ export function AnnouncementBoard() {
   return (
     <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <LuMegaphone size={22} strokeWidth={1.75} className="text-teal-600" />
-          <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Announcements</h4>
+      <div className="flex flex-wrap items-center justify-between gap-y-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <LuMegaphone size={22} strokeWidth={1.75} className="text-teal-600 shrink-0" />
+          <h4 className="text-sm font-semibold text-[#003527] truncate">Announcements</h4>
         </div>
         <button
           onClick={() => (showForm ? closeForm() : openAddForm())}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#003527] hover:bg-[#064e3b] text-white text-xs font-semibold rounded-lg transition-colors"
+          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#003527] hover:bg-[#064e3b] text-white text-xs font-semibold rounded-lg transition-colors"
         >
           <LuPlus size={14} strokeWidth={2.5} />
-          Add announcement
+          Add
         </button>
       </div>
 
