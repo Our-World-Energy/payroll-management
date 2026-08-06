@@ -147,12 +147,12 @@ export function BirthdayCalendar() {
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 md:p-6 flex flex-col h-[500px]">
-      <div className="flex items-center justify-between mb-5 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-pink-500 text-white grid place-items-center shrink-0">
-            <LuCake size={18} strokeWidth={1.75} />
+      <div className="flex flex-wrap items-center justify-between gap-y-2 mb-5 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-pink-500 text-white grid place-items-center shrink-0">
+            <LuCake size={15} strokeWidth={1.75} />
           </div>
-          <h4 className="text-lg md:text-xl font-semibold text-[#003527]">Birthdays</h4>
+          <h4 className="text-sm font-semibold text-[#003527] truncate">Birthdays</h4>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
@@ -182,7 +182,7 @@ export function BirthdayCalendar() {
           <LuLoader size={22} className="text-slate-300 animate-spin" />
         </div>
       ) : (
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
           <div className="grid grid-cols-7 mb-1.5 shrink-0">
             {DAYS_OF_WEEK.map((d) => (
               <span key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase">{d[0]}</span>

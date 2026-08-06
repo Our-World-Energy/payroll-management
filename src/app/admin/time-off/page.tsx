@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import { toast } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
@@ -99,12 +100,26 @@ function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
     };
   }, [open]);
 
+  // The popup itself is a fixed w-52 (208px), roughly 240px tall — on a narrow
+  // phone viewport, anchoring it straight to the button's own left/bottom
+  // (with no clamping) can push it partly off-screen to the right, or below
+  // the bottom edge when the button sits low in a scrollable modal. Clamp
+  // left to the viewport width and flip above the button when there isn't
+  // room below, so the whole calendar always stays reachable.
   function openPicker() {
     const target = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
     setViewYear(target.getFullYear());
     setViewMonth(target.getMonth());
     const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) setCoords({ top: rect.bottom + 4, left: rect.left });
+    if (rect) {
+      const POPUP_WIDTH = 208;
+      const POPUP_HEIGHT = 240;
+      const left = Math.max(8, Math.min(rect.left, window.innerWidth - POPUP_WIDTH - 8));
+      const top = rect.bottom + POPUP_HEIGHT <= window.innerHeight
+        ? rect.bottom + 4
+        : Math.max(8, rect.top - POPUP_HEIGHT - 4);
+      setCoords({ top, left });
+    }
     setOpen(true);
   }
 
@@ -394,7 +409,6 @@ export default function TimeOffPage() {
   const [overrideReason,     setOverrideReason]     = useState("");
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
   const [overrideError,      setOverrideError]      = useState("");
-  const [overrideSuccess,    setOverrideSuccess]    = useState("");
   const [overrideBlocked,    setOverrideBlocked]    = useState("");
   const [overrideDuplicateWarning, setOverrideDuplicateWarning] = useState("");
   const [confirmOverrideAnyway, setConfirmOverrideAnyway] = useState<(() => void) | null>(null);
@@ -769,7 +783,7 @@ export default function TimeOffPage() {
                           {!isRowIndia && (
                             <div>
                               <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1.5">Advance PTO/Birthday Leave</p>
-                              <div className="grid grid-cols-3 gap-2">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Time</p>
                                   <input type="number" min="0" step="0.01" value={editAdvancePtoBalance} onChange={(e) => setEditAdvancePtoBalance(e.target.value)}
@@ -791,7 +805,7 @@ export default function TimeOffPage() {
                           )}
                           <div>
                             <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1.5">Advance Sick Leave</p>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Time</p>
                                 <input type="number" min="0" step="0.01" value={editAdvanceSickBalance} onChange={(e) => setEditAdvanceSickBalance(e.target.value)}
@@ -897,7 +911,7 @@ export default function TimeOffPage() {
                   // duplicate-warning prompt can call straight through to it.
                   async function submitOverride() {
                     if (!selectedRow) return;
-                    setOverrideError(""); setOverrideSuccess("");
+                    setOverrideError("");
                     setOverrideSubmitting(true);
                     const result = await createLeaveOverride({
                       email: selectedRow.email,
@@ -925,7 +939,7 @@ export default function TimeOffPage() {
                         : c
                     ));
                     setLeaveRequests((prev) => [req, ...prev]);
-                    setOverrideSuccess("Leave override created and applied.");
+                    toast.success("Leave override created and applied.");
                     setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason("");
                   }
 
@@ -938,7 +952,7 @@ export default function TimeOffPage() {
                   async function submitAdvanceOverride() {
                     if (!selectedRow) return;
                     const isAdvancePto = overrideType === "Advance PTO/Birthday Leave";
-                    setOverrideError(""); setOverrideSuccess("");
+                    setOverrideError("");
                     setOverrideSubmitting(true);
                     const result = await createAdvanceLeaveOverride({
                       email: selectedRow.email,
@@ -961,7 +975,7 @@ export default function TimeOffPage() {
                         : c
                     ));
                     setLeaveRequests((prev) => [req, ...prev]);
-                    setOverrideSuccess("Leave override created and applied.");
+                    toast.success("Leave override created and applied.");
                     setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason("");
                   }
 
@@ -1086,7 +1100,7 @@ export default function TimeOffPage() {
                             .map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                           <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
                           <CalendarDateInput
@@ -1116,7 +1130,6 @@ export default function TimeOffPage() {
                           className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
                       </div>
                       {overrideError && <p className="text-xs font-medium text-red-600">{overrideError}</p>}
-                      {overrideSuccess && <p className="text-xs font-medium text-emerald-600">{overrideSuccess}</p>}
                       <button onClick={() => handleOverrideSubmit()} disabled={overrideSubmitting || !overrideStartDate || !overrideEndDate}
                         className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                         <LuCircleCheck size={15} strokeWidth={2} /> {overrideSubmitting ? "Applying…" : "Apply Leave Override"}
@@ -1172,7 +1185,7 @@ export default function TimeOffPage() {
                       </div>
                       {isEditingSpecialBalance ? (
                         <div className="space-y-2">
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Credits</p>
                               <input type="number" min="0" step="0.01" value={editSpecialCredits} onChange={(e) => setEditSpecialCredits(e.target.value)}
@@ -1638,7 +1651,7 @@ export default function TimeOffPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
                       <button
-                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); setOverrideSuccess(""); }}
+                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
                       >
                         <LuEye size={14} strokeWidth={1.75} /> View

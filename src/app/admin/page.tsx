@@ -234,7 +234,7 @@ export default function AdminPage() {
         <h2 className="text-xl md:text-2xl font-bold text-[#003527] tracking-tight flex items-center gap-2">
           {greeting} <span aria-hidden>👋</span>
         </h2>
-        <p className="text-sm md:text-base text-slate-500 mt-1">Here&apos;s your global workforce overview</p>
+        <p className="text-sm md:text-base text-slate-500 mt-1">Here&apos;s your Contractor Overview</p>
       </div>
 
       {/* Metrics grid */}

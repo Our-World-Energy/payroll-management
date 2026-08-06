@@ -152,6 +152,18 @@
 [data-theme="dark"] .admin-page .bg-slate-50 { background-color: rgba(255,255,255,0.04) !important; }
 [data-theme="dark"] .admin-page .bg-slate-100 { background-color: rgba(255,255,255,0.06) !important; }
 
+/* Toolbar header gradients (Weekly Time Tracking / Weekly Payroll bars) are
+   light-mode-only — the from-slate-50/to-white gradient stops aren't plain
+   .bg-white/.bg-slate-50 utilities, so the overrides above never touch them,
+   while their heading text (.text-[#003527] below) DOES get dark-converted
+   to a light mint green meant for a dark backdrop. Left alone that's light
+   text (and the "N shown" pill, itself correctly dark-converted) sitting on
+   a still-light gradient — unreadable. Kill the gradient outright. */
+[data-theme="dark"] .admin-page .bg-linear-to-b.from-slate-50\/80.to-white {
+  background-image: none !important;
+  background-color: #182218 !important;
+}
+
 [data-theme="dark"] .admin-page .border-slate-100,
 [data-theme="dark"] .admin-page .border-slate-200,
 [data-theme="dark"] .admin-page .border-slate-200\/80 { border-color: rgba(255,255,255,0.07) !important; }

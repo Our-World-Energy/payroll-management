@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
@@ -2481,6 +2481,7 @@ export default function AttendancePage() {
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
+  const weekJumpButtonRef = useRef<HTMLButtonElement>(null);
   const [reviewTarget, setReviewTarget] = useState<{ record: AttendanceRecord; source: "view" | "review" } | null>(null);
   const [worksnapRows, setWorksnapRows] = useState<AttendanceRow[]>([]);
   const [isLoadingWorksnap, setIsLoadingWorksnap] = useState(true);
@@ -2743,36 +2744,35 @@ export default function AttendancePage() {
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap gap-2 sm:gap-3">
             <button
+              onClick={handleSync}
+              disabled={syncing}
+              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-xs font-semibold transition-all shadow-md disabled:opacity-50"
+            >
+              <LuRefreshCw size={14} strokeWidth={2} className={syncing ? "animate-spin" : ""} />
+              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span>
+              <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
+            </button>
+            <button
               onClick={() => setShowBulkApproveModal(true)}
               disabled={!isSelectedWeekEnded}
               title={!isSelectedWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
+              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
             >
-              <LuCircleCheck size={16} strokeWidth={2} />
+              <LuCircleCheck size={14} strokeWidth={2} />
               <span className="hidden sm:inline">Bulk Approve</span>
               <span className="sm:hidden">Approve</span>
-            </button>
-            <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
-              <LuFileText size={16} /><span className="hidden sm:inline">Export Timesheet</span><span className="sm:hidden">Export</span>
-            </button>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex items-center gap-2 px-3 sm:px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-sm font-semibold transition-all shadow-md disabled:opacity-50"
-            >
-              <LuRefreshCw size={16} strokeWidth={2} className={syncing ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span>
-              <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
             </button>
             <button
               onClick={() => setShowProcessModal(true)}
               disabled={!isSelectedWeekEnded}
               title={!isSelectedWeekEnded ? "Process Attendance is only available once the selected week has ended" : undefined}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
             >
-              <LuListChecks size={16} strokeWidth={2} />
-              <span className="hidden sm:inline">Process Attendance</span>
-              <span className="sm:hidden">Process</span>
+              <LuListChecks size={14} strokeWidth={2} />
+              Process
+            </button>
+            <button className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50">
+              <LuFileText size={14} />Export
             </button>
           </div>
           <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
@@ -2828,11 +2828,11 @@ export default function AttendancePage() {
               </div>
               <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
               <div className="relative shrink-0">
-                <button onClick={() => setShowRangePicker((v) => !v)}
+                <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
                   <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
                 </button>
-                {showRangePicker && <WeekJumpDropdown onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
+                {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
               <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
               <select

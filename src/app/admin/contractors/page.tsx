@@ -392,30 +392,30 @@ export default function ContractorsPage() {
               onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true }); }}
               disabled={loading}
               title="Refresh"
-              className="inline-flex items-center gap-2 px-3 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+              className="p-2 text-slate-400 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40"
             >
-              <LuRefreshCw size={16} strokeWidth={2} className={loading ? "animate-spin" : ""} />
+              <LuRefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
             <button
               onClick={handleExport}
               disabled={exporting || total === 0}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
             >
-              <LuDownload size={16} strokeWidth={2} className={exporting ? "animate-bounce" : ""} />
+              <LuDownload size={14} strokeWidth={2} className={exporting ? "animate-bounce" : ""} />
               {exporting ? "Exporting…" : "Export"}
             </button>
             <button
               onClick={() => setShowImport(true)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all shadow-sm"
+              className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm"
             >
-              <LuUpload size={16} strokeWidth={2} />
+              <LuUpload size={14} strokeWidth={2} />
               Import
             </button>
             <button
               onClick={() => setShowAdd(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#003527] text-white rounded-xl text-sm font-semibold hover:bg-[#064E3B] transition-all shadow-md"
+              className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-[#003527] text-white rounded-xl text-xs font-semibold hover:bg-[#064E3B] transition-all shadow-md"
             >
-              <LuUserPlus size={16} strokeWidth={2} />
+              <LuUserPlus size={14} strokeWidth={2} />
               Add Contractor
             </button>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks, LuBanknote } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
@@ -138,6 +138,7 @@ export default function PayrollPage() {
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
+  const weekJumpButtonRef = useRef<HTMLButtonElement>(null);
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -450,22 +451,21 @@ export default function PayrollPage() {
             onClick={() => setShowProcessModal(true)}
             disabled={!isSelectedWeekEnded}
             title={!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
-            <LuListChecks size={16} strokeWidth={2} />
+            <LuListChecks size={14} strokeWidth={2} />
             <span className="hidden sm:inline">Process Payroll</span>
             <span className="sm:hidden">Process</span>
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50"
+            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
           >
-            <LuUpload size={16} strokeWidth={2} />
-            <span className="hidden sm:inline">Import Earnings & Deductions</span>
-            <span className="sm:hidden">Import</span>
+            <LuUpload size={14} strokeWidth={2} />
+            Import
           </button>
-          <button className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-white border border-slate-200 text-[#003527] rounded-lg text-sm font-semibold hover:bg-slate-50">
-            <LuDownload size={16} strokeWidth={2} />
+          <button className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50">
+            <LuDownload size={14} strokeWidth={2} />
             <span className="hidden sm:inline">Export CSV</span>
             <span className="sm:hidden">Export</span>
           </button>
@@ -507,11 +507,11 @@ export default function PayrollPage() {
               </div>
               <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
               <div className="relative shrink-0">
-                <button onClick={() => setShowRangePicker((v) => !v)}
+                <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
                   <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
                 </button>
-                {showRangePicker && <WeekJumpDropdown onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
+                {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
             </div>
           </div>

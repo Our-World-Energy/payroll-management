@@ -642,9 +642,9 @@ export function HolidayCalendar() {
     <>
       {/* Widget card */}
       <div className="bg-white p-5 md:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-        <div className="flex items-center gap-2 mb-5">
-          <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600" />
-          <h4 className="text-xl md:text-2xl font-semibold text-[#003527]">Upcoming holidays</h4>
+        <div className="flex items-center gap-2 mb-5 min-w-0">
+          <LuCalendar size={22} strokeWidth={1.75} className="text-teal-600 shrink-0" />
+          <h4 className="text-sm font-semibold text-[#003527] truncate">Upcoming holidays</h4>
         </div>
         <div className="space-y-3 flex-1 max-h-64 overflow-y-auto">
           {loading ? (
