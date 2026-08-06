@@ -1,4 +1,6 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
+import { randomUUID } from "crypto";
 
 type PrismaLike = PrismaClient | Prisma.TransactionClient;
 
@@ -98,43 +100,77 @@ export function buildAttendanceStatusOps(
         processed,
       },
     }),
-    // per-day attendance review snapshot
-    ...days
-      .filter((d) => typeof d.date === "string")
-      .map((d) => {
-        const date = new Date(`${d.date as string}T00:00:00.000Z`);
-        const decisionStatus = asReq(d.decisionStatus);
-        const evaluatedMinutes = asInt(d.evaluatedMinutes);
-        const adjustedMinutes = asNullableInt(d.adjustedMinutes);
-        const holidayMinutes = asInt(d.holidayMinutes);
-        const localHoliday = typeof d.localHoliday === "string" && d.localHoliday.trim() ? d.localHoliday.trim() : null;
-        const localHolidayMinutes = asNullableInt(d.localHolidayMinutes);
-        const evaluatedRegularMinutes = asInt(d.evaluatedRegularMinutes);
-        const regularOtMinutes = asInt(d.regularOtMinutes);
-        const rdOtMinutes = asInt(d.rdOtMinutes);
-        const hoOtMinutes = asInt(d.hoOtMinutes);
-        const timeOffStatus = asTimeOff(d.timeOffStatus);
-        const timeOffMinutes = asInt(d.timeOffMinutes);
-        const manualAdjustmentTime = asInt(d.manualAdjustmentTime);
-        const note = typeof d.note === "string" && d.note.trim() ? d.note.trim() : null;
-        // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT +
-        // US HO + Local HO + Time Off Request Time, matching the Attendance
-        // Review column of the same name (distinct from the older
-        // `completionMinutes`/"Ind Time").
-        const totalCompletionTime = evaluatedRegularMinutes + regularOtMinutes + rdOtMinutes
-          + holidayMinutes + (localHolidayMinutes ?? 0) + timeOffMinutes;
-        const fields = {
-          email, decisionStatus, evaluatedMinutes, adjustedMinutes, holidayMinutes, localHoliday, localHolidayMinutes,
-          evaluatedRegularMinutes, regularOtMinutes, rdOtMinutes, hoOtMinutes,
-          timeOffStatus, timeOffMinutes, totalCompletionTime, manualAdjustmentTime, note,
-        };
-        return client.attendanceDayStatus.upsert({
-          where: { attendance_day_key: { worksnapUserId, date } },
-          create: { worksnapUserId, date, ...fields },
-          update: fields,
-        });
-      }),
   ];
+
+  // Per-day attendance review snapshot — one multi-row raw INSERT instead of
+  // N individual .upsert() calls (N round trips), since the pooled DB
+  // connection (see runOpsSequentially below) makes every round trip
+  // expensive: a 7-day week is 1 round trip here instead of 7. Column names
+  // need quoting because the Prisma schema has no @map on these fields, so
+  // Postgres stores them exactly as the camelCase Prisma field names.
+  const dayRows = days
+    .filter((d) => typeof d.date === "string")
+    .map((d) => {
+      const date = new Date(`${d.date as string}T00:00:00.000Z`);
+      const decisionStatus = asReq(d.decisionStatus);
+      const evaluatedMinutes = asInt(d.evaluatedMinutes);
+      const adjustedMinutes = asNullableInt(d.adjustedMinutes);
+      const holidayMinutes = asInt(d.holidayMinutes);
+      const localHoliday = typeof d.localHoliday === "string" && d.localHoliday.trim() ? d.localHoliday.trim() : null;
+      const localHolidayMinutes = asNullableInt(d.localHolidayMinutes);
+      const evaluatedRegularMinutes = asInt(d.evaluatedRegularMinutes);
+      const regularOtMinutes = asInt(d.regularOtMinutes);
+      const rdOtMinutes = asInt(d.rdOtMinutes);
+      const hoOtMinutes = asInt(d.hoOtMinutes);
+      const timeOffStatus = asTimeOff(d.timeOffStatus);
+      const timeOffMinutes = asInt(d.timeOffMinutes);
+      const manualAdjustmentTime = asInt(d.manualAdjustmentTime);
+      const note = typeof d.note === "string" && d.note.trim() ? d.note.trim() : null;
+      // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT +
+      // US HO + Local HO + Time Off Request Time, matching the Attendance
+      // Review column of the same name (distinct from the older
+      // `completionMinutes`/"Ind Time").
+      const totalCompletionTime = evaluatedRegularMinutes + regularOtMinutes + rdOtMinutes
+        + holidayMinutes + (localHolidayMinutes ?? 0) + timeOffMinutes;
+      return Prisma.sql`(
+        ${randomUUID()}::uuid, ${worksnapUserId}, ${email}, ${date}, ${decisionStatus}::"AttendanceRequestStatus",
+        ${evaluatedMinutes}, ${adjustedMinutes}, ${holidayMinutes}, ${localHoliday}, ${localHolidayMinutes},
+        ${evaluatedRegularMinutes}, ${regularOtMinutes}, ${rdOtMinutes}, ${hoOtMinutes},
+        ${timeOffStatus}::"TimeOffKind", ${timeOffMinutes}, ${totalCompletionTime}, ${manualAdjustmentTime},
+        ${note}, now()
+      )`;
+    });
+
+  if (dayRows.length > 0) {
+    ops.push(client.$executeRaw`
+      INSERT INTO "attendance_day_status" (
+        "id", "worksnapUserId", "email", "date", "decisionStatus",
+        "evaluatedMinutes", "adjustedMinutes", "holidayMinutes", "localHoliday", "localHolidayMinutes",
+        "evaluatedRegularMinutes", "regularOtMinutes", "rdOtMinutes", "hoOtMinutes",
+        "timeOffStatus", "timeOffMinutes", "totalCompletionTime", "manualAdjustmentTime",
+        "note", "updatedAt"
+      )
+      VALUES ${Prisma.join(dayRows)}
+      ON CONFLICT ("worksnapUserId", "date") DO UPDATE SET
+        "email" = EXCLUDED."email",
+        "decisionStatus" = EXCLUDED."decisionStatus",
+        "evaluatedMinutes" = EXCLUDED."evaluatedMinutes",
+        "adjustedMinutes" = EXCLUDED."adjustedMinutes",
+        "holidayMinutes" = EXCLUDED."holidayMinutes",
+        "localHoliday" = EXCLUDED."localHoliday",
+        "localHolidayMinutes" = EXCLUDED."localHolidayMinutes",
+        "evaluatedRegularMinutes" = EXCLUDED."evaluatedRegularMinutes",
+        "regularOtMinutes" = EXCLUDED."regularOtMinutes",
+        "rdOtMinutes" = EXCLUDED."rdOtMinutes",
+        "hoOtMinutes" = EXCLUDED."hoOtMinutes",
+        "timeOffStatus" = EXCLUDED."timeOffStatus",
+        "timeOffMinutes" = EXCLUDED."timeOffMinutes",
+        "totalCompletionTime" = EXCLUDED."totalCompletionTime",
+        "manualAdjustmentTime" = EXCLUDED."manualAdjustmentTime",
+        "note" = EXCLUDED."note",
+        "updatedAt" = now()
+    `);
+  }
 
   return { ok: true, ops };
 }

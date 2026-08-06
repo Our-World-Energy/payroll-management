@@ -459,10 +459,11 @@ export default function PayrollPage() {
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            className="flex items-center justify-center gap-1.5 w-28 sm:w-52 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
           >
             <LuUpload size={14} strokeWidth={2} />
-            Import
+            <span className="hidden sm:inline">Import Earning/Deduction</span>
+            <span className="sm:hidden">Import</span>
           </button>
           <button className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50">
             <LuDownload size={14} strokeWidth={2} />
