@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   LuBell, LuX, LuFileClock, LuUserX, LuClock, LuCake, LuMegaphone, LuLoader,
@@ -54,15 +55,28 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
   const [lateRows, setLateRows] = useState<AlertRow[]>([]);
   const [birthdaysToday, setBirthdaysToday] = useState<BirthdayRow[]>([]);
   const [announcementsToday, setAnnouncementsToday] = useState<AnnouncementRow[]>([]);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  // The "+N more" popup below is portaled to document.body, outside ref's
+  // own subtree — without this, any click inside it (even its own close
+  // button) would register as "outside" the dropdown and close the whole
+  // panel instead of just the popup.
+  const expandedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onOutsideClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (ref.current?.contains(target) || expandedRef.current?.contains(target)) return;
+      setOpen(false);
     }
     document.addEventListener("mousedown", onOutsideClick);
     return () => document.removeEventListener("mousedown", onOutsideClick);
   }, []);
+
+  // Don't leave the "+N more" popup dangling once the panel it belongs to closes.
+  useEffect(() => {
+    if (!open) setExpandedKey(null);
+  }, [open]);
 
   useEffect(() => {
     let active = true;
@@ -267,7 +281,13 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
                         )
                       ))}
                       {s.items.length > 3 && (
-                        <p className="text-[11px] text-slate-400 font-medium">+{s.items.length - 3} more</p>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedKey(s.key)}
+                          className="text-[11px] text-teal-600 font-semibold hover:underline"
+                        >
+                          +{s.items.length - 3} more
+                        </button>
                       )}
                     </div>
                   </div>
@@ -277,6 +297,56 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
           </div>
         </div>
       )}
+
+      {/* "+N more" popup — shows every item in that section, not just the
+          first 3 the dropdown truncates to. Portaled to document.body so it
+          isn't clipped by the dropdown's own overflow-y-auto. */}
+      {expandedKey && (() => {
+        const section = sections.find((s) => s.key === expandedKey);
+        if (!section) return null;
+        return createPortal(
+          <div
+            ref={expandedRef}
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-4"
+            onClick={() => setExpandedKey(null)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[70vh] flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-6 h-6 rounded-lg grid place-items-center shrink-0 ${section.color}`}>
+                    <section.icon size={13} strokeWidth={2} />
+                  </span>
+                  <p className="text-sm font-bold text-slate-700">{section.label}</p>
+                  <span className="text-xs font-bold text-slate-400">{section.count}</span>
+                </div>
+                <button onClick={() => setExpandedKey(null)} className="p-1 text-slate-400 hover:text-slate-700 rounded">
+                  <LuX size={14} />
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+                {section.items.map((item, i) => (
+                  item.href ? (
+                    <Link
+                      key={i}
+                      href={item.href}
+                      onClick={() => { setExpandedKey(null); setOpen(false); }}
+                      className="block px-4 py-2.5 text-sm text-slate-600 hover:bg-slate-50 hover:text-teal-700 transition-colors"
+                    >
+                      {item.text}
+                    </Link>
+                  ) : (
+                    <p key={i} className="px-4 py-2.5 text-sm text-slate-600">{item.text}</p>
+                  )
+                ))}
+              </div>
+            </div>
+          </div>,
+          document.body
+        );
+      })()}
     </div>
   );
 }

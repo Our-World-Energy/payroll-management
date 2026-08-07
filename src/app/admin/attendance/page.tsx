@@ -233,6 +233,7 @@ function defaultDailyDecisionStatuses(weekDates: string[]) {
   }, {});
 }
 
+
 function timeOffTimeFor(timeOffStatus: string) {
   if (timeOffStatus === "PTO" || timeOffStatus === "Sick Leave") return "480 mins";
   if (timeOffStatus === "Sick Leave Half Day" || timeOffStatus === "PTO Half Day") return "240 mins";
@@ -316,6 +317,20 @@ function hasApprovedLeaveRequestFor(date: string, leaveRequests: AdminLeaveReque
   );
 }
 
+// A "Reviewed" row on the main table (and its own row-level "Need Attention"
+// downgrade) is flagged when any day that week has an approved PTO/Sick
+// Leave on file AND more than 240 min (4h) of raw Worksnap Time also logged
+// — the same genuine-conflict definition Attendance Review itself uses,
+// minus Adjusted Time (not loaded here — see the row-level comment where
+// this is called). Leave requests must already be filtered to this row's
+// own email before calling.
+function rowHasLeaveOverworkConflict(row: AttendanceRow, weekDates: string[], rowLeaveRequests: AdminLeaveRequest[]) {
+  return weekDates.some((date) => {
+    if (!hasApprovedLeaveRequestFor(date, rowLeaveRequests)) return false;
+    return (row.dailyWorksnapMinutes?.[date] ?? 0) > 240;
+  });
+}
+
 // Week total — sums each DISTINCT request that overlaps the week once (not
 // once per day it covers), since a request's hours are a flat per-request
 // amount, not scaled by how many days it spans.
@@ -355,7 +370,9 @@ function holidayTimeFor(
   dailyWorksnapMinutes: Record<string, number> = {},
   restDaysStr = "",
   weekDates: string[] = [],
-  hireDate = ""
+  hireDate = "",
+  country = "",
+  allHolidays: HolidayEntry[] = []
 ) {
   if (!usaHolidays.some((h) => h.date.slice(0, 10) === date)) return "-";
   if (isRestDayDate(date, restDaysStr)) return "-";
@@ -364,9 +381,16 @@ function holidayTimeFor(
   // All other working days in the week must have login time — a mid-week
   // new hire's pre-hire days are excluded from this fairness check too, or
   // their (correctly) empty login time would wrongly deny this Holiday's
-  // credit for the days they actually were employed that week.
+  // credit for the days they actually were employed that week. A day that's
+  // the contractor's own-country (Local) Holiday is excluded the same way —
+  // legitimately not worked for a reason unrelated to this US Holiday, so it
+  // shouldn't count against them here either.
   const otherWorkingDays = weekDates.filter(
-    (d) => d !== date && !isRestDayDate(d, restDaysStr) && !isBeforeHireDate(d, hireDate) && !usaHolidays.some((h) => h.date.slice(0, 10) === d)
+    (d) => d !== date
+      && !isRestDayDate(d, restDaysStr)
+      && !isBeforeHireDate(d, hireDate)
+      && !usaHolidays.some((h) => h.date.slice(0, 10) === d)
+      && !localHolidayNameFor(d, country, allHolidays)
   );
   if (otherWorkingDays.some((d) => (dailyWorksnapMinutes[d] ?? 0) === 0)) return "-";
   return "480 mins";
@@ -492,7 +516,9 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 }
 
 // OT is never redistributed between days, with two exceptions, both drawing
-// from the same WEEK's Regular OT pool (RD OT is never touched):
+// from the same WEEK's Regular OT pool first, then — if that pool alone
+// isn't enough — the week's HO OT pool as a fallback (RD OT is never
+// touched, by either tier):
 //   1. A day that is itself Approved (approvedByDate — Attendance Review's
 //      own daily decision, not the leave request's approval) AND covered by
 //      an approved PTO Half Day / Sick Leave Half Day (240 min, via
@@ -517,10 +543,15 @@ function weeklyEvaluatedRegularAllocation(
   rdOtByDate: Record<string, number>,
   approvedByDate: Record<string, boolean> = {},
   halfDayOffByDate: Record<string, number> = {},
-  shortfallEligibleByDate: Record<string, boolean> = {}
-): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> {
+  shortfallEligibleByDate: Record<string, boolean> = {},
+  hoOtByDate: Record<string, number> = {}
+): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number; hoOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
-  weekDates.forEach((d) => { remainingRegularOt[d] = regularOtByDate[d] ?? 0; });
+  const remainingHoOt: Record<string, number> = {};
+  weekDates.forEach((d) => {
+    remainingRegularOt[d] = regularOtByDate[d] ?? 0;
+    remainingHoOt[d] = hoOtByDate[d] ?? 0;
+  });
 
   const borrowedByDate: Record<string, number> = {};
   weekDates.forEach((date) => {
@@ -550,14 +581,27 @@ function weeklyEvaluatedRegularAllocation(
       missing -= take;
       borrowedByDate[date] += take;
     }
+
+    // Regular OT alone wasn't enough — fall back to the week's HO OT pool
+    // for whatever's still missing.
+    for (const otDate of weekDates) {
+      if (missing <= 0) break;
+      const available = remainingHoOt[otDate];
+      if (available <= 0) continue;
+      const take = Math.min(missing, available);
+      remainingHoOt[otDate] -= take;
+      missing -= take;
+      borrowedByDate[date] += take;
+    }
   });
 
-  const result: Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number }> = {};
+  const result: Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number; hoOtMinutes: number }> = {};
   weekDates.forEach((date) => {
     result[date] = {
       evaluatedRegularTime: (regularTimeByDate[date] ?? 0) + borrowedByDate[date],
       regularOtMinutes: remainingRegularOt[date],
       rdOtMinutes: rdOtByDate[date] ?? 0,
+      hoOtMinutes: remainingHoOt[date],
     };
   });
   return result;
@@ -637,6 +681,7 @@ function buildBulkApproveDaySnapshots(
   const regularTimeByDate: Record<string, number> = {};
   const regularOtByDate: Record<string, number> = {};
   const rdOtByDate: Record<string, number> = {};
+  const hoOtByDate: Record<string, number> = {};
   const approvedByDate: Record<string, boolean> = {};
   const halfDayOffByDate: Record<string, number> = {};
   const shortfallEligibleByDate: Record<string, boolean> = {};
@@ -650,20 +695,21 @@ function buildBulkApproveDaySnapshots(
     // Approve save leaves the same per-day decisions "Approve All" would.
     const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate);
+    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
     const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
-    const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
+    const { regularOtMinutes, rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
 
     regularTimeByDate[date] = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
     regularOtByDate[date] = regularOtMinutes;
     rdOtByDate[date] = rdOtMinutes;
+    hoOtByDate[date] = hoOtMinutes;
     approvedByDate[date] = dailyDecisionStatus === "Approved";
     halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
     shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, row.hireDate) && timeValueToMinutes(holidayTime) <= 0;
   });
 
-  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate);
+  const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate, hoOtByDate);
 
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -672,20 +718,20 @@ function buildBulkApproveDaySnapshots(
     const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate);
+    const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
     const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
-    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
+    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes: rawRdOtMinutes } = otMinutesFor(
       timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay,
       dailyDecisionStatus === "Approved", isFullTimeOffDay
     );
-    const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+    const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: 0 };
     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
     // Same week-total formula Attendance Review actually saves as
     // completionMinutes (see completionTotalMinutes in ReviewModal) — not the
     // weekly-reallocated allocation above, which only feeds the day snapshot's
-    // own evaluatedRegular/regularOt/rdOt breakdown fields.
+    // own evaluatedRegular/regularOt/rdOt/hoOt breakdown fields.
     const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
     const otMinutesToFold = rawRdOtMinutes + (isFullTimeOffDay ? rawRegularOtMinutes : 0);
     const completionMinutes = timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
@@ -701,7 +747,7 @@ function buildBulkApproveDaySnapshots(
       evaluatedRegularMinutes: allocation.evaluatedRegularTime,
       regularOtMinutes: allocation.regularOtMinutes,
       rdOtMinutes: allocation.rdOtMinutes,
-      hoOtMinutes,
+      hoOtMinutes: allocation.hoOtMinutes,
       completionMinutes,
       timeOffMinutes: timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)),
     };
@@ -930,6 +976,19 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const contractor = CONTRACTORS.find((item) => item.id === record.contractorId || item.name === record.name);
   const location = contractor?.site ?? record.region;
   const dailyWorksnapMinutes = record.dailyWorksnapMinutes ?? EMPTY_DAILY_WORKSNAP_MINUTES;
+  // Same conflict check the table highlights red per-day — an approved
+  // PTO/Sick Leave on file for a date where more than 240 min (4h) was also
+  // logged (Adjusted Time when set, else Worksnap Time); 240 min or less is
+  // the expected half-day-leave pattern, not a real conflict. If any day in
+  // the week has a genuine conflict, a "Reviewed" week is downgraded to
+  // "Need Attention" in the footer status below, since Approve All would
+  // otherwise silently wave through a week with an unresolved conflict on it.
+  const weekHasLeaveWorkConflict = weekDates.some((date) => {
+    if (!hasApprovedLeaveRequestFor(date, leaveRequests)) return false;
+    const adjustedMinutes = timeValueToMinutes(adjustedTimes[date] ?? "");
+    const loggedMinutes = adjustedMinutes > 0 ? adjustedMinutes : (dailyWorksnapMinutes[date] ?? 0);
+    return loggedMinutes > 240;
+  });
   // Adjusted Time is the secondary time source: once a valid value is entered
   // for a date, it overrides Worksnap Time entirely for every calculation
   // (evaluated time, regular/OT allocation, holiday eligibility, completion
@@ -952,7 +1011,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const indiaTotalMinutes = Math.min(effectiveTotalMinutes, 2400);
   const indiaNetCompletionMinutes = Math.max(0, indiaTotalMinutes - appliedOffsetCredit);
 const totalHolidayMins = weekDates.reduce(
-    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate)),
+    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays)),
     0
   );
   // Displayed US HO Time total — unlike totalHolidayMins (used for Completion
@@ -964,7 +1023,7 @@ const totalHolidayMins = weekDates.reduce(
     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
+    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays);
     const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
     const { rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -976,7 +1035,7 @@ const totalHolidayMins = weekDates.reduce(
       isRestDayDate(date, restDaysStr),
       isApprovedFullTimeOffRequestDay(date, leaveRequests),
       isHolidayDayFor(
-        holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate),
+        holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays),
         localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays)
       )
     ),
@@ -991,7 +1050,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
         const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
         const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
-        const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
+        const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays);
         const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
         const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
         const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
@@ -1005,23 +1064,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     0
   );
   const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(weekDates, leaveRequests);
-  const otTotals = weekDates.reduce(
-    (totals, date) => {
-      const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
-      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
-      const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
-      const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
-      const isRestDay = isRestDayDate(date, restDaysStr);
-      const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
-      const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
-      const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-      const { hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
-      return {
-        ho: totals.ho + hoOtMinutes,
-      };
-    },
-    { ho: 0 }
-  );
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time
   // (not just each day's own), so it's computed once across all weekDates
@@ -1030,6 +1072,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const regularTimeByDate: Record<string, number> = {};
     const regularOtByDate: Record<string, number> = {};
     const rdOtByDate: Record<string, number> = {};
+    const hoOtByDate: Record<string, number> = {};
     const approvedByDate: Record<string, boolean> = {};
     const halfDayOffByDate: Record<string, number> = {};
     const shortfallEligibleByDate: Record<string, boolean> = {};
@@ -1040,24 +1083,26 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
       const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
       const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
-      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
+      const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays);
       const localHolMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
       const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
-      const { regularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
+      const { regularOtMinutes, rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
 
       regularTimeByDate[date] = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
       regularOtByDate[date] = regularOtMinutes;
       rdOtByDate[date] = rdOtMinutes;
+      hoOtByDate[date] = hoOtMinutes;
       approvedByDate[date] = dailyDecisionStatus === "Approved";
       halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
       shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, hireDate) && timeValueToMinutes(holidayTime) <= 0;
     });
 
-    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate);
+    return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate, hoOtByDate);
   })();
   const totalEvaluatedRegularMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.evaluatedRegularTime ?? 0), 0);
   const totalRegularOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.regularOtMinutes ?? 0), 0);
   const totalAdjustedRdOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.rdOtMinutes ?? 0), 0);
+  const totalHoOtMinutes = weekDates.reduce((sum, d) => sum + (regularAllocationByDate[d]?.hoOtMinutes ?? 0), 0);
   // Evaluated Time includes whatever Regular OT a half-day leave day
   // borrowed to complete itself (see evaluatedMinutesWithBorrow), so this
   // total stays consistent with the per-day Evaluated Time column.
@@ -1067,7 +1112,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatuses[date] ?? "No Status", isRestDay, isFullTimeOffDay);
     const isHolidayDay = isHolidayDayFor(
-      holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate),
+      holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays),
       localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays)
     );
     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
@@ -1223,16 +1268,16 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
           const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
           const adjustedTime = adjustedTimes[date] ?? "";
-          const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
+          const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays);
           const adjustedMinutesParsed = timeValueToMinutes(adjustedTime);
           const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
           const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
           const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
-          const { rdOtMinutes: rawRdOtMinutes, hoOtMinutes } = otMinutesFor(
+          const { rdOtMinutes: rawRdOtMinutes } = otMinutesFor(
             timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay,
             dailyDecisionStatus === "Approved", isFullTimeOffDay
           );
-          const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+          const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: 0 };
           const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
 
           return {
@@ -1246,7 +1291,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             evaluatedRegularMinutes: allocation.evaluatedRegularTime,
             regularOtMinutes: allocation.regularOtMinutes,
             rdOtMinutes: allocation.rdOtMinutes,
-            hoOtMinutes,
+            hoOtMinutes: allocation.hoOtMinutes,
             timeOffMinutes: timeValueToMinutes(timeOffRequestMinutesFor(date, leaveRequests)),
           };
         });
@@ -1373,12 +1418,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
                     // Raw Worksnap Time — reference display only, never fed into calculations.
                     const rawWorksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
-                    // Flags a day the contractor has an approved PTO/Sick Leave (full or
-                    // half day) request for, but also logged actual Worksnap Time —
-                    // i.e. they filed leave but reported to work anyway.
-                    const hasLeaveWorkConflict = rawWorksnapTime !== "-" && hasApprovedLeaveRequestFor(date, leaveRequests);
-                    const conflictCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "text-slate-600";
-                    const conflictHighlightCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-red-50 text-slate-600";
                     // Effective time — Adjusted Time when present, else Worksnap Time. Every
                     // calculation below reads this instead of the raw value.
                     const worksnapTime = worksnapTimeForDate(effectiveDailyMinutes, date);
@@ -1386,18 +1425,35 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
                     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
                     const adjustedTime = adjustedTimes[date] ?? "";
-                    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate);
+                    // A day with an approved PTO/Sick Leave (full or half day) request is
+                    // flagged one of two ways depending on how much time (Adjusted Time
+                    // when set, else Worksnap Time) was also logged that day:
+                    //   - 240 min (4h/half-day) or less — the expected half-day-leave
+                    //     pattern (worked half, on leave the other half) — yellow, not a
+                    //     real conflict.
+                    //   - More than 240 min — they filed leave but reported to work well
+                    //     beyond a half day anyway — red, a genuine conflict needing review.
+                    // No approved leave that day means neither highlight applies.
+                    const hasApprovedLeave = hasApprovedLeaveRequestFor(date, leaveRequests);
+                    const rawWorksnapMinutes = timeValueToMinutes(rawWorksnapTime);
+                    const adjustedMinutesValue = timeValueToMinutes(adjustedTime);
+                    const loggedMinutes = adjustedMinutesValue > 0 ? adjustedMinutesValue : rawWorksnapMinutes;
+                    const isShortDay = hasApprovedLeave && loggedMinutes > 0 && loggedMinutes <= 240;
+                    const hasLeaveWorkConflict = rawWorksnapTime !== "-" && hasApprovedLeave && !isShortDay;
+                    const conflictCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "text-slate-600";
+                    const conflictHighlightCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-red-50 text-slate-600";
+                    const holidayTime = holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays);
                     const localHoliday = localHolidayNameFor(date, record.region, allHolidays);
                     const localHolidayMinutes = localHolidayMinutesFor(date, dailyLogs, record.region, allHolidays);
                     const timeOffTime = approvedTimeOffRequestMinutesFor(date, leaveRequests);
                     const isEditingAdjustedTime = editingAdjustedDate === date;
                     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
                     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
-                    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
+                    const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay);
                     const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? rawRegularOtMinutes : 0);
                     const completionTime = completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold));
                     const displayedUsHoMinutes = boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
-                    const regularAllocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0 };
+                    const regularAllocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: 0 };
                     // Includes whatever Regular OT a half-day leave day borrowed to
                     // complete itself, so Evaluated Time stays consistent with
                     // Evaluated Regular Time (see evaluatedMinutesWithBorrow).
@@ -1407,15 +1463,15 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                       <tr key={date}>
                         <td
                           className={`sticky left-0 z-10 w-[156px] min-w-[156px] px-4 py-2 font-medium border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
-                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-800"
+                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-800"
                           }`}
-                          title={hasLeaveWorkConflict ? "Approved PTO/Sick Leave on file for this date, but Worksnap Time was also logged." : undefined}
+                          title={hasLeaveWorkConflict ? "Approved PTO/Sick Leave on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved PTO/Sick Leave on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
                         >
                           {formatDayLabel(date)}
                         </td>
                         {!isIndia && (
                           <td className={`sticky left-[156px] z-10 w-[112px] min-w-[112px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
-                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                            hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
                           }`}>
                             {!isRestDay || rawWorksnapTime !== "-" ? (
                               <div className="flex items-center gap-1.5">
@@ -1446,12 +1502,12 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           </td>
                         )}
                         <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-10 w-[140px] min-w-[140px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
-                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${worksnapTimeClassName(rawWorksnapTime)}`
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : `bg-white ${worksnapTimeClassName(rawWorksnapTime)}`
                         }`}>
                           {rawWorksnapTime}
                         </td>
                         <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
-                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : "bg-white text-slate-600"
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
                         }`}>
                           {isIndia ? "-" : isEditingAdjustedTime ? (
                             <input
@@ -1512,7 +1568,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {displayedUsHoMinutes > 0 ? formatMinutesAsMins(displayedUsHoMinutes) : "-"}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
-                          {hoOtMinutes > 0 ? formatMinutesAsMins(hoOtMinutes) : "-"}
+                          {regularAllocation.hoOtMinutes > 0 ? formatMinutesAsMins(regularAllocation.hoOtMinutes) : "-"}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 ${conflictCellClass}`}>
                           {localHoliday}
@@ -1541,7 +1597,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           })()}
                         </td>
                         <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
-                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
                         }`}>
                           {dailyDecisionStatus}
                         </td>
@@ -1586,7 +1642,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         : <span className="text-slate-500">-</span>}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {otTotals.ho > 0 ? formatMinutesAsMins(otTotals.ho) : "-"}
+                      {totalHoOtMinutes > 0 ? formatMinutesAsMins(totalHoOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       -
@@ -1672,20 +1728,30 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               </table>
             </div>
           </div>
-          {record.weeklyStatus === "For Review" && (
-            <div className="mt-4 flex items-center gap-3 p-3 rounded-xl bg-amber-50 border border-amber-100">
-              <LuCircleAlert size={18} className="text-amber-500" />
-              <div>
-                <p className="text-sm font-bold text-amber-700">{record.weeklyStatus}</p>
-                <p className="text-xs text-slate-500">
-                  Actual: {record.actualMinutes.toLocaleString()} min &middot; Standard: {(isIndia ? 2400 : record.standardMinutes).toLocaleString()} min
-                </p>
-              </div>
-            </div>
-          )}
         </div>
         <div className="px-5 py-3 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
-          {saveError && <p className="mr-auto text-sm font-medium text-red-600">{saveError}</p>}
+          <div className="mr-auto flex items-center gap-3">
+            {record.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}
+            {record.weeklyStatus === "For Review" && (
+              <span className="flex items-center gap-1 text-red-600">
+                <LuCircleAlert size={13} strokeWidth={2} />
+                <span className="text-[11px] font-bold uppercase">For Review</span>
+              </span>
+            )}
+            {record.weeklyStatus === "On Leave" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">On Leave</span>}
+            {record.weeklyStatus === "Reviewed" && (
+              weekHasLeaveWorkConflict ? (
+                <span className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
+                  <LuCircleAlert size={12} strokeWidth={2} />
+                  Need Attention
+                </span>
+              ) : (
+                <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">Reviewed</span>
+              )
+            )}
+            {record.weeklyStatus === "Processed" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">Processed</span>}
+            {saveError && <p className="text-sm font-medium text-red-600">{saveError}</p>}
+          </div>
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
@@ -1874,7 +1940,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       const userLogs = dailyLogs.filter((l) => l.worksnapUserId === r.worksnapUserId);
       cache.set(r.contractorId, {
         weeklyTotals: rowWeeklyTotals(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), rowLeave),
-        holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates, r.hireDate)), 0),
+        holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates, r.hireDate, r.region, allHolidays)), 0),
         localHolidayMins: modalWeekDates.reduce((sum, date) => sum + (localHolidayMinutesFor(date, userLogs, r.region, allHolidays) ?? 0), 0),
         timeOffRequestMins: email ? totalTimeOffRequestMinutesFor(modalWeekDates, rowLeave) : 0,
       });
@@ -2344,6 +2410,18 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
   // from this week's attendance data at all, so it stays accurate whenever a
   // profile is added or removed regardless of whether they logged any time.
   const [contractorRecordsCount, setContractorRecordsCount] = useState<number | null>(null);
+  const [processedCount, setProcessedCount] = useState(0);
+  const [totalToProcess, setTotalToProcess] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
+  const [processingElapsedSeconds, setProcessingElapsedSeconds] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!isProcessing) return;
+    setProcessingElapsedSeconds(0);
+    const id = setInterval(() => setProcessingElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isProcessing]);
 
   const weekDates = week ? datesBetween(week, addDaysIso(week, 6)) : [];
   const leaveRequests = useMemo(() => allLeaveRequests.filter((r) => r.status === "Approved"), [allLeaveRequests]);
@@ -2420,7 +2498,10 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
 
   async function handleProcess() {
     setIsProcessing(true);
+    setCancelling(false);
     setProcessError("");
+    setProcessedCount(0);
+    setTotalToProcess(eligibleRows.length);
 
     const items = eligibleRows.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
@@ -2438,32 +2519,57 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       };
     });
 
-    type BulkSaveResult = { worksnapUserId: number | null; ok: boolean; error?: string };
-    const response = await fetch("/api/attendance/status/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
-    })
-      .then(async (res) => (res.ok ? ((await res.json()) as { results: BulkSaveResult[] }) : null))
-      .catch(() => null);
+    // One request per contractor, awaited sequentially — same DB-connection
+    // pressure as a single batched request (never more than one save in
+    // flight), but this way the client can show real "N of M" progress and
+    // Cancel cleanly between contractors, same as Bulk Approve.
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    let processed = 0;
+    let failedCount = 0;
+    let wasAborted = false;
 
+    for (const item of items) {
+      if (controller.signal.aborted) { wasAborted = true; break; }
+      try {
+        const res = await fetch("/api/attendance/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(item),
+          signal: controller.signal,
+        });
+        if (!res.ok) failedCount++;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") { wasAborted = true; break; }
+        failedCount++;
+      }
+      processed++;
+      setProcessedCount(processed);
+    }
+
+    abortControllerRef.current = null;
     setIsProcessing(false);
+    setCancelling(false);
 
-    const results = response?.results ?? [];
-    const failedCount = results.filter((r) => !r.ok).length;
+    if (wasAborted) {
+      setProcessError(`Cancelled after ${processed} of ${items.length} — contractors already processed before cancelling stay saved. Retry the rest, or refresh to check.`);
+      if (processed > 0) onProcessed();
+      return;
+    }
 
-    if (!response || failedCount > 0) {
-      setProcessError(
-        failedCount > 0
-          ? `${failedCount} of ${results.length} record${results.length !== 1 ? "s" : ""} failed to process. Please try again.`
-          : "Unable to process attendance. Please try again."
-      );
-      if (results.some((r) => r.ok)) onProcessed();
+    if (failedCount > 0) {
+      setProcessError(`${failedCount} of ${items.length} record${items.length !== 1 ? "s" : ""} failed to process. Please try again.`);
+      if (processed > failedCount) onProcessed();
       return;
     }
 
     onProcessed();
     onClose();
+  }
+
+  function handleCancelProcess() {
+    setCancelling(true);
+    abortControllerRef.current?.abort();
   }
 
   return (
@@ -2527,6 +2633,36 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
           </button>
         </div>
       </div>
+
+      {/* Processing overlay — blocks interaction and shows live progress
+          while a process is in flight (a large batch can take a while). */}
+      {isProcessing && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[240px]">
+            <LuRefreshCw size={28} className="text-emerald-600 animate-spin" />
+            <p className="text-sm font-semibold text-slate-700">{cancelling ? "Cancelling…" : "Processing attendance…"}</p>
+            <p className="text-xs font-semibold text-emerald-700 tabular-nums">
+              {processedCount} of {totalToProcess} contractor{totalToProcess !== 1 ? "s" : ""} processed
+            </p>
+            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-emerald-600 transition-all"
+                style={{ width: `${totalToProcess > 0 ? Math.round((processedCount / totalToProcess) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 tabular-nums">{formatElapsedSeconds(processingElapsedSeconds)}</p>
+            <button
+              type="button"
+              onClick={handleCancelProcess}
+              disabled={cancelling}
+              title="Contractors already processed before cancelling will stay saved — this only stops waiting on the rest"
+              className="mt-1 px-4 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2733,7 +2869,20 @@ export default function AttendancePage() {
     const matchesCountry = countryFilter === "All" || row.region === countryFilter;
     const matchesShiftType = shiftTypeFilter === "All" || row.shiftType === shiftTypeFilter;
     const matchesDepartment = departmentFilter === "All" || department === departmentFilter;
-    const matchesStatus = statusFilter === "All" || row.weeklyStatus === statusFilter;
+    // "Need Attention" isn't a stored weeklyStatus — it's a "Reviewed" row
+    // with a genuine leave/overwork conflict (same check as the stats card
+    // and the row's own badge). Filtering by "Reviewed" excludes those rows,
+    // so the two options stay mutually exclusive, matching the stats cards.
+    const rowNeedsAttentionForStatus = row.weeklyStatus === "Reviewed" && rowHasLeaveOverworkConflict(
+      row, weekDates, leaveRequests.filter((r) => r.email === (row.role.includes("@") ? row.role : ""))
+    );
+    const matchesStatus = statusFilter === "All"
+      ? true
+      : statusFilter === "Need Attention"
+      ? rowNeedsAttentionForStatus
+      : statusFilter === "Reviewed"
+      ? row.weeklyStatus === "Reviewed" && !rowNeedsAttentionForStatus
+      : row.weeklyStatus === statusFilter;
 
     return matchesName && matchesPayCategory && matchesCountry && matchesShiftType && matchesDepartment && matchesStatus;
   }).sort((a, b) => a.name.localeCompare(b.name));
@@ -2761,12 +2910,21 @@ export default function AttendancePage() {
 
   const perfectStandard  = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Standard Met").length;
   const forReviewCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "For Review").length;
-  const reviewedCount    = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed").length;
+  // A "Reviewed" row is split into "Need Attention" (same genuine leave/
+  // overwork conflict Attendance Review itself flags) vs a clean "Reviewed"
+  // — mutually exclusive, so neither count double-counts the other.
+  const reviewedRows        = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed");
+  const needsAttentionCount = reviewedRows.filter((r) => {
+    const email = r.role.includes("@") ? r.role : "";
+    return rowHasLeaveOverworkConflict(r, weekDates, leaveRequests.filter((req) => req.email === email));
+  }).length;
+  const reviewedCount    = reviewedRows.length - needsAttentionCount;
   const processedCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Processed").length;
 
   const STATS = [
     { label: "Standard Met",      value: perfectStandard, color: "text-emerald-600", iconBg: "bg-teal-50",   iconColor: "text-teal-600",   Icon: LuCircleCheck },
     { label: "For Review",        value: forReviewCount,  color: "text-red-600",    iconBg: "bg-red-50",    iconColor: "text-red-600",    Icon: LuCircleAlert },
+    { label: "Need Attention",    value: needsAttentionCount, color: "text-rose-600", iconBg: "bg-rose-50", iconColor: "text-rose-600", Icon: LuCircleAlert },
     { label: "Reviewed", value: reviewedCount,   color: "text-orange-600", iconBg: "bg-orange-50", iconColor: "text-orange-600", Icon: LuClock       },
     { label: "Processed", value: processedCount, color: "text-blue-600",   iconBg: "bg-blue-50",   iconColor: "text-blue-600",   Icon: LuListChecks  },
   ];
@@ -2849,7 +3007,7 @@ export default function AttendancePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
           <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
             <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
@@ -2956,6 +3114,7 @@ export default function AttendancePage() {
             <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={statusFilter} onChange={setStatusFilter} label="Filter by status">
               <option value="All">All Statuses</option>
               <option value="For Review">For Review</option>
+              <option value="Need Attention">Need Attention</option>
               <option value="Reviewed">Reviewed</option>
               <option value="Standard Met">Standard Met</option>
               <option value="Processed">Processed</option>
@@ -3047,13 +3206,23 @@ export default function AttendancePage() {
                 const isForReview = row.weeklyStatus === "For Review";
                 const isReviewed = row.weeklyStatus === "Reviewed";
                 const isProcessed = row.weeklyStatus === "Processed";
+                // Same conflict check Attendance Review flags per-day and in its own
+                // footer status (see ReviewModal) — an approved PTO/Sick Leave on file
+                // for a date where more than 240 min (4h) of raw Worksnap Time was also
+                // logged. Adjusted Time isn't available here (only fetched per-contractor
+                // when Attendance Review itself opens), so this uses raw Worksnap Time
+                // only — a "Reviewed" row is downgraded to "Need Attention" here too, so
+                // the weekly table always agrees with what Attendance Review would show.
+                const rowEmailForConflict = row.role.includes("@") ? row.role : "";
+                const rowLeaveRequestsForConflict = leaveRequests.filter((r) => r.email === rowEmailForConflict);
+                const needsAttention = isReviewed && rowHasLeaveOverworkConflict(row, weekDates, rowLeaveRequestsForConflict);
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
                 const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
                 const rowDailyMins = row.dailyWorksnapMinutes ?? {};
                 const rowRestDays = restDaysForAttendanceRow(row);
                 const holidayBonusMins = weekDates.reduce(
-                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate)),
+                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate, row.region, allHolidays)),
                   0
                 );
                 const completionMins = row.completionMinutes ?? (
@@ -3246,9 +3415,16 @@ export default function AttendancePage() {
                             </span>
                           )}
                           {isReviewed && (
-                            <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
-                              Reviewed
-                            </span>
+                            needsAttention ? (
+                              <span className="flex items-center justify-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
+                                <LuCircleAlert size={12} strokeWidth={2} />
+                                Need Attention
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
+                                Reviewed
+                              </span>
+                            )
                           )}
                           {isProcessed && (
                             <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">

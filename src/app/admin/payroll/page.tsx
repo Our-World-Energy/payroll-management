@@ -14,6 +14,12 @@ import { computePayComponents } from "@/lib/payrollVoucher";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 
+function formatElapsedSeconds(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 type PayrollRow = {
   email: string;
   name: string;
@@ -1396,6 +1402,19 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [processError, setProcessError] = useState("");
+  const [processedSoFar, setProcessedSoFar] = useState(0);
+  const [totalToProcess, setTotalToProcess] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
+  const [processingElapsedSeconds, setProcessingElapsedSeconds] = useState(0);
+  const cancelledRef = useRef(false);
+  const isBusy = isProcessing || isReprocessing;
+
+  useEffect(() => {
+    if (!isBusy) return;
+    setProcessingElapsedSeconds(0);
+    const id = setInterval(() => setProcessingElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [isBusy]);
 
   const reviewedCount   = rows.filter((r) => r.status === "Reviewed").length;
   const forReviewCount  = rows.filter((r) => r.status === "For Review").length;
@@ -1468,26 +1487,58 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
     });
   }
 
+  // One contractor at a time, awaited sequentially, instead of one call
+  // covering the whole batch — this is what makes a real "N of M processed"
+  // counter possible and lets Cancel stop cleanly between contractors
+  // instead of having no visibility into an in-flight batch at all (same
+  // approach as Bulk Approve / Process Attendance).
   async function runProcess(rowsToProcess: PayrollRow[], setBusy: (v: boolean) => void, label: string) {
     setBusy(true);
+    setCancelling(false);
     setProcessError("");
+    setProcessedSoFar(0);
+    setTotalToProcess(rowsToProcess.length);
+    cancelledRef.current = false;
 
     const items = buildItems(rowsToProcess);
-    try {
-      const result = await processWeeklyPayroll(items);
-      if (!result.ok) {
-        setProcessError(`${result.failed.length} of ${items.length} record${items.length !== 1 ? "s" : ""} failed to process. Please try again.`);
-        if (result.processed > 0) onProcessed();
-        return;
+    let processed = 0;
+    const failed: Array<{ email: string; error: string }> = [];
+
+    for (const item of items) {
+      if (cancelledRef.current) break;
+      try {
+        const result = await processWeeklyPayroll([item]);
+        if (!result.ok) failed.push(...result.failed);
+      } catch (err) {
+        failed.push({ email: item.email, error: err instanceof Error ? err.message : "Failed to process payroll." });
       }
-      toast.success(`${result.processed} contractor${result.processed !== 1 ? "s" : ""} ${label} successfully`);
-      onProcessed();
-      onClose();
-    } catch (err) {
-      setProcessError(err instanceof Error ? err.message : "Failed to process payroll. Please try again.");
-    } finally {
-      setBusy(false);
+      processed++;
+      setProcessedSoFar(processed);
     }
+
+    setBusy(false);
+    setCancelling(false);
+
+    if (cancelledRef.current) {
+      setProcessError(`Cancelled after ${processed} of ${items.length} — contractors already processed before cancelling stay saved. Retry the rest, or refresh to check.`);
+      if (processed > failed.length) onProcessed();
+      return;
+    }
+
+    if (failed.length > 0) {
+      setProcessError(`${failed.length} of ${items.length} record${items.length !== 1 ? "s" : ""} failed to process. Please try again.`);
+      if (processed > failed.length) onProcessed();
+      return;
+    }
+
+    toast.success(`${processed} contractor${processed !== 1 ? "s" : ""} ${label} successfully`);
+    onProcessed();
+    onClose();
+  }
+
+  function handleCancelProcess() {
+    setCancelling(true);
+    cancelledRef.current = true;
   }
 
   function handleProcess() {
@@ -1567,6 +1618,38 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
           </button>
         </div>
       </div>
+
+      {/* Processing overlay — blocks interaction and shows live progress
+          while a process is in flight (a large batch can take a while). */}
+      {isBusy && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl px-8 py-7 flex flex-col items-center gap-3 min-w-[240px]">
+            <LuRefreshCw size={28} className="text-blue-600 animate-spin" />
+            <p className="text-sm font-semibold text-slate-700">
+              {cancelling ? "Cancelling…" : isReprocessing ? "Re-Processing payroll…" : "Processing payroll…"}
+            </p>
+            <p className="text-xs font-semibold text-blue-700 tabular-nums">
+              {processedSoFar} of {totalToProcess} contractor{totalToProcess !== 1 ? "s" : ""} processed
+            </p>
+            <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all"
+                style={{ width: `${totalToProcess > 0 ? Math.round((processedSoFar / totalToProcess) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-400 tabular-nums">{formatElapsedSeconds(processingElapsedSeconds)}</p>
+            <button
+              type="button"
+              onClick={handleCancelProcess}
+              disabled={cancelling}
+              title="Contractors already processed before cancelling will stay saved — this only stops waiting on the rest"
+              className="mt-1 px-4 py-1.5 text-xs font-semibold text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 hover:text-red-600 hover:border-red-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {cancelling ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
