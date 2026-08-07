@@ -176,58 +176,6 @@ export function calculateSickLeaveBalance(hireDate: string, cutoff: CutoffDate =
   return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL, cutoff);
 }
 
-// Whenever newly-accrued Sick Leave becomes available, any outstanding
-// Advance Sick Leave balance is repaid first: the newly-accrued amount is
-// credited to Sick Leave Used (instead of increasing Sick Leave Available)
-// until the advance reaches zero, then any leftover accrual increases
-// Available normally. Repayment never exceeds either the amount just accrued
-// or the remaining advance balance. advanceSickLeaveUsed is a running total
-// of every repayment ever made, for the "Advance Leave Used" scorecard —
-// it only ever grows, unlike advanceSickLeave (the remaining balance).
-export function applyAdvanceSickLeaveRepayment(
-  previousSickLeaveBalance: number,
-  nextSickLeaveBalance: number,
-  currentSickLeaveUsed: number,
-  currentAdvanceSickLeave: number,
-  currentAdvanceSickLeaveUsed: number
-): { sickLeaveUsed: number; advanceSickLeave: number; advanceSickLeaveUsed: number } {
-  const accrued = nextSickLeaveBalance - previousSickLeaveBalance;
-  if (accrued <= 0 || currentAdvanceSickLeave <= 0) {
-    return { sickLeaveUsed: currentSickLeaveUsed, advanceSickLeave: currentAdvanceSickLeave, advanceSickLeaveUsed: currentAdvanceSickLeaveUsed };
-  }
-  const repayment = Math.min(accrued, currentAdvanceSickLeave);
-  return {
-    sickLeaveUsed: roundBalance(currentSickLeaveUsed + repayment),
-    advanceSickLeave: roundBalance(currentAdvanceSickLeave - repayment),
-    advanceSickLeaveUsed: roundBalance(currentAdvanceSickLeaveUsed + repayment),
-  };
-}
-
-// Whenever newly-accrued PTO becomes available, any outstanding Advance
-// PTO/Birthday Leave balance (stored on birthdayLeave) is repaid first: the
-// newly-accrued amount is credited to PTO Used (instead of increasing PTO
-// Available) until the advance reaches zero, then any leftover accrual
-// increases Available normally. Mirrors applyAdvanceSickLeaveRepayment for
-// the PTO bucket, including the running birthdayLeaveUsed total.
-export function applyAdvancePtoRepayment(
-  previousPtoBalance: number,
-  nextPtoBalance: number,
-  currentPtoUsed: number,
-  currentBirthdayLeave: number,
-  currentBirthdayLeaveUsed: number
-): { ptoUsed: number; birthdayLeave: number; birthdayLeaveUsed: number } {
-  const accrued = nextPtoBalance - previousPtoBalance;
-  if (accrued <= 0 || currentBirthdayLeave <= 0) {
-    return { ptoUsed: currentPtoUsed, birthdayLeave: currentBirthdayLeave, birthdayLeaveUsed: currentBirthdayLeaveUsed };
-  }
-  const repayment = Math.min(accrued, currentBirthdayLeave);
-  return {
-    ptoUsed: roundBalance(currentPtoUsed + repayment),
-    birthdayLeave: roundBalance(currentBirthdayLeave - repayment),
-    birthdayLeaveUsed: roundBalance(currentBirthdayLeaveUsed + repayment),
-  };
-}
-
 // Once a contractor's real PTO accrual has a full day (>=8h) available,
 // any outstanding Advance PTO/Birthday Leave balance is wiped entirely —
 // both the remaining pool (Time) and the running Used total — since the

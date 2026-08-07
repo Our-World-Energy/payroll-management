@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, applyAdvancePtoRepayment, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 
 const TABLE = "contractor_profiles";
@@ -44,54 +44,6 @@ function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
   return createClient(url, key, { auth: { persistSession: false } });
-}
-
-// applyAdvancePtoRepayment silently moves hours from an outstanding Advance
-// PTO/Birthday Leave balance into PTO Used whenever new accrual comes in —
-// with no leave request behind it, so Used could climb with nothing in
-// Historical Request Data to explain it. This logs an "Approved" audit row
-// into contractor_leave_requests whenever a repayment actually occurs, so
-// it's traceable the same way every other Used-affecting event already is.
-// (Advance Sick Leave is no longer auto-repaid this way — see updateContractor
-// and backfillLeaveBalances below.)
-async function logAdvanceRepayment(
-  sb: ReturnType<typeof getSupabase>,
-  email: string,
-  hours: number
-): Promise<void> {
-  if (hours <= 0) return;
-  const id = crypto.randomUUID();
-  const today = new Date().toISOString().slice(0, 10);
-  const now = new Date().toISOString();
-  const reason = "Automatic repayment of outstanding Advance PTO/Birthday Leave from newly-accrued PTO.";
-  await sb.from("contractor_leave_requests").insert({
-    id,
-    email,
-    type: "Advance PTO Repayment",
-    startDate: today,
-    endDate: today,
-    durationDays: 0,
-    reason,
-    status: "Approved",
-    ptoUsedHours: hours,
-    sickLeaveUsedHours: 0,
-    specialLeaveUsedHours: 0,
-    createdAt: now,
-    updatedAt: now,
-  });
-  await logTimeOffRequestHistory(sb, {
-    requestId: id,
-    email,
-    type: "Advance PTO Repayment",
-    startDate: today,
-    endDate: today,
-    durationDays: 0,
-    reason,
-    status: "Approved",
-    ptoUsedHours: hours,
-    sickLeaveUsedHours: 0,
-    specialLeaveUsedHours: 0,
-  });
 }
 
 function toContractor(row: Record<string, unknown>): Contractor {
@@ -338,11 +290,11 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
   const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
 
-  // Any outstanding Advance PTO/Birthday Leave is repaid out of newly-accrued
-  // PTO before it's allowed to raise the Available balance — compared against
-  // the currently-stored balance/used/advance, not whatever the client
-  // happens to have in memory. Advance Sick Leave is no longer auto-repaid
-  // this way — it's only ever adjusted explicitly via Leave Override/Grant now.
+  // Advance PTO/Birthday Leave and Advance Sick Leave are no longer
+  // auto-repaid from newly-accrued balance — they're only ever adjusted
+  // explicitly via Leave Override/Grant now. Compared against the
+  // currently-stored balance/used/advance, not whatever the client happens
+  // to have in memory.
   const { data: existing } = await sb.from(TABLE)
     .select("sickLeaveBalance, sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, ptoBalance, ptoUsed, birthdayLeave, birthdayLeaveUsed")
     .eq("uid", c.uid)
@@ -350,14 +302,9 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const sickLeaveUsed        = existing?.sickLeaveUsed        ?? (c.sickLeaveUsed        ?? 0);
   const advanceSickLeave     = existing?.advanceSickLeave     ?? (c.advanceSickLeave     ?? 0);
   const advanceSickLeaveUsed = existing?.advanceSickLeaveUsed ?? (c.advanceSickLeaveUsed ?? 0);
-  const { ptoUsed, birthdayLeave, birthdayLeaveUsed } = applyAdvancePtoRepayment(
-    existing?.ptoBalance ?? 0,
-    ptoBalance,
-    existing?.ptoUsed ?? (c.ptoUsed ?? 0),
-    existing?.birthdayLeave ?? (c.birthdayLeave ?? 0),
-    existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0)
-  );
-  const ptoRepayment = birthdayLeaveUsed - (existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0));
+  const ptoUsed           = existing?.ptoUsed           ?? (c.ptoUsed           ?? 0);
+  const birthdayLeave     = existing?.birthdayLeave     ?? (c.birthdayLeave     ?? 0);
+  const birthdayLeaveUsed = existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0);
 
   const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
   const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
@@ -406,8 +353,6 @@ export async function updateContractor(c: Contractor): Promise<void> {
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   }).eq("uid", c.uid);
   if (error) throw new Error(error.message);
-
-  await logAdvanceRepayment(sb, c.email, ptoRepayment);
 }
 
 export async function deleteContractor(uid: string): Promise<void> {
@@ -461,18 +406,15 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
     if (!row.hireDate) continue;
     const ptoBalance       = calculatePtoBalance(row.hireDate, cutoff);
     const sickLeaveBalance = calculateSickLeaveBalance(row.hireDate, cutoff);
-    // Advance Sick Leave is no longer auto-repaid — sickLeaveUsed/advanceSickLeave/
-    // advanceSickLeaveUsed are carried through unchanged.
+    // Advance PTO/Birthday Leave and Advance Sick Leave are no longer
+    // auto-repaid — the used/advance/advanceUsed fields are carried through
+    // unchanged; only the underlying accrued balance is refreshed.
     const sickLeaveUsed        = row.sickLeaveUsed        ?? 0;
     const advanceSickLeave     = row.advanceSickLeave     ?? 0;
     const advanceSickLeaveUsed = row.advanceSickLeaveUsed ?? 0;
-    const { ptoUsed, birthdayLeave, birthdayLeaveUsed } = applyAdvancePtoRepayment(
-      row.ptoBalance ?? 0,
-      ptoBalance,
-      row.ptoUsed ?? 0,
-      row.birthdayLeave ?? 0,
-      row.birthdayLeaveUsed ?? 0
-    );
+    const ptoUsed           = row.ptoUsed           ?? 0;
+    const birthdayLeave     = row.birthdayLeave     ?? 0;
+    const birthdayLeaveUsed = row.birthdayLeaveUsed ?? 0;
     const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
     const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
     await sb.from(TABLE).update({
@@ -482,9 +424,6 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
       advanceSickLeave: sickAdvanceReset.advanceSickLeave,
       advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
     }).eq("uid", row.uid);
-    if (row.email) {
-      await logAdvanceRepayment(sb, row.email, birthdayLeaveUsed - (row.birthdayLeaveUsed ?? 0));
-    }
     updated++;
   }
   return { updated };
