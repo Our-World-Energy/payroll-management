@@ -106,8 +106,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
         <div className={`px-4 py-4 border-b ${sidebar.brand} shrink-0 flex items-center justify-between gap-2 min-h-16`}>
           {(!collapsed || mobile) && (
             <div className="min-w-0">
-              <Image src="/logo.svg" alt="Our World Energy" width={120} height={24} priority
-                className={dark ? "brightness-0 invert" : ""} />
+              <Image src={dark ? "/logo-dark.svg" : "/logo.svg"} alt="Our World Energy" width={120} height={24} priority />
               <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${sidebar.label}`}>Contractor Portal</p>
             </div>
           )}

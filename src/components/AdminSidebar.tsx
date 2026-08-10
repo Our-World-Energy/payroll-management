@@ -81,12 +81,11 @@ export function AdminSidebar() {
           {(!collapsed || mobile) && (
             <div className="min-w-0">
               <Image
-                src="/logo.svg"
+                src={dark ? "/logo-dark.svg" : "/logo.svg"}
                 alt="Our World Energy"
                 width={140}
                 height={28}
                 priority
-                className={dark ? "brightness-0 invert" : ""}
               />
               <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${s.label}`}>
                 Admin Console
