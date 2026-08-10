@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useAdminTheme } from "@/components/AdminThemeContext";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint } from "react-icons/lu";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
@@ -2668,6 +2669,7 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
 }
 
 export default function AttendancePage() {
+  const { dark } = useAdminTheme();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [weeks, setWeeks] = useState<string[]>([]);
@@ -2964,8 +2966,8 @@ export default function AttendancePage() {
             <LuFingerprint size={18} strokeWidth={2} />
           </div>
           <div>
-            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Attendance Management</h2>
-            <p className="text-xs md:text-sm text-slate-600 mt-0.5">Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Attendance Management</h2>
+            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
@@ -2998,36 +3000,36 @@ export default function AttendancePage() {
               <LuListChecks size={14} strokeWidth={2} />
               Process
             </button>
-            <button className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50">
+            <button className={`flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 rounded-lg text-xs font-semibold border ${dark ? "bg-white/8 border-white/15 text-white/80 hover:bg-white/15" : "bg-white border-slate-200 text-[#003527] hover:bg-slate-50"}`}>
               <LuFileText size={14} />Export
             </button>
           </div>
-          <p className="text-xs text-slate-400">Last updated: <span className="font-semibold text-slate-500">{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
+          <p className={`text-xs ${dark ? "text-white/30" : "text-slate-400"}`}>Last updated: <span className={`font-semibold ${dark ? "text-white/50" : "text-slate-500"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
-            <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
-            <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${color}`}>{value}</p></div>
+          <div key={label} className={`p-2.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-2.5 ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${dark ? "bg-white/8 text-white/60" : `${iconBg} ${iconColor}`}`}><Icon size={14} strokeWidth={1.75} /></div>
+            <div><p className={`text-[10px] font-bold uppercase tracking-wider ${dark ? "text-white/40" : "text-slate-500"}`}>{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p></div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className={`rounded-xl border overflow-hidden ${dark ? "bg-[#1c2320] border-white/10" : "bg-white border-slate-200"}`}>
         {/* Table header toolbar */}
-        <div className="px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 bg-linear-to-b from-slate-50/80 to-white">
+        <div className={`px-4 md:px-6 py-3 border-b flex flex-col gap-3 ${dark ? "bg-[#1c2320] border-white/10" : "bg-linear-to-b from-slate-50/80 to-white border-slate-100"}`}>
           {/* Row 1: title + week selector */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Time Tracking</h3>
-              <p className="mt-0.5 text-xs font-medium text-slate-500">
-                Summed from Worksnap entries · <span className="font-semibold text-slate-600">{formatRangeLabel(rangeFrom, rangeTo)}</span>
+              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Time Tracking</h3>
+              <p className={`mt-0.5 text-xs font-medium ${dark ? "text-white/40" : "text-slate-500"}`}>
+                Summed from Worksnap entries · <span className={`font-semibold ${dark ? "text-white/60" : "text-slate-600"}`}>{formatRangeLabel(rangeFrom, rangeTo)}</span>
               </p>
               {isLoadingWorksnap && (
-                <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                <p className={`mt-1 inline-flex items-center gap-1.5 text-xs font-medium ${dark ? "text-teal-400" : "text-teal-600"}`}>
                   <LuRefreshCw size={12} className="animate-spin" /> Loading Worksnap entries…
                 </p>
               )}
@@ -3046,27 +3048,27 @@ export default function AttendancePage() {
                 <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
               )}
             </div>
-            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-full md:w-auto overflow-x-auto">
+            <div className={`flex items-center gap-1.5 rounded-xl border p-1.5 shadow-sm w-full md:w-auto overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
               <div className="flex gap-1">
                 {weeks.slice(0, 4).map((w) => (
                   <button key={w} onClick={() => setWeek(w)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
                 ))}
               </div>
-              <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
+              <div className={`h-6 w-px mx-0.5 shrink-0 ${dark ? "bg-white/15" : "bg-slate-200"}`} />
               <div className="relative shrink-0">
                 <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
                   <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
                 </button>
                 {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
-              <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
+              <div className={`h-6 w-px mx-0.5 shrink-0 ${dark ? "bg-white/15" : "bg-slate-200"}`} />
               <select
                 value={week}
                 onChange={(e) => setWeek(e.target.value)}
                 title="Select any week from the last few months, including previous months"
-                className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600 outline-none focus:ring-2 focus:ring-teal-500"
+                className={`h-8 shrink-0 rounded-lg border px-2 text-xs font-bold outline-none focus:ring-2 focus:ring-teal-500 ${dark ? "bg-white/5 border-white/10 text-white/70" : "bg-white border-slate-200 text-slate-600"}`}
               >
                 {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
               </select>
@@ -3082,7 +3084,7 @@ export default function AttendancePage() {
                 value={nameSearch}
                 onChange={(event) => setNameSearch(event.target.value)}
                 placeholder="Search by name or email…"
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-800 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+                className={`h-10 w-full rounded-lg border pl-9 pr-8 text-sm outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
               />
               {nameSearch && (
                 <button
@@ -3129,8 +3131,8 @@ export default function AttendancePage() {
                   <LuX size={14} strokeWidth={2.5} /> Clear
                 </button>
               )}
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 whitespace-nowrap">
-                <span className="font-bold text-[#003527]">{filteredAttendanceRows.length}</span> shown
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
+                <span className={`font-bold ${dark ? "text-white" : "text-[#003527]"}`}>{filteredAttendanceRows.length}</span> shown
               </span>
             </div>
           </div>
@@ -3171,7 +3173,7 @@ export default function AttendancePage() {
             <tbody>
               {isLoadingWorksnap && attendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     <span className="inline-flex items-center gap-1.5">
                       <LuRefreshCw size={14} className="animate-spin" /> Loading attendance data…
                     </span>
@@ -3180,7 +3182,7 @@ export default function AttendancePage() {
               )}
               {!isLoadingWorksnap && filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     {worksnapError ? (
                       <span className="inline-flex items-center gap-2 text-red-600">
                         Unable to load attendance data. {worksnapError}
@@ -3235,13 +3237,13 @@ export default function AttendancePage() {
                 return (
                   <tr
                     key={row.contractorId}
-                    className={`transition-colors group ${missingContractorProfile ? "bg-red-50 hover:bg-red-100" : "hover:bg-slate-50/80"}`}
+                    className={`transition-colors group ${missingContractorProfile ? "bg-red-50 hover:bg-red-100" : dark ? "hover:bg-white/5" : "hover:bg-slate-50/80"}`}
                   >
                     {/* Contractor */}
                     <td
                       title={missingContractorProfile ? "Not yet added in Contractor Details" : undefined}
-                      className={`px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 border-r border-b border-slate-200 overflow-hidden ${
-                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      className={`px-4 md:px-6 py-3 md:py-4 sticky left-0 z-10 border-r border-b overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100 border-red-200" : dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"
                       }`}
                       style={{ minWidth: 280, width: 280, maxWidth: 280 }}
                     >
@@ -3253,116 +3255,116 @@ export default function AttendancePage() {
                           <button
                             onClick={() => setBreakdownTarget(row)}
                             title="Task breakdown"
-                            className="text-sm font-semibold text-slate-900 whitespace-nowrap hover:text-emerald-700 hover:underline text-left"
+                            className={`text-sm font-semibold whitespace-nowrap hover:underline text-left ${dark ? "text-white/90 hover:text-emerald-300" : "text-slate-900 hover:text-emerald-700"}`}
                           >
                             {row.name}
                           </button>
-                          <p className="text-xs text-slate-500 whitespace-nowrap">{row.role}</p>
+                          <p className={`text-xs whitespace-nowrap ${dark ? "text-white/40" : "text-slate-500"}`}>{row.role}</p>
                         </div>
                       </div>
                     </td>
 
                     {/* Department */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 text-sm font-medium text-slate-600 whitespace-nowrap border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 text-sm font-medium whitespace-nowrap border-r border-b ${dark ? "text-white/55 border-white/8" : "text-slate-600 border-slate-100"}`}>
                       {departmentForAttendanceRow(row)}
                     </td>
 
                     {/* Actual */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className={`text-sm font-bold ${isForReview ? "text-red-600" : "text-slate-900"}`}>
+                        <span className={`text-sm font-bold ${isForReview ? "text-red-500" : dark ? "text-white/85" : "text-slate-900"}`}>
                           {row.actualMinutes.toLocaleString()}
                         </span>
                       )}
                     </td>
 
                     {/* Total Evaluated Regular Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalEvaluatedRegularMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalEvaluatedRegularMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalEvaluatedRegularMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total Regular OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalRegularOtMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalRegularOtMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalRegularOtMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total RD OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalRdOtMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalRdOtMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalRdOtMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total Evaluated Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalEvaluatedMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalEvaluatedMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalEvaluatedMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total US HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalUsHoMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalUsHoMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalUsHoMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total HO OT Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalHoOtMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalHoOtMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalHoOtMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total Local HO Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || !row.totalLocalHolidayMinutes ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
-                        <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(row.totalLocalHolidayMinutes)}</span>
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(row.totalLocalHolidayMinutes)}</span>
                       )}
                     </td>
 
                     {/* Total Time Off Request Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {(() => {
                         const rowEmail = row.role.includes("@") ? row.role : "";
                         const minutes = rowEmail
                           ? totalTimeOffRequestMinutesFor(weekDates, leaveRequests.filter((r) => r.email === rowEmail))
                           : 0;
                         return isOnLeave || minutes === 0 ? (
-                          <span className="text-sm text-slate-400">—</span>
+                          <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                         ) : (
-                          <span className="text-sm font-semibold text-slate-900">{formatMinutesAsMins(minutes)}</span>
+                          <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(minutes)}</span>
                         );
                       })()}
                     </td>
 
                     {/* Ind Time */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave ? (
-                        <span className="text-sm text-slate-400">—</span>
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
                       ) : (
                         <span className="flex items-center gap-1.5">
-                          <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-600" : "text-slate-900"}`}>
+                          <span className={`text-sm font-semibold ${completionMins > 0 && completionMins < 2400 ? "text-red-500" : dark ? "text-white/80" : "text-slate-900"}`}>
                             {completionMins > 0 ? formatMinutesAsMins(completionMins) : "—"}
                           </span>
                           {holidayBonusMins > 0 && (
@@ -3375,11 +3377,11 @@ export default function AttendancePage() {
                     </td>
 
                     {/* Variance */}
-                    <td className="px-4 md:px-6 py-3 md:py-4 border-r border-b border-slate-100">
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {isOnLeave || isStandard || isReviewed || isProcessed ? (
-                        <span className="text-sm text-slate-400">--</span>
+                        <span className={`text-sm ${dark ? "text-white/25" : "text-slate-400"}`}>--</span>
                       ) : (
-                        <span className="text-sm font-medium text-red-600">
+                        <span className="text-sm font-medium text-red-500">
                           {variance > 0 ? `+${variance}` : variance}
                         </span>
                       )}
@@ -3387,8 +3389,8 @@ export default function AttendancePage() {
 
                     {/* Status */}
                     <td
-                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 border-l border-b border-slate-200 overflow-hidden ${
-                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-[175px] z-10 border-l border-b overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100 border-red-200" : dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"
                       }`}
                       style={{ minWidth: 170, width: 170, maxWidth: 170 }}
                     >
@@ -3399,35 +3401,35 @@ export default function AttendancePage() {
                       ) : (
                         <>
                           {isStandard && (
-                            <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">
+                            <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${dark ? "bg-emerald-500/20 text-emerald-300" : "bg-emerald-100 text-emerald-700"}`}>
                               Standard Met
                             </span>
                           )}
                           {isForReview && (
-                            <span className="flex items-center justify-center gap-1 text-red-600">
-                              <LuCircleAlert size={15} strokeWidth={2} className="fill-red-100" />
+                            <span className="flex items-center justify-center gap-1 text-red-500">
+                              <LuCircleAlert size={15} strokeWidth={2} className={dark ? "" : "fill-red-100"} />
                               <span className="text-[11px] font-bold uppercase">For Review</span>
                             </span>
                           )}
                           {isOnLeave && (
-                            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">
+                            <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${dark ? "bg-blue-500/20 text-blue-300" : "bg-blue-100 text-blue-700"}`}>
                               On Leave
                             </span>
                           )}
                           {isReviewed && (
                             needsAttention ? (
-                              <span className="flex items-center justify-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase">
+                              <span className={`flex items-center justify-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold uppercase ${dark ? "bg-red-500/20 text-red-400" : "bg-red-100 text-red-700"}`}>
                                 <LuCircleAlert size={12} strokeWidth={2} />
                                 Need Attention
                               </span>
                             ) : (
-                              <span className="px-2 py-1 bg-orange-100 text-orange-600 rounded-md text-[11px] font-bold uppercase">
+                              <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${dark ? "bg-orange-500/20 text-orange-300" : "bg-orange-100 text-orange-600"}`}>
                                 Reviewed
                               </span>
                             )
                           )}
                           {isProcessed && (
-                            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">
+                            <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${dark ? "bg-blue-500/20 text-blue-300" : "bg-blue-100 text-blue-700"}`}>
                               Processed
                             </span>
                           )}
@@ -3437,15 +3439,15 @@ export default function AttendancePage() {
 
                     {/* Actions */}
                     <td
-                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 border-l border-b border-slate-200 overflow-hidden ${
-                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100" : "bg-white group-hover:bg-slate-50"
+                      className={`px-4 md:px-6 py-3 md:py-4 text-center sticky right-0 z-10 border-l border-b overflow-hidden ${
+                        missingContractorProfile ? "bg-red-50 group-hover:bg-red-100 border-red-200" : dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"
                       }`}
                       style={{ minWidth: 175, width: 175, maxWidth: 175 }}
                     >
                       {(isStandard || isReviewed || isProcessed) && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
-                          className="text-slate-400 hover:text-[#003527] transition-all"
+                          className={`transition-all ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                           title="View attendance review"
                         >
                           <LuEye size={20} strokeWidth={1.75} />
@@ -3454,7 +3456,7 @@ export default function AttendancePage() {
                       {isOnLeave && (
                         <button
                           onClick={() => setReviewTarget({ record: row, source: "view" })}
-                          className="text-slate-400 hover:text-[#003527] transition-all"
+                          className={`transition-all ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                           title="View attendance review"
                         >
                           <LuEye size={20} strokeWidth={1.75} />
@@ -3462,7 +3464,7 @@ export default function AttendancePage() {
                       )}
                       {isForReview && (
                         <div className="flex justify-center gap-2">
-                          <button className="p-1.5 text-slate-400 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-all" title="Message Contractor">
+                          <button className={`p-1.5 rounded-lg transition-all ${dark ? "text-white/30 hover:text-white hover:bg-white/10" : "text-slate-400 hover:text-[#003527] hover:bg-slate-100"}`} title="Message Contractor">
                             <LuMessageSquare size={18} strokeWidth={1.75} />
                           </button>
                           <button
@@ -3481,8 +3483,8 @@ export default function AttendancePage() {
           </table>
         </div>
 
-        <div className="p-4 bg-slate-50 flex justify-center border-t border-slate-100">
-          <button className="text-xs font-bold text-[#003527] hover:underline">
+        <div className={`p-4 flex justify-center border-t ${dark ? "bg-white/3 border-white/10" : "bg-slate-50 border-slate-100"}`}>
+          <button className={`text-xs font-bold hover:underline ${dark ? "text-white/50" : "text-[#003527]"}`}>
             Load {Math.max(0, 150 - attendanceRows.length)} more contractors...
           </button>
         </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { useAdminTheme } from "@/components/AdminThemeContext";
 import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks, LuBanknote } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
@@ -141,6 +142,7 @@ function fmtMoney(n: number, currency: string) {
 }
 
 export default function PayrollPage() {
+  const { dark } = useAdminTheme();
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
@@ -446,9 +448,9 @@ export default function PayrollPage() {
             <LuBanknote size={18} strokeWidth={2} />
           </div>
           <div>
-            <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Payroll</h2>
-            <p className="text-xs md:text-sm text-slate-600 mt-0.5">
-              Pay period: <span className="font-semibold text-slate-600">{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Payroll</h2>
+            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
+              Pay period: <span className={`font-semibold ${dark ? "text-white/80" : "text-slate-600"}`}>{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
             </p>
           </div>
         </div>
@@ -482,22 +484,22 @@ export default function PayrollPage() {
       {/* Scorecards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md hover:border-slate-300 transition-all flex items-center gap-2.5">
-            <div className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center ${iconColor} shrink-0`}><Icon size={14} strokeWidth={1.75} /></div>
-            <div><p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${color}`}>{value}</p></div>
+          <div key={label} className={`p-2.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-2.5 ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
+            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${dark ? "bg-white/8" : iconBg} ${dark ? "text-white/60" : iconColor}`}><Icon size={14} strokeWidth={1.75} /></div>
+            <div><p className={`text-[10px] font-bold uppercase tracking-wider ${dark ? "text-white/40" : "text-slate-500"}`}>{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p></div>
           </div>
         ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className={`rounded-xl border shadow-sm overflow-hidden ${dark ? "bg-[#1c2320] border-white/10" : "bg-white border-slate-200"}`}>
         {/* Toolbar */}
-        <div className="px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 bg-linear-to-b from-slate-50/80 to-white">
+        <div className={`px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 ${dark ? "bg-[#1c2320]" : "bg-linear-to-b from-slate-50/80 to-white"}`}>
           {/* Week selector */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <h3 className="text-lg md:text-xl font-bold tracking-tight text-[#003527]">Weekly Payroll</h3>
+              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Payroll</h3>
               {isLoading && (
-                <p className="mt-0.5 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
+                <p className={`mt-0.5 inline-flex items-center gap-1.5 text-xs font-medium ${dark ? "text-teal-400" : "text-teal-600"}`}>
                   <LuRefreshCw size={12} className="animate-spin" /> Loading payroll data…
                 </p>
               )}
@@ -505,17 +507,17 @@ export default function PayrollPage() {
                 <p className="mt-0.5 text-xs font-medium text-red-600">{loadError}</p>
               )}
             </div>
-            <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white p-1.5 shadow-sm w-full md:w-auto overflow-x-auto">
+            <div className={`flex items-center gap-1.5 rounded-xl border p-1.5 shadow-sm w-full md:w-auto overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
               <div className="flex gap-1">
                 {weeks.slice(0, 4).map((w) => (
                   <button key={w} onClick={() => setWeek(w)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
                 ))}
               </div>
-              <div className="h-6 w-px bg-slate-200 mx-0.5 shrink-0" />
+              <div className={`h-6 w-px mx-0.5 shrink-0 ${dark ? "bg-white/15" : "bg-slate-200"}`} />
               <div className="relative shrink-0">
                 <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
                   <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
                 </button>
                 {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
@@ -532,7 +534,7 @@ export default function PayrollPage() {
                 value={nameSearch}
                 onChange={(event) => setNameSearch(event.target.value)}
                 placeholder="Search by name…"
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-8 text-sm text-slate-800 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30"
+                className={`h-10 w-full rounded-lg border pl-9 pr-8 text-sm outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
               />
               {nameSearch && (
                 <button
@@ -571,8 +573,8 @@ export default function PayrollPage() {
                   <LuX size={14} strokeWidth={2.5} /> Clear
                 </button>
               )}
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 whitespace-nowrap">
-                <span className="font-bold text-[#003527]">{filteredRows.length}</span> shown
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
+                <span className={`font-bold ${dark ? "text-white" : "text-[#003527]"}`}>{filteredRows.length}</span> shown
               </span>
             </div>
           </div>
@@ -610,13 +612,13 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={21} className="px-5 py-10 text-center text-sm text-slate-400">
+                  <td colSpan={21} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
               ) : filteredRows.map((r) => (
-                <tr key={r.email} className="group hover:bg-slate-50 transition-colors">
-                  <td className="sticky left-0 z-10 w-[180px] min-w-[180px] bg-white group-hover:bg-slate-50 px-4 md:px-6 py-3 md:py-4 font-semibold text-slate-800 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
+                <tr key={r.email} className={`group transition-colors ${dark ? "hover:bg-white/5" : "hover:bg-slate-50"}`}>
+                  <td className={`sticky left-0 z-10 w-[180px] min-w-[180px] px-4 md:px-6 py-3 md:py-4 font-semibold whitespace-nowrap border-r shadow-[1px_0_0_0_#e2e8f0] ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] text-white border-white/10" : "bg-white group-hover:bg-slate-50 text-slate-800 border-slate-100"}`}>
                     <span className="inline-flex items-center gap-1.5">
                       {r.name}
                       {r.status === "Processed" && r.hasChangedSinceProcessed && (
@@ -629,26 +631,26 @@ export default function PayrollPage() {
                       )}
                     </span>
                   </td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.country}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.department}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.payCategory}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.shiftType}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-500 whitespace-nowrap border-r border-slate-100">{r.localHoliday}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.currency} {r.hourlyRate.toFixed(2)}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-600 tabular-nums whitespace-nowrap border-r border-slate-100">{r.hourlyRate.toFixed(2)}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-slate-700 font-medium tabular-nums whitespace-nowrap border-r border-slate-100">{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-red-500 tabular-nums whitespace-nowrap border-r border-slate-100">{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
-                  <td className="px-4 md:px-6 py-3 md:py-4 text-teal-700 font-semibold tabular-nums whitespace-nowrap border-r border-slate-100">{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 whitespace-nowrap border-r ${dark ? "text-white/55 border-white/8" : "text-slate-500 border-slate-100"}`}>{r.country}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 whitespace-nowrap border-r ${dark ? "text-white/55 border-white/8" : "text-slate-500 border-slate-100"}`}>{r.department}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 whitespace-nowrap border-r ${dark ? "text-white/55 border-white/8" : "text-slate-500 border-slate-100"}`}>{r.payCategory}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 whitespace-nowrap border-r ${dark ? "text-white/55 border-white/8" : "text-slate-500 border-slate-100"}`}>{r.shiftType}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 whitespace-nowrap border-r ${dark ? "text-white/55 border-white/8" : "text-slate-500 border-slate-100"}`}>{r.localHoliday}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.currency} {r.hourlyRate.toFixed(2)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.hourlyRate.toFixed(2)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 font-medium tabular-nums whitespace-nowrap border-r ${dark ? "text-white/80 border-white/8" : "text-slate-700 border-slate-100"}`}>{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-red-400 border-white/8" : "text-red-500 border-slate-100"}`}>{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 font-semibold tabular-nums whitespace-nowrap border-r ${dark ? "text-teal-300 border-white/8" : "text-teal-700 border-slate-100"}`}>{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
                   <td
-                    className="text-center sticky right-[90px] z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-6 py-3 md:py-4"
+                    className={`text-center sticky right-[90px] z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
                     style={{ minWidth: 150, width: 150, maxWidth: 150 }}
                   >
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATUS_STYLES[r.status]}`}>
@@ -657,21 +659,21 @@ export default function PayrollPage() {
                     </span>
                   </td>
                   <td
-                    className="text-center sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 overflow-hidden px-4 md:px-6 py-3 md:py-4"
+                    className={`text-center sticky right-0 z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
                     style={{ minWidth: 90, width: 90, maxWidth: 90 }}
                   >
                     <div className="flex items-center justify-center gap-3">
                       <button
                         onClick={() => setVoucherTarget(r)}
                         title="View payroll voucher"
-                        className="text-slate-400 hover:text-[#003527] transition-colors"
+                        className={`transition-colors ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                       >
                         <LuEye size={18} strokeWidth={1.75} />
                       </button>
                       <button
                         onClick={() => setReviewTarget(r)}
                         title="Review — add Bonus, MISC, Retro Pay, REIM"
-                        className="text-slate-400 hover:text-[#003527] transition-colors"
+                        className={`transition-colors ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                       >
                         <LuPencil size={16} strokeWidth={1.75} />
                       </button>
@@ -682,7 +684,7 @@ export default function PayrollPage() {
             </tbody>
           </table>
         </div>
-        <div className="px-4 md:px-5 py-3 border-t border-slate-100 text-xs text-slate-400">
+        <div className={`px-4 md:px-5 py-3 border-t text-xs ${dark ? "border-white/10 text-white/35" : "border-slate-100 text-slate-400"}`}>
           {filteredRows.length} of {rows.length} contractors · Week of {week ? weekLabel(week) : "—"}
         </div>
       </div>

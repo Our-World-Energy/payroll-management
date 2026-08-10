@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type ContractorProfile, type BirthdayEntry } from "../profile/actions";
+import { sendBirthdayWish, fetchWishState, type ReceivedWish } from "./wishes";
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
 import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
 import { PageHeader } from "../_components/portal";
+import { Confetti } from "../_components/Confetti";
+import { EmojiPicker } from "../_components/EmojiPicker";
 import {
   LuCalendarDays, LuCake,
   LuChevronRight, LuLoader, LuShieldCheck,
@@ -279,6 +282,17 @@ export default function ContractorDashboardPage() {
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
+  // Birthday wishes: my email, colleagues I've already wished today, and wishes
+  // I've received today (shown when it's my own birthday).
+  const [myEmail,       setMyEmail]       = useState("");
+  const [wishedEmails,  setWishedEmails]  = useState<Set<string>>(new Set());
+  const [receivedWishes, setReceivedWishes] = useState<ReceivedWish[]>([]);
+
+  // Local calendar date (YYYY-MM-DD) — the wishDate key for today's birthdays.
+  const todayIso = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  })();
 
   useEffect(() => {
     const supabase = createClient();
@@ -297,6 +311,15 @@ export default function ContractorDashboardPage() {
       setProfile(prof);
       setAllHolidays(hols);
       setBirthdays(bdays);
+      setMyEmail(email);
+
+      // Load today's birthday-wish state (sent + received).
+      fetchWishState(email, todayIso)
+        .then(({ sentTo, received }) => {
+          setWishedEmails(new Set(sentTo));
+          setReceivedWishes(received);
+        })
+        .catch(() => { /* leave empty */ });
 
       // Country comes from the location field: "City, Country" → last segment
       const country = prof?.location?.split(",").pop()?.trim() ?? "";
@@ -323,6 +346,37 @@ export default function ContractorDashboardPage() {
     })();
   }, [router]);
 
+  // Live-refresh wishes ONLY on the viewer's own birthday — that's the only day
+  // they can receive wishes, so there's nothing to poll for otherwise.
+  const isMyBirthdayToday = !!myEmail && birthdays.some(
+    (b) => b.email.trim().toLowerCase() === myEmail.trim().toLowerCase() && b.dob.slice(5, 10) === todayIso.slice(5, 10)
+  );
+  useEffect(() => {
+    if (!isMyBirthdayToday || !myEmail) return;
+    const id = setInterval(() => {
+      fetchWishState(myEmail, todayIso)
+        .then(({ sentTo, received }) => { setWishedEmails(new Set(sentTo)); setReceivedWishes(received); })
+        .catch(() => { /* ignore */ });
+    }, 30000);
+    return () => clearInterval(id);
+  }, [isMyBirthdayToday, myEmail, todayIso]);
+
+  // On your birthday, stamp the browser tab with a 🎂 title + favicon; restore on leave.
+  useEffect(() => {
+    if (!isMyBirthdayToday) return;
+    const name = profile?.firstName || profile?.fullName?.split(" ")[0] || "you";
+    const prevTitle = document.title;
+    document.title = `🎂 Happy Birthday, ${name}!`;
+    const link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    const prevHref = link?.getAttribute("href") ?? null;
+    const cake = "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎂</text></svg>");
+    link?.setAttribute("href", cake);
+    return () => {
+      document.title = prevTitle;
+      if (link && prevHref) link.setAttribute("href", prevHref);
+    };
+  }, [isMyBirthdayToday, profile]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -333,9 +387,22 @@ export default function ContractorDashboardPage() {
 
   const firstName = profile?.firstName || profile?.fullName?.split(" ")[0] || "there";
   const country   = profile?.location?.split(",").pop()?.trim() ?? "";
+  const myName    = profile?.fullName || firstName;
 
   const now = new Date();
   const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
+
+  // One-click birthday wish (with an optional note) → record it and
+  // optimistically mark as wished.
+  async function handleSendWish(toEmail: string, message?: string) {
+    if (!myEmail || !toEmail) return;
+    setWishedEmails((prev) => new Set(prev).add(toEmail.toLowerCase()));
+    const res = await sendBirthdayWish({ fromEmail: myEmail, fromName: myName, toEmail, wishDate: todayIso, message });
+    if (!res.ok) {
+      // roll back on failure
+      setWishedEmails((prev) => { const next = new Set(prev); next.delete(toEmail.toLowerCase()); return next; });
+    }
+  }
 
   const statusChip = profile?.status === "Active" ? (
     <span className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-full text-sm font-semibold shadow-sm">
@@ -355,12 +422,33 @@ export default function ContractorDashboardPage() {
         />
       )}
 
-      {/* ── Welcome ── */}
-      <PageHeader
-        title={`${greeting}, ${firstName}.`}
-        subtitle="Ready to power the future today?"
-        right={statusChip}
-      />
+      {/* ── Welcome / birthday hero ── */}
+      {isMyBirthdayToday ? (
+        <>
+          <Confetti />
+          <div className="relative overflow-hidden rounded-2xl p-6 md:p-8 text-white shadow-sm bg-linear-to-r from-emerald-500 via-teal-500 to-emerald-700">
+            <div className="absolute inset-0 bg-grid-soft opacity-30 pointer-events-none" />
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/80">🎂 Happy Birthday</p>
+                <h2 className="text-3xl md:text-4xl font-bold mt-1.5 leading-none">Happy Birthday, {firstName}! 🎉</h2>
+                <p className="text-white/85 mt-2 text-sm">
+                  {receivedWishes.length > 0
+                    ? `${receivedWishes.length} colleague${receivedWishes.length !== 1 ? "s" : ""} have wished you so far — scroll down to see them.`
+                    : "Wishing you a fantastic day from everyone at Our World Energy."}
+                </p>
+              </div>
+              {statusChip}
+            </div>
+          </div>
+        </>
+      ) : (
+        <PageHeader
+          title={`${greeting}, ${firstName}.`}
+          subtitle="Ready to power the future today?"
+          right={statusChip}
+        />
+      )}
 
       {/* ── Announcements + holidays ── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
@@ -440,73 +528,163 @@ export default function ContractorDashboardPage() {
       </div>
 
       {/* ── Birthday Calendar ── */}
-      <BirthdaySection birthdays={birthdays} />
+      <BirthdaySection
+        birthdays={birthdays}
+        myEmail={myEmail}
+        wishedEmails={wishedEmails}
+        receivedWishes={receivedWishes}
+        onSendWish={handleSendWish}
+      />
 
     </div>
   );
 }
 
-// ── Birthday section component ────────────────────────────────────────────────
-function BirthdaySection({ birthdays }: { birthdays: BirthdayEntry[] }) {
+// Initials from a full name (up to 2 letters).
+function initialsOf(name: string) {
+  return name.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
 
+// ── Birthday section component ────────────────────────────────────────────────
+function BirthdaySection({
+  birthdays, myEmail, wishedEmails, receivedWishes, onSendWish,
+}: {
+  birthdays: BirthdayEntry[];
+  myEmail: string;
+  wishedEmails: Set<string>;
+  receivedWishes: ReceivedWish[];
+  onSendWish: (toEmail: string, message?: string) => void;
+}) {
   const today    = new Date();
-  const year     = today.getFullYear();
   const month    = today.getMonth();
   const todayDay = today.getDate();
+  const me       = myEmail.trim().toLowerCase();
 
-  // This month's birthdays, sorted by day.
+  // Only today's birthdays (same month + day as today).
   const items = birthdays
     .map((c) => {
       const [, mm, dd] = c.dob.split("-").map(Number);
       return { ...c, mm, dd };
     })
-    .filter((c) => c.mm && c.dd && c.mm - 1 === month)
-    .sort((a, b) => a.dd - b.dd);
+    .filter((c) => c.mm && c.dd && c.mm - 1 === month && c.dd === todayDay)
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const monthAbbr = MONTHS[month].slice(0, 3);
+  const todayLabel = today.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xl font-bold text-[#003527]">Birthdays</h3>
+        <h3 className="text-xl font-bold text-[#003527]">Today&apos;s Birthdays</h3>
         <div className="flex items-center gap-2">
-          <LuCake size={18} strokeWidth={1.75} className="text-pink-400" />
-          <span className="text-xs font-semibold text-slate-400">{MONTHS[month]} {year}</span>
+          <LuCake size={18} strokeWidth={1.75} className="text-teal-500" />
+          <span className="text-xs font-semibold text-slate-400">{todayLabel}</span>
         </div>
       </div>
-    <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
 
-      {items.length === 0 ? (
-        <p className="text-sm text-slate-400 text-center py-6">No birthdays this month.</p>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {items.map((c) => {
-            const isToday  = c.dd === todayDay;
-            const initials = c.fullName.split(" ").filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase() ?? "").join("");
-            return (
-              <div
+        {/* ── Wishes wall — the wishes I've received on my birthday ── */}
+        {receivedWishes.length > 0 && (
+          <div className="mb-6">
+            <p className="text-sm font-bold text-emerald-800 flex items-center gap-2 mb-3">
+              <LuCake size={16} strokeWidth={2} className="text-teal-600" />
+              {receivedWishes.length} birthday wish{receivedWishes.length !== 1 ? "es" : ""} for you 🎉
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {receivedWishes.map((w, i) => (
+                <div key={`${w.fromEmail}-${i}`} className="flex items-start gap-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100 px-3 py-2.5">
+                  <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-700 grid place-items-center text-[11px] font-bold shrink-0">
+                    {initialsOf(w.fromName)}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-[#003527] truncate">{w.fromName}</p>
+                    <p title={w.message?.trim() || undefined} className="text-xs text-slate-500 leading-snug wrap-break-word line-clamp-2">
+                      {w.message?.trim() || "🎉 Happy Birthday!"}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {items.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-6">No birthdays today.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {items.map((c) => (
+              <BirthdayCard
                 key={`${c.fullName}-${c.dd}`}
-                className={[
-                  "flex items-center gap-3 p-3 rounded-xl border transition-colors",
-                  isToday ? "border-pink-200 bg-pink-50" : "border-slate-100 hover:bg-slate-50",
-                ].join(" ")}
-              >
-                <div className="w-10 h-10 rounded-full bg-pink-100 text-pink-700 flex items-center justify-center text-sm font-bold shrink-0">
-                  {initials || "?"}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{c.fullName}</p>
-                  <p className="text-xs text-slate-400 tabular-nums">{monthAbbr} {c.dd}</p>
-                </div>
-                {isToday && (
-                  <span className="shrink-0 text-[9px] font-bold bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full uppercase tracking-wide">Today</span>
-                )}
-              </div>
-            );
-          })}
+                name={c.fullName}
+                email={c.email}
+                dateLabel={`${monthAbbr} ${c.dd}`}
+                isMe={!!c.email && c.email.trim().toLowerCase() === me}
+                wished={wishedEmails.has(c.email.trim().toLowerCase())}
+                onSendWish={onSendWish}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── One birthday card, with an optional note composer ──────────────────────────
+function BirthdayCard({
+  name, email, dateLabel, isMe, wished, onSendWish,
+}: {
+  name: string;
+  email: string;
+  dateLabel: string;
+  isMe: boolean;
+  wished: boolean;
+  onSendWish: (toEmail: string, message?: string) => void;
+}) {
+  const [msg, setMsg] = useState("");
+  const hasEmail = !!email.trim();
+
+  return (
+    <div className="bday-card flex flex-col gap-3 p-3 h-full">
+      <div className="flex items-center gap-3">
+        <div className="relative shrink-0">
+          <div className="w-10 h-10 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-sm font-bold">
+            {initialsOf(name)}
+          </div>
+          <span className="absolute -top-1.5 -right-1.5 text-sm animate-bday-wiggle select-none" aria-hidden>🎂</span>
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{name}</p>
+          <p className="text-xs text-teal-600/80 tabular-nums">🎂 {dateLabel}</p>
+        </div>
+      </div>
+
+      {isMe ? (
+        <span className="mt-auto text-center text-[11px] font-bold text-emerald-700 bg-emerald-100 rounded-lg py-2">That&apos;s you 🎉</span>
+      ) : wished ? (
+        <span className="mt-auto text-center text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg py-2">Wished ✓</span>
+      ) : (
+        <div className="mt-auto space-y-2">
+          {/* note + chat-style emoji picker */}
+          <div className="flex items-center gap-1.5">
+            <input
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              maxLength={140}
+              placeholder="Add a note (optional)"
+              className="flex-1 min-w-0 text-xs rounded-lg border border-emerald-200 bg-white px-2.5 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            />
+            <EmojiPicker onPick={(e) => setMsg((m) => (m + e).slice(0, 140))} />
+          </div>
+          <button
+            onClick={() => onSendWish(email, msg.trim() || undefined)}
+            disabled={!hasEmail}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-white bg-[#003527] hover:opacity-90 active:scale-[0.98] rounded-lg py-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <LuCake size={13} strokeWidth={2.25} /> Send Wishes
+          </button>
         </div>
       )}
-    </div>
     </div>
   );
 }
