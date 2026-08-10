@@ -8,7 +8,7 @@ import Link from "next/link";
 import {
   LuLogOut, LuMenu, LuUser, LuUmbrella,
   LuClipboardCheck, LuLayoutDashboard, LuWallet,
-  LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight,
+  LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
 
@@ -33,6 +33,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   const [collapsed,      setCollapsed]      = useState(false);
   const [dark,           setDark]           = useState(false);
   const [isAdminViewing, setIsAdminViewing] = useState(false);
+  const [switching,      setSwitching]      = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -64,6 +65,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   }, [router]);
 
   function switchToAdmin() {
+    setSwitching(true);
     localStorage.removeItem("role_override");
     router.push("/admin");
   }
@@ -236,15 +238,19 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
             {isAdminViewing && (
               <button
                 onClick={switchToAdmin}
+                disabled={switching}
                 title="Back to Admin View"
-                className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed ${
                   dark
                     ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
                     : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
                 }`}
               >
-                <LuArrowLeftRight size={13} strokeWidth={2} />
-                Admin View
+                {switching
+                  ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+                  : <LuArrowLeftRight size={13} strokeWidth={2} />
+                }
+                {switching ? "Switching…" : "Admin View"}
               </button>
             )}
             <ContractorBell dark={dark} />

@@ -1,6 +1,7 @@
 "use client";
 
-import { LuSearch, LuMenu, LuArrowLeftRight } from "react-icons/lu";
+import { useState } from "react";
+import { LuSearch, LuMenu, LuArrowLeftRight, LuLoader } from "react-icons/lu";
 import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
@@ -10,8 +11,10 @@ export function AdminTopbar() {
   const { toggle } = useSidebar();
   const { dark } = useAdminTheme();
   const router = useRouter();
+  const [switching, setSwitching] = useState(false);
 
   function switchToContractor() {
+    setSwitching(true);
     localStorage.setItem("role_override", "contractor");
     router.push("/contractor/dashboard");
   }
@@ -51,15 +54,19 @@ export function AdminTopbar() {
       <div className="flex items-center gap-3 ml-3">
         <button
           onClick={switchToContractor}
+          disabled={switching}
           title="Switch to Contractor View"
-          className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+          className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed ${
             dark
               ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
               : "bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
           }`}
         >
-          <LuArrowLeftRight size={13} strokeWidth={2} />
-          Contractor View
+          {switching
+            ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+            : <LuArrowLeftRight size={13} strokeWidth={2} />
+          }
+          {switching ? "Switching…" : "Contractor View"}
         </button>
 
         <NotificationBell dark={dark} />
