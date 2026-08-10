@@ -239,7 +239,7 @@ export async function processWeeklyPayroll(
 // Everything the Voucher needs to render fully frozen (no live computation)
 // once a contractor is "Processed", plus everything the "changed since
 // processed" check in the main table compares against — gross/deductions/net
-// alone already cover Contractor Details/Time Off/Attendance drift, the rest
+// alone already cover Contractor Details/Time Away/Attendance drift, the rest
 // here is purely for the frozen voucher display.
 export type ProcessedSnapshot = {
   processedAt: string;

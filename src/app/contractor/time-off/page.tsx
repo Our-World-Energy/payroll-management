@@ -8,7 +8,7 @@ import {
   submitLeaveRequest, cancelLeaveRequest,
   type ContractorTimeOff, type LeaveRequest,
 } from "./actions";
-import { HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { HOURS_PER_DAY, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuChevronRight, LuInfo, LuX, LuCircleAlert,
@@ -243,7 +243,7 @@ export default function ContractorTimeOffPage() {
     <div className="space-y-8">
       {/* Page title */}
       <PageHeader
-        title="Time-Off Management"
+        title="Time Away Management"
         subtitle="Track and manage your leave requests and balances."
         right={
           <HeaderChip icon={<LuClock size={13} strokeWidth={2} className="text-emerald-600" />}>
@@ -272,7 +272,7 @@ export default function ContractorTimeOffPage() {
         <BalanceCard
           icon={<LuStethoscope size={20} strokeWidth={1.75} />}
           iconBg="bg-teal-100 text-teal-700"
-          title="Sick Leave"
+          title="Medical Unavailability"
           badge="Renewal Dec 31"
           badgeBg="bg-slate-50"
           badgeText="text-slate-500"
@@ -320,7 +320,7 @@ export default function ContractorTimeOffPage() {
                 className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
               >
                 {(isPtoHidden ? INDIA_LEAVE_TYPES : ALL_LEAVE_TYPES).map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>{leaveTypeDisplayLabel(t)}</option>
                 ))}
               </select>
             </div>
@@ -391,7 +391,7 @@ export default function ContractorTimeOffPage() {
               <ul className="space-y-3 text-sm text-emerald-50/90">
                 {[
                   "PTO requests must be submitted at least 2 weeks in advance.",
-                  "Sick leave requires a medical certificate if longer than 3 days.",
+                  "Medical Unavailability requires a medical certificate if longer than 3 days.",
                   "A maximum of 5 days can carry over to the next year.",
                 ].map((item) => (
                   <li key={item} className="flex gap-3">
@@ -449,7 +449,7 @@ export default function ContractorTimeOffPage() {
                                 : <LuStethoscope size={15} strokeWidth={1.75} />
                               }
                             </div>
-                            <span className="text-sm font-semibold text-slate-800">{row.type}</span>
+                            <span className="text-sm font-semibold text-slate-800">{leaveTypeDisplayLabel(row.type)}</span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-500 whitespace-nowrap">
@@ -547,7 +547,7 @@ export default function ContractorTimeOffPage() {
                                   : <LuStethoscope size={13} strokeWidth={1.75} />
                                 }
                               </div>
-                              <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">{row.type}</span>
+                              <span className="text-sm font-semibold text-slate-800 whitespace-nowrap">{leaveTypeDisplayLabel(row.type)}</span>
                             </div>
                           </td>
                           <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">

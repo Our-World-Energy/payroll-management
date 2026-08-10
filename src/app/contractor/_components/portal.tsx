@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared presentational primitives for the Contractor Portal, so Profile,
-// Attendance, Time-Off and Holidays share one visual language.
+// Attendance, Time Away and Holidays share one visual language.
 // ─────────────────────────────────────────────────────────────────────────
 
 // Standard page header: an uppercase eyebrow with an accent hairline, a

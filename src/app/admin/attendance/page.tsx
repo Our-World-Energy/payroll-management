@@ -277,7 +277,7 @@ function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest
 
 // Minutes for the APPROVED request covering this date only — unlike
 // timeOffRequestMinutesFor (which shows whatever was requested regardless of
-// status, for the read-only Time Off Request columns), this is what actually
+// status, for the read-only Time Away Request columns), this is what actually
 // drives Completion Time / OT suppression in Attendance Review, so a merely
 // Pending or Rejected request can't grant time-off credit.
 function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
@@ -966,7 +966,7 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
 
   // Leave requests submitted through the contractor portal, matched to this
-  // week's days by date range, so "Time Off Request" can show what type of
+  // week's days by date range, so "Time Away Request" can show what type of
   // leave (if any) was requested for that day. Filtered from the parent's
   // already-fetched list rather than re-querying the whole table again here.
   const leaveRequests = useMemo(() => {
@@ -1058,8 +1058,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? regularOtMinutes : 0);
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
       }, 0);
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Off Request", "Time Off Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
-    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Off Request" || heading === "Time Off Request Time")));
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
+    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Away Request" || heading === "Time Away Request Time")));
   const totalLocalHolidayMinutes = weekDates.reduce(
     (sum, d) => sum + (localHolidayMinutesFor(d, dailyLogs, record.region, allHolidays) ?? 0),
     0
@@ -1121,7 +1121,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     return sum + evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, evaluatedRegularTime);
   }, 0);
   // "Total Completion Time" — Evaluated Regular + Regular OT + RD OT + US HO +
-  // Local HO + Time Off Request Time — same formula as the table's Total
+  // Local HO + Time Away Request Time — same formula as the table's Total
   // Completion Time column/footer, now shown in the scorecard too.
   const totalCompletionTimeMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalAdjustedRdOtMinutes
     + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
@@ -1466,7 +1466,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           className={`sticky left-0 z-10 w-[156px] min-w-[156px] px-4 py-2 font-medium border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                             hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-800"
                           }`}
-                          title={hasLeaveWorkConflict ? "Approved PTO/Sick Leave on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved PTO/Sick Leave on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
+                          title={hasLeaveWorkConflict ? "Approved PTO/Medical Unavailability on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved PTO/Medical Unavailability on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
                         >
                           {formatDayLabel(date)}
                         </td>
@@ -2109,7 +2109,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                 <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Assigned Team</th>
                 {["Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Local HO Time", "Total Time Off Request Time", "Ind Time",
+                  "Local HO Time", "Total Time Away Request Time", "Ind Time",
                   "Status"].map((h) => (
                   <th key={h} className="px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 last:border-r-0">{h}</th>
                 ))}
@@ -2369,7 +2369,7 @@ function BreakdownModal({ userId, userName, email, week, onClose }: { userId: nu
                   <td className="px-3 py-1.5 text-right font-bold text-indigo-600 tabular-nums">{signed(days.reduce((s, d) => s + (data.adjustments?.[d] ?? 0), 0))}</td>
                 </tr>
                 <tr className="bg-slate-50/60">
-                  <td className="px-3 py-1.5 text-xs font-semibold text-amber-600">Time Off</td>
+                  <td className="px-3 py-1.5 text-xs font-semibold text-amber-600">Time Away</td>
                   {days.map((d) => { const v = data.timeOff?.[d] ?? 0; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums ${v ? "text-amber-600 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
                   <td className="px-3 py-1.5 text-right font-bold text-amber-600 tabular-nums">{days.reduce((s, d) => s + (data.timeOff?.[d] ?? 0), 0)}</td>
                 </tr>
@@ -3146,7 +3146,7 @@ export default function AttendancePage() {
                 {[
                   "Contractor", "Assigned Team", "Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
-                  "Total Local HO Time", "Total Time Off Request Time", "Ind Time",
+                  "Total Local HO Time", "Total Time Away Request Time", "Ind Time",
                   "Variance", "Status", "Actions",
                 ].map((h) => (
                   <th
@@ -3343,7 +3343,7 @@ export default function AttendancePage() {
                       )}
                     </td>
 
-                    {/* Total Time Off Request Time */}
+                    {/* Total Time Away Request Time */}
                     <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
                       {(() => {
                         const rowEmail = row.role.includes("@") ? row.role : "";

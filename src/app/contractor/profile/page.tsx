@@ -169,16 +169,16 @@ export default function ContractorProfilePage() {
             <CardTitle icon={<LuBanknote size={16} strokeWidth={1.75} />}>Contract Rate</CardTitle>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Monthly Rate</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Monthly Contract Rate</p>
                 <p className="text-lg font-bold text-[#003527] tabular-nums">{fmtMoney(monthlyNum)}</p>
               </div>
               <div className="flex justify-between items-center">
-                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Weekly Rate</p>
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Weekly Contract Rate</p>
                 <p className="text-base font-semibold text-slate-800 tabular-nums">{fmtMoney(weeklyNum)}</p>
               </div>
               <div className="pt-4 border-t border-emerald-100">
                 <p className="text-xs text-emerald-700 font-medium">
-                  Pay period: {profile.payPeriod || "Sunday – Saturday"}
+                  Pay cycle: {profile.payPeriod || "Sunday – Saturday"}
                 </p>
               </div>
             </div>

@@ -11,7 +11,7 @@ import {
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
-import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate } from "@/lib/timeOffBalances";
+import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../../settings/actions";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 
@@ -146,7 +146,7 @@ export default function ContractorTimeOffPage() {
       return;
     }
     // Refresh contractor balances + request list from the server so the score
-    // cards (PTO/Sick Used & Available) and both tables reflect the change.
+    // cards (PTO/Medical Unavailability Used & Available) and both tables reflect the change.
     await loadData();
   }
 
@@ -169,7 +169,7 @@ export default function ContractorTimeOffPage() {
   // rather than trusting the stored snapshot — so a Cut Off Time change is
   // reflected immediately without waiting for this contractor to be saved again.
   const ptoBalance       = contractor ? calculatePtoBalance(contractor.hireDate, cutoff) : 0;
-  // Same formula as the main Time Off Management page: an imported/legacy
+  // Same formula as the main Time Away Management page: an imported/legacy
   // baseline supersedes the computed value wherever it's set, and Advance
   // PTO/Sick Leave Used is always added on top so this matches what's shown
   // there instead of only reflecting the normal (non-advance) usage.
@@ -221,7 +221,7 @@ export default function ContractorTimeOffPage() {
         )}
         <TimeOffBalanceCard
           icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
-          title="Sick Leave Balance"
+          title="Medical Unavailability Balance"
           tone={sickAvailable < 0 ? "red" : "orange"}
           accrued={sickBalance}
           used={sickUsed}
@@ -276,7 +276,7 @@ export default function ContractorTimeOffPage() {
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {["Employee", "Dates", "Leave Type", "Hours", "Reason",
                     ...(!isIndia ? ["PTO Available"] : []),
-                    "Sick Leave Available", "Actions",
+                    "Medical Unavailability Available", "Actions",
                   ].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
                       {h}
@@ -298,7 +298,7 @@ export default function ContractorTimeOffPage() {
                     <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDateRange(req.startDate, req.endDate)}</td>
                     <td className="px-5 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${typeBadgeClass(req.type)}`}>
-                        {req.type}
+                        {leaveTypeDisplayLabel(req.type)}
                       </span>
                     </td>
                     <td className="px-5 py-4 text-sm font-medium text-slate-700 whitespace-nowrap">{fmtBalance(hoursFor(req))}h</td>
@@ -415,7 +415,7 @@ export default function ContractorTimeOffPage() {
                         <td className="px-5 py-4 text-sm text-slate-600 whitespace-nowrap">{fmtDateRange(req.startDate, req.endDate)}</td>
                         <td className="px-5 py-4 whitespace-nowrap">
                           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${typeBadgeClass(req.type)}`}>
-                            {req.type}
+                            {leaveTypeDisplayLabel(req.type)}
                           </span>
                         </td>
                         <td className="px-5 py-4 text-sm font-medium text-slate-700 whitespace-nowrap">{fmtBalance(hoursFor(req))}h</td>
@@ -501,7 +501,7 @@ export default function ContractorTimeOffPage() {
               <div>
                 <h3 className="text-base font-bold text-[#003527]">Delete Leave Request</h3>
                 <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-                  This will permanently delete the {deleteTarget.type} request for {fmtDate(deleteTarget.startDate)} – {fmtDate(deleteTarget.endDate)}.
+                  This will permanently delete the {leaveTypeDisplayLabel(deleteTarget.type)} request for {fmtDate(deleteTarget.startDate)} – {fmtDate(deleteTarget.endDate)}.
                   {deleteTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
                   {" "}This cannot be undone.
                 </p>

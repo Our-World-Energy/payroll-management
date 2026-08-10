@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { LuSearch, LuMenu, LuArrowLeftRight, LuLoader } from "react-icons/lu";
+import { useEffect, useRef, useState } from "react";
+import { LuSearch, LuMenu, LuArrowLeftRight, LuLoader, LuChevronDown } from "react-icons/lu";
 import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
@@ -12,6 +12,16 @@ export function AdminTopbar() {
   const { dark } = useAdminTheme();
   const router = useRouter();
   const [switching, setSwitching] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onOutsideClick(e: MouseEvent) {
+      if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", onOutsideClick);
+    return () => document.removeEventListener("mousedown", onOutsideClick);
+  }, []);
 
   function switchToContractor() {
     setSwitching(true);
@@ -52,33 +62,46 @@ export function AdminTopbar() {
 
       {/* Right */}
       <div className="flex items-center gap-3 ml-3">
-        <button
-          onClick={switchToContractor}
-          disabled={switching}
-          title="Switch to Contractor View"
-          className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed ${
-            dark
-              ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
-              : "bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
-          }`}
-        >
-          {switching
-            ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
-            : <LuArrowLeftRight size={13} strokeWidth={2} />
-          }
-          {switching ? "Switching…" : "Contractor View"}
-        </button>
-
         <NotificationBell dark={dark} />
 
-        <div className={`flex items-center gap-2.5 pl-3 border-l ${dark ? "border-white/10" : "border-slate-200"}`}>
-          <div className="text-right hidden sm:block">
-            <p className={`text-sm font-semibold leading-tight ${dark ? "text-white" : "text-emerald-900"}`}>Admin User</p>
-            <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>System Administrator</p>
-          </div>
-          <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
-            AU
-          </div>
+        <div ref={menuRef} className="relative">
+          <button
+            onClick={() => setMenuOpen((v) => !v)}
+            className={`flex items-center gap-2.5 pl-3 border-l cursor-pointer ${dark ? "border-white/10" : "border-slate-200"}`}
+          >
+            <div className="text-right hidden sm:block">
+              <p className={`text-sm font-semibold leading-tight ${dark ? "text-white" : "text-emerald-900"}`}>Admin User</p>
+              <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>System Administrator</p>
+            </div>
+            <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
+              AU
+            </div>
+            <LuChevronDown
+              size={14}
+              strokeWidth={2}
+              className={`hidden sm:block transition-transform ${menuOpen ? "rotate-180" : ""} ${dark ? "text-white/40" : "text-slate-400"}`}
+            />
+          </button>
+
+          {menuOpen && (
+            <div className={`absolute right-0 top-full mt-2 z-50 w-56 rounded-xl shadow-xl border overflow-hidden ${
+              dark ? "bg-[#0f1a15] border-white/10" : "bg-white border-slate-200"
+            }`}>
+              <button
+                onClick={() => { setMenuOpen(false); switchToContractor(); }}
+                disabled={switching}
+                className={`w-full flex items-center gap-2.5 px-4 py-3 text-sm font-medium text-left transition-colors cursor-pointer disabled:cursor-not-allowed ${
+                  dark ? "text-white/80 hover:bg-white/10" : "text-slate-700 hover:bg-emerald-50 hover:text-emerald-700"
+                }`}
+              >
+                {switching
+                  ? <LuLoader size={15} strokeWidth={2} className="animate-spin" />
+                  : <LuArrowLeftRight size={15} strokeWidth={2} />
+                }
+                {switching ? "Switching…" : "Switch to Contractor View"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -82,9 +82,9 @@ function exportCSV(rows: Contractor[], cutoff: CutoffDate) {
   const headers = [
     "Unique ID","First Name","Middle Name","Surname","Full Name","DOB","Gender",
     "Contractor ID","Assigned Team","Functional Team","Role","Location","Status",
-    "Engagement Start Date","PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
-    "Work Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate",
-    "Email","Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Period","Shift Type",
+    "Engagement Start Date","PTO Balance","PTO Used","Medical Unavailability Balance","Medical Unavailability Used",
+    "Work Location","Currency","Monthly Contract Rate","Weekly Contract Rate","Hourly Rate",
+    "Email","Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Cycle","Shift Type",
     "Equipment Provided","Created On","Dismissal Date","Dismissal Reason",
   ];
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
@@ -128,8 +128,8 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
 const COLS = [
   "Full Name","Date of Birth","Gender",
   "Contractor ID","Assigned Team","Functional Team","Role","Location","Status","Engagement Start Date",
-  "Work Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
-  "Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Period","Equipment Provided",
+  "Work Location","Currency","Monthly Contract Rate","Weekly Contract Rate","Hourly Rate","Email",
+  "Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Cycle","Equipment Provided",
   "Created On","Dismissal Date","Dismissal Reason","Action",
 ];
 

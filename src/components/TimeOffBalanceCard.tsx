@@ -68,9 +68,9 @@ const TONES: Record<TimeOffBalanceTone, {
   },
 };
 
-// Shared PTO/Sick Leave balance card — icon + title, ACCRUED/USED/AVAILABLE
+// Shared PTO/Medical Unavailability balance card — icon + title, ACCRUED/USED/AVAILABLE
 // stats, and a linear progress bar showing % Available. Used on the
-// Contractor Time-Off Detail and Leave Override tabs (Time Off Management)
+// Contractor Time Away Detail and Leave Override tabs (Time Away Management)
 // and the standalone Current/New Request Data page, so all three stay
 // visually identical.
 export function TimeOffBalanceCard({ icon, title, tone, accrued, used, available, accruedLabel = "Accrued" }: {

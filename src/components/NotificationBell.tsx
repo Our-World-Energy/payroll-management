@@ -9,6 +9,7 @@ import {
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "@/app/admin/contractors/actions";
 import { fetchAnnouncements } from "@/app/admin/announcements/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
+import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 
 type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
 type AlertRow = { name: string; department: string };
@@ -178,7 +179,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
 
   const totalCount = pendingApprovals.length + absentRows.length + lateRows.length + birthdaysToday.length + announcementsToday.length;
 
-  // Each item links straight to that specific record — PTO into Time-Off's
+  // Each item links straight to that specific record — PTO into Time Away's
   // existing ?open= contractor-detail deep link, Absent/Late into Attendance
   // filtered by that person's name via ?search=. Birthdays/Announcements have
   // no per-contractor detail view to deep-link into, so those stay plain text
@@ -188,7 +189,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
       key: "pending", label: "Pending Approvals", icon: LuFileClock, count: pendingApprovals.length,
       color: "text-amber-600 bg-amber-50", href: "/admin/time-off?status=Pending",
       items: pendingApprovals.map((r): NotificationItem => ({
-        text: `${r.name} — ${r.type} (${fmtLeaveDates(r.startDate, r.endDate)})`,
+        text: `${r.name} — ${leaveTypeDisplayLabel(r.type)} (${fmtLeaveDates(r.startDate, r.endDate)})`,
         href: r.contractorId ? `/admin/time-off?open=${encodeURIComponent(r.contractorId)}` : undefined,
       })),
     },

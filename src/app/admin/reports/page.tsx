@@ -18,7 +18,7 @@ const REPORTS = [
   { name: "Payroll Summary – May 2026", type: "Payroll", generated: "2026-05-15", Icon: LuWallet },
   { name: "Attendance Report – May 2026", type: "Attendance", generated: "2026-05-15", Icon: LuFingerprint },
   { name: "Headcount by Region – Q2 2026", type: "Workforce", generated: "2026-05-01", Icon: LuUsers },
-  { name: "Leave & Absence – May 2026", type: "Time-Off", generated: "2026-05-15", Icon: LuCalendarX },
+  { name: "Leave & Absence – May 2026", type: "Time Away", generated: "2026-05-15", Icon: LuCalendarX },
 ];
 
 export default function ReportsPage() {

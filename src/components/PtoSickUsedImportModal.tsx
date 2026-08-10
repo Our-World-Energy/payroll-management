@@ -121,7 +121,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
     }
   }
 
-  const columnLabel = leaveType === "pto" ? "PTO Used Import" : "Sick Used Import";
+  const columnLabel = leaveType === "pto" ? "PTO Used Import" : "Medical Unavailability Used Import";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -135,7 +135,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
               <LuUpload size={17} strokeWidth={2} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-[#003527]">PTO / Sick Used Import</h3>
+              <h3 className="text-lg font-bold text-[#003527]">PTO / Medical Unavailability Used Import</h3>
               <p className="text-xs text-slate-400">Bulk-set the imported {columnLabel} baseline from a CSV</p>
             </div>
           </div>
@@ -168,7 +168,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
           {/* ── Step 1: Upload ── */}
           {step === "upload" && (
             <div className="space-y-4">
-              {/* PTO / Sick selector */}
+              {/* PTO / Medical Unavailability selector */}
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Which balance is this import for?</p>
                 <div className="grid grid-cols-2 gap-2">
@@ -192,7 +192,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
                         : "border-slate-200 text-slate-500 hover:bg-slate-50"
                     }`}
                   >
-                    <LuStethoscope size={15} strokeWidth={2} /> Sick
+                    <LuStethoscope size={15} strokeWidth={2} /> Medical Unavailability
                   </button>
                 </div>
               </div>

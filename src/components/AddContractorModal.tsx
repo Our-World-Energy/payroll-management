@@ -58,7 +58,7 @@ for (let h = 0; h < 24; h++) {
   }
 }
 
-// Pay period: always Sun–Sat of current week
+// Pay cycle: always Sun–Sat of current week
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function getPayPeriod() {
   const today = new Date();
@@ -72,9 +72,9 @@ function getPayPeriod() {
 function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52).toFixed(2); }
 function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52 / 5 / 8).toFixed(2); }
 
-const FIELD = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
+const FIELD = ({ label, children, required, labelClassName }: { label: string; children: React.ReactNode; required?: boolean; labelClassName?: string }) => (
   <div className="flex flex-col gap-1">
-    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+    <label className={labelClassName ?? "text-xs font-semibold text-slate-500 uppercase tracking-wider"}>
       {label}{required && <span className="text-red-400 ml-0.5">*</span>}
     </label>
     {children}
@@ -379,7 +379,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
 
-            {/* Row 1: Engagement Start Date · Pay Category · Pay Period */}
+            {/* Row 1: Engagement Start Date · Pay Category · Pay Cycle */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
               <FIELD label="Engagement Start Date" required>
                 <input type="date" className={INPUT} value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
@@ -390,7 +390,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   {PAY_CATEGORIES.map((p) => <option key={p}>{p}</option>)}
                 </select>
               </FIELD>
-              <FIELD label="Pay Period">
+              <FIELD label="Pay Cycle">
                 <input className={READONLY} readOnly value="Sunday – Saturday" />
               </FIELD>
             </div>
@@ -497,13 +497,13 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
 
               {/* Monthly rate — main source */}
-              <FIELD label="Monthly Rate *">
+              <FIELD label="Monthly Contract Rate" required labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 <input type="number" className={INPUT} value={form.monthlyRate}
                   onChange={(e) => set("monthlyRate", e.target.value)} placeholder="5200" />
               </FIELD>
 
               {/* Weekly & Hourly — auto-calculated */}
-              <FIELD label="Weekly Rate (auto)">
+              <FIELD label="Weekly Contract Rate" labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 <input className={READONLY} readOnly
                   value={form.weeklyRate ? Number(form.weeklyRate).toFixed(2) : ""}
                   placeholder="Auto from monthly" />

@@ -226,7 +226,7 @@ export default function ContractorAttendancePage() {
           <h2 className="text-xl md:text-2xl font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
             Attendance Logs
           </h2>
-          <p className="text-slate-500 mt-1.5 text-sm">Track your hours and efficiency for the current pay period.</p>
+          <p className="text-slate-500 mt-1.5 text-sm">Track your hours and efficiency for the current pay cycle.</p>
         </div>
         <div className="flex items-center gap-2 text-xs font-medium text-slate-500 bg-white border border-slate-200/80 rounded-full pl-3.5 pr-4 py-1.5 shadow-sm self-start md:self-auto">
           <LuClock size={13} strokeWidth={2} className="text-emerald-600" />

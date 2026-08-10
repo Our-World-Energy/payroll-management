@@ -312,7 +312,7 @@ export async function seedOrgDefaults(
   return { ok: true };
 }
 
-// ── Time Off cut off date ──────────────────────────────────────────────────
+// ── Time Away cut off date ──────────────────────────────────────────────────
 // Single-row table: month name + day number only (no year — recurs annually).
 
 export async function fetchCutOffTime(): Promise<{ monthName: string; monthNo: number } | null> {

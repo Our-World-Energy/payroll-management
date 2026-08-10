@@ -118,7 +118,7 @@ export default function ContractorPayVouchersPage() {
         <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center shadow-sm">
           <LuWallet size={32} className="mx-auto text-slate-300 mb-3" strokeWidth={1.5} />
           <p className="text-sm text-slate-500 font-medium">No pay vouchers yet.</p>
-          <p className="text-xs text-slate-400 mt-1">Vouchers appear here once a pay period has been reviewed and finalised.</p>
+          <p className="text-xs text-slate-400 mt-1">Vouchers appear here once a pay cycle has been reviewed and finalised.</p>
         </div>
       ) : (
         <Voucher profile={profile} v={main} onDownload={handleDownload} />
@@ -174,7 +174,7 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
           </div>
           <div className="flex items-center gap-2 text-slate-600">
             <LuCalendarDays size={17} className="text-emerald-700 shrink-0" strokeWidth={2} />
-            <span className="text-sm">Pay Period: {fmtRange(v.rangeFrom, v.rangeTo)}</span>
+            <span className="text-sm">Pay Cycle: {fmtRange(v.rangeFrom, v.rangeTo)}</span>
           </div>
           <div className="flex items-center gap-2 text-slate-600">
             <LuCalendarCheck size={17} className="text-emerald-700 shrink-0" strokeWidth={2} />
@@ -183,11 +183,11 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
         </div>
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex justify-between md:justify-end md:gap-12">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Monthly Rate</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Monthly Contract Rate</p>
             <p className="text-2xl font-bold text-[#003527] mt-1 tabular-nums">{money(v.monthlyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
           </div>
           <div className="text-right">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weekly Rate</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weekly Contract Rate</p>
             <p className="text-2xl font-bold text-slate-700 mt-1 tabular-nums">{money(v.weeklyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
           </div>
         </div>
@@ -354,7 +354,7 @@ function PaymentHistory({
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-100">
-                {["Pay Period", "Check Date", "Net Pay", "Status", ""].map((h, i) => (
+                {["Pay Cycle", "Check Date", "Net Pay", "Status", ""].map((h, i) => (
                   <th key={h || i} className={`px-6 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-400 ${i === 4 ? "text-right" : ""}`}>{h}</th>
                 ))}
               </tr>
@@ -430,7 +430,7 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
           </div>
         </div>
         <div className="text-right text-xs">
-          <p><span className="text-slate-500">Pay Period:</span> <span className="font-semibold">{fmtVoucherDate(v.rangeFrom)} to {fmtVoucherDate(v.rangeTo)}</span></p>
+          <p><span className="text-slate-500">Pay Cycle:</span> <span className="font-semibold">{fmtVoucherDate(v.rangeFrom)} to {fmtVoucherDate(v.rangeTo)}</span></p>
           <p className="mt-1"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">{fmtVoucherDate(v.checkDate)}</span></p>
         </div>
       </div>
@@ -440,9 +440,9 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
       {/* Contractor info */}
       <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs mb-5">
         <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{profile.name}</span></p>
-        <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(v.monthlyRate)}</span></p>
+        <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{money(v.monthlyRate)}</span></p>
         <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{profile.role}</span></p>
-        <p><span className="text-slate-500">Weekly Rate</span> <span className="font-semibold ml-2">{money(v.weeklyRate)}</span></p>
+        <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{money(v.weeklyRate)}</span></p>
       </div>
 
       {/* Gross Pay */}
@@ -546,7 +546,7 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
       </div>
 
       <p className="text-[10px] text-slate-400 mt-3">
-        Check Date is always the Friday following the pay period&apos;s end date.
+        Check Date is always the Friday following the pay cycle&apos;s end date.
         Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
       </p>
     </div>

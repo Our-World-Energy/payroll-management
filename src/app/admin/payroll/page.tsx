@@ -51,7 +51,7 @@ type PayrollRow = {
   net: number | null;
   status: "Reviewed" | "For Review" | "No Activity" | "Processed";
   // True only when status is "Processed" AND something in Contractor
-  // Details, Time Off Management, or Attendance has changed since the
+  // Details, Time Away Management, or Attendance has changed since the
   // process_weekly_payroll snapshot was taken — surfaced as an icon next to
   // the name, prompting a Re-Process.
   hasChangedSinceProcessed: boolean;
@@ -286,7 +286,7 @@ export default function PayrollPage() {
             const net = gross != null && deductions != null ? gross - deductions : null;
 
             // Compare the live-computed values against the saved snapshot to
-            // catch a Contractor Details / Time Off / Attendance change that
+            // catch a Contractor Details / Time Away / Attendance change that
             // happened after this contractor was processed — gross/net/
             // deductions already fold in attendance totals, PTO hours, and
             // hourly rate, so this alone covers changes from all three areas.
@@ -450,7 +450,7 @@ export default function PayrollPage() {
           <div>
             <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Payroll</h2>
             <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
-              Pay period: <span className={`font-semibold ${dark ? "text-white/80" : "text-slate-600"}`}>{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
+              Pay cycle: <span className={`font-semibold ${dark ? "text-white/80" : "text-slate-600"}`}>{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
             </p>
           </div>
         </div>
@@ -586,7 +586,7 @@ export default function PayrollPage() {
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
-                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
+                  "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
                   "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
@@ -626,7 +626,7 @@ export default function PayrollPage() {
                           size={13}
                           strokeWidth={2}
                           className="text-amber-500 shrink-0"
-                          title="Contractor Details, Time Off, or Attendance changed since this was processed — Re-Process to refresh it"
+                          title="Contractor Details, Time Away, or Attendance changed since this was processed — Re-Process to refresh it"
                         />
                       )}
                     </span>
@@ -962,7 +962,7 @@ function PayrollVoucherModal({
             <div />
             <h3 className="text-center font-bold text-slate-700 tracking-wide">Payroll Voucher</h3>
             <div className="text-right text-xs justify-self-end">
-              <p><span className="text-slate-500">Pay Period:</span> <span className="font-semibold">{fmtVoucherDate(rangeFrom)} to {fmtVoucherDate(rangeTo)}</span></p>
+              <p><span className="text-slate-500">Pay Cycle:</span> <span className="font-semibold">{fmtVoucherDate(rangeFrom)} to {fmtVoucherDate(rangeTo)}</span></p>
               <p className="mt-0.5"><span className="text-slate-500">Check Date:</span> <span className="font-semibold">{rangeTo ? fmtVoucherDate(addDaysIso(rangeTo, 6)) : "—"}</span></p>
             </div>
           </div>
@@ -970,9 +970,9 @@ function PayrollVoucherModal({
           {/* Contractor info */}
           <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs mt-2.5 mb-3">
             <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{row.name}</span></p>
-            <p><span className="text-slate-500">Monthly Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
+            <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{row.role}</span></p>
-            <p><span className="text-slate-500">Weekly Rate</span> <span className="font-semibold ml-2">{money(figures.weeklyRate)}</span></p>
+            <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.weeklyRate)}</span></p>
           </div>
 
           {/* Gross Pay */}
@@ -1081,7 +1081,7 @@ function PayrollVoucherModal({
           </div>
 
           <p className="text-[10px] text-slate-400 mt-2">
-            Check Date is always the Friday following the pay period&apos;s end date.
+            Check Date is always the Friday following the pay cycle&apos;s end date.
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
         </div>

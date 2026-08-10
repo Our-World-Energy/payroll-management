@@ -24,7 +24,7 @@ export type ContractorVoucher = {
   weekStart: string;   // ISO Sunday (also the key)
   rangeFrom: string;   // Sunday
   rangeTo: string;     // Saturday
-  checkDate: string;   // Friday following the pay period end
+  checkDate: string;   // Friday following the pay cycle end
   status: "Paid" | "Processing";
   currency: string;
   hourlyRate: number;

@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
  *   worksnap_actual_time    = all logged minutes that week
  *   fixed_evaluated_time    = Σ over days of min(day_actual, 480)   (Fixed: 8h/day cap)
  *   flexible_evaluated_time = min(weekly_actual, target)            (Flexible: weekly pool)
- *   time_off_time           = HO/PTO 480, PTO½/Sick½ 240, else 0
+ *   time_off_time           = HO/PTO 480, PTO½/Medical Unavailability½ 240, else 0
  *   manual_adjustment_time  = admin ± minutes
  *   completion_time         = evaluated(by shift) + time_off + manual_adjustment
  *   status                  = completion vs target → Met / Short / Over

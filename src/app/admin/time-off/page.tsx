@@ -15,7 +15,7 @@ import {
 } from "../contractors/actions";
 import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 
@@ -336,7 +336,7 @@ function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: (
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <div className="flex items-center justify-between mb-1">
-          <h3 className="text-lg font-bold text-[#003527]">Process Time Off</h3>
+          <h3 className="text-lg font-bold text-[#003527]">Process Time Away</h3>
           <button
             onClick={onClose}
             className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
@@ -344,7 +344,7 @@ function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: (
             <LuX size={18} strokeWidth={2} />
           </button>
         </div>
-        <p className="text-sm text-slate-500 mb-4">Current PTO / Sick Leave usage across your contractor workforce.</p>
+        <p className="text-sm text-slate-500 mb-4">Current PTO / Medical Unavailability usage across your contractor workforce.</p>
 
         <div className="space-y-2 mb-5">
           <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-teal-50 border border-teal-100">
@@ -352,7 +352,7 @@ function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: (
             <span className="text-sm font-bold text-teal-700">{ptoCount}</span>
           </div>
           <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-orange-50 border border-orange-100">
-            <span className="text-sm font-medium text-orange-700">Count of Sick Leave</span>
+            <span className="text-sm font-medium text-orange-700">Count of Medical Unavailability</span>
             <span className="text-sm font-bold text-orange-700">{sickLeaveCount}</span>
           </div>
         </div>
@@ -435,7 +435,7 @@ export default function TimeOffPage() {
 
   useEffect(() => { reloadData(); }, [reloadData]);
 
-  // ── Clear PTO/Sick Used Import ──────────────────────────────────────────
+  // ── Clear PTO/Medical Unavailability Used Import ─────────────────────────
   // Resets a single contractor's imported baseline back to 0 (i.e. "no
   // import on file"), reusing the same bulk-import action with a lone
   // zero-hours entry rather than adding a dedicated clear endpoint.
@@ -557,17 +557,17 @@ export default function TimeOffPage() {
   const COLS = [
     "Contractor", "Country", "Assigned Team", "Engagement Start Date",
     ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Used Import", "PTO Accrual Available"] : []),
-    "Sick Leave Accrual", "Sick Used", "Sick Used Import", "Sick Accrual Available",
+    "Medical Unavailability Accrual", "Medical Unavailability Used", "Medical Unavailability Used Import", "Medical Unavailability Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
-    "Advance Sick Leave", "Status", "Action",
+    "Advance Medical Unavailability", "Status", "Action",
   ];
 
   function exportCSV() {
     const headers = [
       "Name", "Country", "Assigned Team", "Engagement Start Date",
       "PTO Accrual (h)", "PTO Used (h)", "PTO Used Import (h)", "PTO Available (h)",
-      "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Used Import (h)", "Sick Available (h)",
-      "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
+      "Medical Unavailability Accrual (h)", "Medical Unavailability Used (h)", "Medical Unavailability Used Import (h)", "Medical Unavailability Available (h)",
+      "Advance PTO/Birthday Leave (h)", "Advance Medical Unavailability (h)",
       "Special Leave Credits (h)", "Special Leave Used (h)", "Special Leave Available (h)", "Status",
     ];
     const csvRows = [
@@ -611,7 +611,7 @@ export default function TimeOffPage() {
                     {avatarInitials(selectedRow.fullName)}
                   </div>
                   <div>
-                    <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wider">Contractor Time Off – Advance Leave Request Details</p>
+                    <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wider">Contractor Time Away – Advance Leave Request Details</p>
                     <h3 className="text-lg font-bold text-white mt-0.5">{selectedRow.fullName}</h3>
                     <p className="text-sm text-white/60 mt-0.5">{selectedRow.department || "—"}</p>
                     <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
@@ -625,7 +625,7 @@ export default function TimeOffPage() {
               {/* Tabs */}
               <div className="flex border-b border-slate-100 px-6">
                 {([
-                  { key: "info",     label: "Contractor Time-Off Detail", icon: <LuEye size={13} /> },
+                  { key: "info",     label: "Contractor Time Away Detail", icon: <LuEye size={13} /> },
                   { key: "details",  label: "Advance Leave Request",      icon: <LuCalendarPlus size={13} /> },
                   { key: "special",  label: "Special Leave Credits",      icon: <LuGift size={13} /> },
                   { key: "override", label: "Leave Override",             icon: <LuSlidersHorizontal size={13} /> },
@@ -678,7 +678,7 @@ export default function TimeOffPage() {
                       )}
                       <TimeOffBalanceCard
                         icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
-                        title="Sick Leave Balance"
+                        title="Medical Unavailability Balance"
                         tone={selectedRow.sickLeaveAvailable < 0 ? "red" : "orange"}
                         accrued={selectedRow.sickLeaveBalance}
                         used={selectedRow.sickLeaveUsed}
@@ -814,7 +814,7 @@ export default function TimeOffPage() {
                             </div>
                           )}
                           <div>
-                            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1.5">Advance Sick Leave</p>
+                            <p className="text-[10px] font-semibold text-blue-600 uppercase tracking-wider mb-1.5">Advance Medical Unavailability</p>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Time</p>
@@ -864,7 +864,7 @@ export default function TimeOffPage() {
                           )}
                           <TimeOffBalanceCard
                             icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
-                            title="Advance Sick Leave"
+                            title="Advance Medical Unavailability"
                             tone="blue"
                             accruedLabel="Time"
                             accrued={selectedRow.advanceSickLeave}
@@ -882,13 +882,13 @@ export default function TimeOffPage() {
                           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
                             <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
                             <p className="text-xs text-slate-500 leading-relaxed">
-                              Advance leave becomes available once a contractor&apos;s available PTO or Sick Leave balance drops <strong>below 8 hours</strong>. This contractor currently has 8+ hours available in {isRowIndia ? "Sick Leave" : "both PTO and Sick Leave"}, so advance leave isn&apos;t needed.
+                              Advance leave becomes available once a contractor&apos;s available PTO or Medical Unavailability balance drops <strong>below 8 hours</strong>. This contractor currently has 8+ hours available in {isRowIndia ? "Medical Unavailability" : "both PTO and Medical Unavailability"}, so advance leave isn&apos;t needed.
                             </p>
                           </div>
                         ) : (
                           <div className="space-y-2">
                             <p className="text-xs text-slate-500 leading-relaxed mb-1">
-                              Grants extra advance leave hours ahead of accrual for a contractor running low on PTO or Sick Leave — repaid automatically from future accrual.
+                              Grants extra advance leave hours ahead of accrual for a contractor running low on PTO or Medical Unavailability — repaid automatically from future accrual.
                             </p>
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours to Grant <span className="text-red-400">*</span></p>
@@ -902,7 +902,7 @@ export default function TimeOffPage() {
                                 onChange={(e) => { setEditLeaveType(e.target.value as typeof editLeaveType); setEditHours(""); }}
                                 className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                               >
-                                {sickAdvanceEligible && <option value="Advance Sick Leave">Advance Sick Leave</option>}
+                                {sickAdvanceEligible && <option value="Advance Sick Leave">Advance Medical Unavailability</option>}
                                 {ptoAdvanceEligible && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
                               </select>
                             </div>
@@ -1011,7 +1011,7 @@ export default function TimeOffPage() {
                       // createAdvanceLeaveOverride) rather than requiring a full 8h
                       // every time — only block once there's nothing left at all.
                       if (available <= 0) {
-                        setOverrideBlocked(`${overrideType} has no balance remaining for this override.`);
+                        setOverrideBlocked(`${leaveTypeDisplayLabel(overrideType)} has no balance remaining for this override.`);
                         return;
                       }
                       await submitAdvanceOverride();
@@ -1028,7 +1028,7 @@ export default function TimeOffPage() {
                       const leaveLabel =
                         overrideBucket === "pto" ? "PTO" :
                         overrideBucket === "specialLeave" ? "Special Leave Credits" :
-                        "Sick Leave";
+                        "Medical Unavailability";
                       setOverrideBlocked(
                         `${leaveLabel} Available is not enough for this override. Available: ${fmtBalance(availableHours)}h, Required: ${requiredHours}h.`
                       );
@@ -1050,7 +1050,7 @@ export default function TimeOffPage() {
                       );
                       if (conflict) {
                         setOverrideDuplicateWarning(
-                          `This contractor already has a ${conflict.status.toLowerCase()} ${conflict.type} request from ${fmtDate(conflict.startDate)} to ${fmtDate(conflict.endDate)} that overlaps these dates. Apply this override anyway?`
+                          `This contractor already has a ${conflict.status.toLowerCase()} ${leaveTypeDisplayLabel(conflict.type)} request from ${fmtDate(conflict.startDate)} to ${fmtDate(conflict.endDate)} that overlaps these dates. Apply this override anyway?`
                         );
                         setConfirmOverrideAnyway(() => () => handleOverrideSubmit(true));
                         return;
@@ -1089,7 +1089,7 @@ export default function TimeOffPage() {
                         )}
                         <TimeOffBalanceCard
                           icon={<LuShieldCheck size={18} strokeWidth={1.75} />}
-                          title="Sick Leave Balance"
+                          title="Medical Unavailability Balance"
                           tone={selectedRow.sickLeaveAvailable < 0 ? "red" : "orange"}
                           accrued={selectedRow.sickLeaveBalance}
                           used={selectedRow.sickLeaveUsed}
@@ -1107,7 +1107,7 @@ export default function TimeOffPage() {
                           {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) && t !== "Advance PTO/Birthday Leave" : true)
                             .filter((t) => t !== "Advance PTO/Birthday Leave" || selectedRow.ptoAvailable < 8)
                             .filter((t) => t !== "Advance Sick Leave" || selectedRow.sickLeaveAvailable < 8)
-                            .map((t) => <option key={t} value={t}>{t}</option>)}
+                            .map((t) => <option key={t} value={t}>{leaveTypeDisplayLabel(t)}</option>)}
                         </select>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -1245,7 +1245,7 @@ export default function TimeOffPage() {
                           <LuGift size={13} /> Grant Special Leave Credits
                         </p>
                         <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                          Grants an extra bonus leave balance for this contractor, on top of their regular PTO/Sick Leave — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
+                          Grants an extra bonus leave balance for this contractor, on top of their regular PTO/Medical Unavailability — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
                         </p>
                         <div className="space-y-2">
                           <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
@@ -1366,7 +1366,7 @@ export default function TimeOffPage() {
             <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
               <li>Management</li>
               <li><LuChevronRight size={14} className="text-slate-400" /></li>
-              <li className="text-teal-600">Time-Off Management</li>
+              <li className="text-teal-600">Time Away Management</li>
             </ol>
           </nav>
           <div className="flex items-center gap-3">
@@ -1374,7 +1374,7 @@ export default function TimeOffPage() {
               <LuCalendarDays size={18} strokeWidth={2} />
             </div>
             <div>
-              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time-Off Management</h2>
+              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time Away Management</h2>
               <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
             </div>
           </div>
@@ -1386,7 +1386,7 @@ export default function TimeOffPage() {
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <LuLoader size={13} strokeWidth={2} className="animate-spin" /> : <LuListChecks size={13} strokeWidth={2} />}
-            Process Time Off
+            Process Time Away
           </button>
           <button
             onClick={() => setShowUsedImportModal(true)}
@@ -1611,7 +1611,7 @@ export default function TimeOffPage() {
                             type="button"
                             onClick={() => handleClearUsedImport(row, "sick")}
                             disabled={clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"}
-                            title="Clear Sick Used Import"
+                            title="Clear Medical Unavailability Used Import"
                             className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"
@@ -1653,7 +1653,7 @@ export default function TimeOffPage() {
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
                           {reviewStatus === "Approved" ? <LuCircleCheck size={11} /> : reviewStatus === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                          {latest.type} · {reviewStatus}
+                          {leaveTypeDisplayLabel(latest.type)} · {reviewStatus}
                         </span>
                       ) : (
                         <span className="text-slate-300 text-sm">—</span>

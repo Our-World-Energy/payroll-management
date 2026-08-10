@@ -7,8 +7,15 @@ const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 
 export const HOURS_PER_DAY = 8;
 
+// Cosmetic-only relabeling: the stored/compared leave-request type stays
+// "Sick Leave" (so historical requests keep matching), this only changes
+// what's rendered wherever that raw type/label string is shown to a user.
+export function leaveTypeDisplayLabel(type: string): string {
+  return type.replace(/Sick Leave/g, "Medical Unavailability");
+}
+
 // The PTO/Sick Leave accrual "year" resets on a cut off date (month + day,
-// no year) configured under Settings → Time Off Settings → Cut Off Time,
+// no year) configured under Settings → Time Away Settings → Cut Off Time,
 // rather than being hardcoded to March 1st.
 export type CutoffDate = { month: number; day: number }; // month is 0-indexed (Date()-compatible)
 
@@ -105,11 +112,6 @@ function calendarMonthDiff(start: Date, end: Date) {
   );
 }
 
-function accrualPeriodStartFor(date: Date, cutoff: CutoffDate) {
-  const cutoffThisYear = new Date(date.getFullYear(), cutoff.month, cutoff.day);
-  return date >= cutoffThisYear ? new Date(date.getFullYear(), 0, 1) : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
-}
-
 function latestResetDateFor(date: Date, cutoff: CutoffDate) {
   const cutoffThisYear = new Date(date.getFullYear(), cutoff.month, cutoff.day);
   return date >= cutoffThisYear ? cutoffThisYear : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
@@ -154,14 +156,25 @@ function calculatePolicyBalanceAsOf(
     return roundBalance(firstYearAccrual + firstYearAdditionalMonths * monthlyAccrual);
   }
 
-  const currentPeriodStart = accrualPeriodStartFor(asOfDate, cutoff);
-  const effectiveStartDate = accrualStartDate > currentPeriodStart ? accrualStartDate : currentPeriodStart;
-  const prorationDate = effectiveStartDate.getTime() === accrualStartDate.getTime() ? eligibilityDate : effectiveStartDate;
-  const firstAccrual = prorationDate.getDate() <= 15 ? monthlyAccrual : halfMonthAccrual;
-  // Only count months whose last day has already passed (end-of-month accrual)
-  const completedMonths = calendarMonthDiff(effectiveStartDate, startOfMonth(asOfDate));
-  if (completedMonths === 0) return 0;
-  return roundBalance(firstAccrual + (completedMonths - 1) * monthlyAccrual);
+  // Ongoing (past the first eligibility year): accrual runs on a plain
+  // calendar year (Jan–Dec), the same for every contractor regardless of
+  // hire date — Jan = 1 completed month's worth, Dec = 12. The Reset Date
+  // only delays *when* a new calendar year's count takes over: right up
+  // until the Reset Date itself arrives, the PRIOR year's running total
+  // keeps extending (+12 months) instead of resetting; once asOfDate
+  // reaches the Reset Date, plain counting for the new year takes over
+  // immediately (it doesn't wait for the Reset Month to fully complete).
+  // This extension never applies the very first time a contractor reaches
+  // this branch, since there's no prior cycle yet to continue.
+  const year = asOfDate.getFullYear();
+  const resetThisYear = new Date(year, cutoff.month, cutoff.day);
+  const priorCycleExists = new Date(year - 1, cutoff.month, cutoff.day) >= oneYearDate;
+  const extend = asOfDate < resetThisYear && priorCycleExists;
+
+  const completedMonthsThisYear = calendarMonthDiff(new Date(year, 0, 1), startOfMonth(asOfDate));
+  const totalMonths = extend ? completedMonthsThisYear + 12 : completedMonthsThisYear;
+  if (totalMonths === 0) return 0;
+  return roundBalance(totalMonths * monthlyAccrual);
 }
 
 function calculatePolicyBalance(hireDate: string, monthlyAccrual: number, halfMonthAccrual: number, cutoff: CutoffDate) {

@@ -141,14 +141,14 @@ export default function AdminPage() {
 
         // If a contractor with no logged time today has an approved leave
         // request covering today, that's why they're absent — label it PTO
-        // or Sick Leave instead of a bare "Absent" (Half Day/Unpaid/Special
+        // or Medical Unavailability instead of a bare "Absent" (Half Day/Unpaid/Special
         // Leave requests are left as "Absent" since they weren't asked for).
         function absenceStatusFor(email: string): string {
           const match = leaveRequests.find((r) =>
             r.status === "Approved" && r.email.trim().toLowerCase() === email && todayLocal >= r.startDate && todayLocal <= r.endDate
           );
           if (match?.type === "PTO") return "PTO";
-          if (match?.type === "Sick Leave") return "Sick Leave";
+          if (match?.type === "Sick Leave") return "Medical Unavailability";
           return "Absent";
         }
 
@@ -192,9 +192,9 @@ export default function AdminPage() {
         }
         setLateRows(lateRows);
 
-        // PTO/Sick Leave Today — every active contractor with an Approved
-        // PTO or Sick Leave request (full or half day) covering today,
-        // sourced straight from Time Off Management, independent of whether
+        // PTO/Medical Unavailability Today — every active contractor with an Approved
+        // PTO or Medical Unavailability request (full or half day) covering today,
+        // sourced straight from Time Away Management, independent of whether
         // they also logged Worksnap time today.
         const ptoRows: PtoRow[] = [];
         for (const c of activeContractors) {
@@ -206,7 +206,7 @@ export default function AdminPage() {
             (r.type === "PTO" || r.type === "PTO Half Day" || r.type === "Sick Leave" || r.type === "Sick Leave Half Day")
           );
           if (match) {
-            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "PTO" : "Sick Leave" });
+            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "PTO" : "Medical Unavailability" });
           }
         }
         setPtoRows(ptoRows);
@@ -265,7 +265,7 @@ export default function AdminPage() {
           );
         })}
 
-        {/* PTO/Sick Leave + Absent Today + Late Today — one slim stacked column */}
+        {/* PTO/Medical Unavailability + Absent Today + Late Today — one slim stacked column */}
         <div className="flex flex-col gap-1.5">
           <button
             onClick={() => setShowPtoModal(true)}
@@ -275,7 +275,7 @@ export default function AdminPage() {
               <LuBriefcase size={13} strokeWidth={2} />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">PTO/Sick Leave</p>
+              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">PTO/Medical Unavailability</p>
               <p className="text-sm font-bold text-blue-700 leading-tight mt-0.5">{ptoRows.length}</p>
             </div>
           </button>
@@ -432,14 +432,14 @@ export default function AdminPage() {
         </div>
       )}
 
-      {/* PTO/Sick Leave Today Modal */}
+      {/* PTO/Medical Unavailability Today Modal */}
       {showPtoModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowPtoModal(false)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 bg-blue-600">
               <div>
-                <h3 className="text-lg font-bold text-white">PTO/Sick Leave Today</h3>
+                <h3 className="text-lg font-bold text-white">PTO/Medical Unavailability Today</h3>
                 <p className="text-sm text-blue-100 mt-0.5">{ptoRows.length} contractor{ptoRows.length !== 1 ? "s" : ""} on approved leave today</p>
               </div>
               <button
@@ -461,7 +461,7 @@ export default function AdminPage() {
                 <tbody className="divide-y divide-slate-100">
                   {ptoRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved PTO or Sick Leave today.</td>
+                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved PTO or Medical Unavailability today.</td>
                     </tr>
                   ) : ptoRows.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">

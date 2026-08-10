@@ -56,7 +56,7 @@ export default function SettingsPage() {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  // ── Time Off cut off date (month + day, no year — recurs every year) ─────
+  // ── Time Away cut off date (month + day, no year — recurs every year) ─────
   // Local edits only take effect once "Save" is clicked, tracked against the
   // last-saved values so the button can enable/disable and show confirmation.
   const [cutoffMonth, setCutoffMonth] = useState(0);
@@ -645,14 +645,14 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* Time Off Settings */}
+      {/* Time Away Settings */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <button
           onClick={() => toggleSection("timeOff")}
           className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
         >
           {openSections.timeOff ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
-          <h4 className="text-base font-semibold text-[#003527]">Time Off Settings</h4>
+          <h4 className="text-base font-semibold text-[#003527]">Time Away Settings</h4>
         </button>
         {openSections.timeOff && (
           <div className="px-6 py-5">

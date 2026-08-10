@@ -374,7 +374,7 @@ export async function updateTimeOffUsage(
   if (error) throw new Error(error.message);
 }
 
-// Bulk-sets the imported/legacy PTO Used or Sick Used baseline (pto_used_import /
+// Bulk-sets the imported/legacy PTO Used or Medical Unavailability Used baseline (pto_used_import /
 // sick_used_import) from an admin-uploaded CSV, matching contractors by email.
 // One update per row so a typo'd/missing email fails just that row instead of
 // aborting the whole batch.
@@ -685,7 +685,7 @@ export async function createAdvanceLeaveOverride(params: {
   const alreadyUsed = isPto ? Number(profile.birthdayLeaveUsed ?? 0) : Number(profile.advanceSickLeaveUsed ?? 0);
   const available = Math.max(balance - alreadyUsed, 0);
   if (available <= 0) {
-    const label = isPto ? "Advance PTO/Birthday Leave" : "Advance Sick Leave";
+    const label = isPto ? "Advance PTO/Birthday Leave" : "Advance Medical Unavailability";
     return { ok: false, error: `${label} has no balance remaining for this override.` };
   }
   // Deduction is capped to whatever's actually available — e.g. 12h available
