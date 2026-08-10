@@ -5,7 +5,7 @@ import { fetchContractorProfileByEmail } from "../profile/actions";
 import { fetchHolidays } from "@/app/admin/holidays/actions";
 import { addDaysIso, arizonaTodayIso } from "@/lib/weekUtils";
 import { countryFromLocation } from "@/lib/countryTimeZones";
-import type { VoucherTimeTotals } from "@/lib/payrollVoucher";
+import { totalPtoHoursFor, type VoucherTimeTotals } from "@/lib/payrollVoucher";
 
 function getSupabase() {
   return createClient(
@@ -68,7 +68,7 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
     sb.from("attendance_week_status")
       .select("weekStart, totalLocalHolidayMinutes, totalEvaluatedRegularMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes")
       .ilike("email", email),
-    sb.from("contractor_leave_requests").select("type, startDate, endDate, ptoUsedHours").ilike("email", email).eq("status", "Approved"),
+    sb.from("contractor_leave_requests").select("type, startDate, endDate, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours").ilike("email", email).eq("status", "Approved"),
     fetchHolidays().catch(() => []),
   ]);
 
@@ -100,6 +100,8 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
     startDate: String(r.startDate ?? ""),
     endDate: String(r.endDate ?? ""),
     ptoUsedHours: Number(r.ptoUsedHours ?? 0),
+    sickLeaveUsedHours: Number(r.sickLeaveUsedHours ?? 0),
+    specialLeaveUsedHours: Number(r.specialLeaveUsedHours ?? 0),
   }));
 
   const country = countryFromLocation(profileRaw?.location || String(pwpRows[0]?.country ?? ""));
@@ -132,9 +134,7 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
         if (m != null) evaluatedDailyMinutes[date] = m;
       }
 
-      const ptoHours = leaveRows
-        .filter((lr) => lr.type.startsWith("PTO") && lr.startDate <= rangeTo && lr.endDate >= rangeFrom)
-        .reduce((sum, lr) => sum + lr.ptoUsedHours, 0);
+      const ptoHours = totalPtoHoursFor(rangeFrom, rangeTo, leaveRows);
 
       const holsInWeek = holidays.filter((h) => {
         const hd = h.date.slice(0, 10);

@@ -45,6 +45,29 @@ export function computePayComponents(hourlyRate: number, totals: VoucherTimeTota
   };
 }
 
+// PTO hours for the voucher's PTO HRS line — regular PTO ("PTO"/"PTO Half
+// Day"), Advance PTO/Birthday Leave and Advance Sick Leave overrides, and
+// Special Leave (excludes regular Medical Unavailability/Sick Leave
+// requests). Advance overrides always stamp their hours on
+// sickLeaveUsedHours regardless of which advance pool they draw from (see
+// createAdvanceLeaveOverride), while Special Leave has its own dedicated
+// specialLeaveUsedHours column (see LEAVE_BUCKET_FIELDS).
+export const PTO_HRS_TYPES = ["PTO", "PTO Half Day", "Advance PTO/Birthday Leave", "Advance Sick Leave", "Special Leave"];
+
+export function totalPtoHoursFor(
+  rangeFrom: string,
+  rangeTo: string,
+  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number; sickLeaveUsedHours: number; specialLeaveUsedHours: number }>
+) {
+  return requests
+    .filter((r) => PTO_HRS_TYPES.includes(r.type) && r.startDate <= rangeTo && r.endDate >= rangeFrom)
+    .reduce((sum, r) => sum + (
+      r.type.startsWith("PTO") ? r.ptoUsedHours :
+      r.type === "Special Leave" ? r.specialLeaveUsedHours :
+      r.sickLeaveUsedHours
+    ), 0);
+}
+
 export const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THUR", "FRI", "SAT"];
 
 export const REST_DAY_TO_LABEL: Record<string, string> = {

@@ -739,6 +739,7 @@ export default function TimeOffPage() {
                         : c
                     ));
                     setEditHours("");
+                    toast.success(`${hoursToAdd}h of ${isPto ? "Advance PTO/Birthday Leave" : "Advance Medical Unavailability"} granted.`);
                   }
 
                   function startEditAdvanceBalance() {
@@ -891,11 +892,6 @@ export default function TimeOffPage() {
                               Grants extra advance leave hours ahead of accrual for a contractor running low on PTO or Medical Unavailability — repaid automatically from future accrual.
                             </p>
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours to Grant <span className="text-red-400">*</span></p>
-                              <input type="number" min="1" value={editHours} onChange={(e) => setEditHours(e.target.value)} placeholder="Enter hours e.g. 8"
-                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
-                            </div>
-                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
                               <select
                                 value={effectiveLeaveType}
@@ -905,6 +901,11 @@ export default function TimeOffPage() {
                                 {sickAdvanceEligible && <option value="Advance Sick Leave">Advance Medical Unavailability</option>}
                                 {ptoAdvanceEligible && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
                               </select>
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours to Grant <span className="text-red-400">*</span></p>
+                              <input type="number" min="1" value={editHours} onChange={(e) => setEditHours(e.target.value)} placeholder="Enter hours e.g. 8"
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
                             </div>
                             <button onClick={applyAdvanceGrant} disabled={!editHours || parseFloat(editHours) <= 0}
                               className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">

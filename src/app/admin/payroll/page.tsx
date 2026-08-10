@@ -11,7 +11,7 @@ import {
   processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow, type ProcessedSnapshot,
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
-import { computePayComponents } from "@/lib/payrollVoucher";
+import { computePayComponents, totalPtoHoursFor } from "@/lib/payrollVoucher";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 
@@ -73,22 +73,15 @@ type PayrollRow = {
 function totalTimeOffRequestMinutesFor(
   rangeFrom: string,
   rangeTo: string,
-  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number; sickLeaveUsedHours: number }>
+  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number; sickLeaveUsedHours: number; specialLeaveUsedHours: number }>
 ) {
   return requests
     .filter((r) => r.startDate <= rangeTo && r.endDate >= rangeFrom)
-    .reduce((sum, r) => sum + (r.type.startsWith("PTO") ? r.ptoUsedHours : r.sickLeaveUsedHours) * 60, 0);
-}
-
-// PTO-only hours (excludes Sick Leave requests) for the voucher's PTO HRS line.
-function totalPtoHoursFor(
-  rangeFrom: string,
-  rangeTo: string,
-  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number }>
-) {
-  return requests
-    .filter((r) => r.type.startsWith("PTO") && r.startDate <= rangeTo && r.endDate >= rangeFrom)
-    .reduce((sum, r) => sum + r.ptoUsedHours, 0);
+    .reduce((sum, r) => sum + (
+      r.type.startsWith("PTO") ? r.ptoUsedHours :
+      r.type === "Special Leave" ? r.specialLeaveUsedHours :
+      r.sickLeaveUsedHours
+    ) * 60, 0);
 }
 
 function fmtVoucherDate(iso: string) {

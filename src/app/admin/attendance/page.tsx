@@ -259,7 +259,8 @@ function timeOffRequestTypeFor(date: string, leaveRequests: AdminLeaveRequest[])
 
 // Hours stamped on a leave request for its own type's bucket — PTO types read
 // ptoUsedHours, Special Leave reads specialLeaveUsedHours, everything else
-// (Sick Leave, Unpaid Leave) reads sickLeaveUsedHours.
+// (Sick Leave, Unpaid Leave, and both Advance PTO/Birthday Leave and Advance
+// Sick Leave overrides — see createAdvanceLeaveOverride) reads sickLeaveUsedHours.
 function hoursForLeaveRequest(r: AdminLeaveRequest): number {
   if (r.type.startsWith("PTO")) return r.ptoUsedHours;
   if (r.type.startsWith("Special Leave")) return r.specialLeaveUsedHours;
@@ -307,11 +308,17 @@ function isApprovedHalfDayLeaveDate(date: string, leaveRequests: AdminLeaveReque
   );
 }
 
-const APPROVED_LEAVE_CONFLICT_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day"];
+const APPROVED_LEAVE_CONFLICT_TYPES = [
+  "PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day",
+  "Advance PTO/Birthday Leave", "Advance Sick Leave", "Special Leave",
+];
 
-// Whether an approved PTO/Sick Leave (full or half day) portal request covers
-// `date` — used to flag a day the contractor filed one of these for but also
-// logged Worksnap Time on, so the admin can spot the conflict at a glance.
+// Whether an approved PTO/Sick Leave (full or half day, including Advance
+// PTO/Birthday Leave, Advance Sick Leave, and Special Leave overrides — all
+// full-day only, no half-day variant exists for any of the three) portal
+// request covers `date` — used to flag a day the contractor filed one of
+// these for but also logged Worksnap Time on, so the admin can spot the
+// conflict at a glance.
 function hasApprovedLeaveRequestFor(date: string, leaveRequests: AdminLeaveRequest[]) {
   return leaveRequests.some((r) =>
     APPROVED_LEAVE_CONFLICT_TYPES.includes(r.type) && r.status === "Approved" && date >= r.startDate && date <= r.endDate
@@ -320,15 +327,18 @@ function hasApprovedLeaveRequestFor(date: string, leaveRequests: AdminLeaveReque
 
 // A "Reviewed" row on the main table (and its own row-level "Need Attention"
 // downgrade) is flagged when any day that week has an approved PTO/Sick
-// Leave on file AND more than 240 min (4h) of raw Worksnap Time also logged
-// — the same genuine-conflict definition Attendance Review itself uses,
-// minus Adjusted Time (not loaded here — see the row-level comment where
-// this is called). Leave requests must already be filtered to this row's
-// own email before calling.
-function rowHasLeaveOverworkConflict(row: AttendanceRow, weekDates: string[], rowLeaveRequests: AdminLeaveRequest[]) {
+// Leave on file AND more than 240 min (4h) also logged (Adjusted Time when
+// set, else raw Worksnap Time) — the exact same genuine-conflict definition
+// Attendance Review's own footer status uses, so the two can never disagree.
+// Leave requests must already be filtered to this row's own email before
+// calling; adjustedDaily is this row's own contractor's Adjusted Time map
+// (keyed by date), if any.
+function rowHasLeaveOverworkConflict(row: AttendanceRow, weekDates: string[], rowLeaveRequests: AdminLeaveRequest[], adjustedDaily?: Record<string, number>) {
   return weekDates.some((date) => {
     if (!hasApprovedLeaveRequestFor(date, rowLeaveRequests)) return false;
-    return (row.dailyWorksnapMinutes?.[date] ?? 0) > 240;
+    const adjustedMinutes = adjustedDaily?.[date] ?? 0;
+    const loggedMinutes = adjustedMinutes > 0 ? adjustedMinutes : (row.dailyWorksnapMinutes?.[date] ?? 0);
+    return loggedMinutes > 240;
   });
 }
 
@@ -2709,6 +2719,7 @@ export default function AttendancePage() {
   const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
   const [allHolidays, setAllHolidays] = useState<HolidayEntry[]>([]);
   const [leaveRequests, setLeaveRequests] = useState<AdminLeaveRequest[]>([]);
+  const [adjustedByEmail, setAdjustedByEmail] = useState<Map<string, Record<string, number>>>(new Map());
 
   const rangeFrom = week;                 // Sunday (week start)
   const rangeTo = addDaysIso(week, 6);    // Saturday (week end)
@@ -2739,6 +2750,32 @@ export default function AttendancePage() {
       .then(setLeaveRequests)
       .catch(() => setLeaveRequests([]));
   }, []);
+
+  // Adjusted Time per contractor for the selected week — so the main
+  // table's "Need Attention" conflict check (rowHasLeaveOverworkConflict)
+  // can prefer Adjusted Time over raw Worksnap Time exactly like Attendance
+  // Review's own footer status does, instead of only ever seeing raw time
+  // and disagreeing with what Attendance Review shows for the same week.
+  useEffect(() => {
+    if (!rangeFrom || !rangeTo) return;
+    let isCancelled = false;
+    fetchWithRetry(`/api/attendance/day-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`)
+      .then((r) => (r.ok ? r.json() : { days: [] }))
+      .then((dayStatusResult: { days?: Array<{ email?: string; date?: string; adjustedMinutes?: number | null }> }) => {
+        if (isCancelled) return;
+        const map = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? [])) {
+          const email = String(d.email ?? "").trim().toLowerCase();
+          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          const record = map.get(email) ?? {};
+          record[String(d.date ?? "")] = d.adjustedMinutes;
+          map.set(email, record);
+        }
+        setAdjustedByEmail(map);
+      })
+      .catch(() => { if (!isCancelled) setAdjustedByEmail(new Map()); });
+    return () => { isCancelled = true; };
+  }, [rangeFrom, rangeTo]);
 
   // Week selector = recent Sun→Sat weeks in Arizona time, anchored to the
   // current week (e.g. Jun 28 – Jul 4). Computed on the client to use the
@@ -2876,7 +2913,8 @@ export default function AttendancePage() {
     // and the row's own badge). Filtering by "Reviewed" excludes those rows,
     // so the two options stay mutually exclusive, matching the stats cards.
     const rowNeedsAttentionForStatus = row.weeklyStatus === "Reviewed" && rowHasLeaveOverworkConflict(
-      row, weekDates, leaveRequests.filter((r) => r.email === (row.role.includes("@") ? row.role : ""))
+      row, weekDates, leaveRequests.filter((r) => r.email === (row.role.includes("@") ? row.role : "")),
+      adjustedByEmail.get((row.role.includes("@") ? row.role : "").trim().toLowerCase())
     );
     const matchesStatus = statusFilter === "All"
       ? true
@@ -2918,7 +2956,7 @@ export default function AttendancePage() {
   const reviewedRows        = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Reviewed");
   const needsAttentionCount = reviewedRows.filter((r) => {
     const email = r.role.includes("@") ? r.role : "";
-    return rowHasLeaveOverworkConflict(r, weekDates, leaveRequests.filter((req) => req.email === email));
+    return rowHasLeaveOverworkConflict(r, weekDates, leaveRequests.filter((req) => req.email === email), adjustedByEmail.get(email.trim().toLowerCase()));
   }).length;
   const reviewedCount    = reviewedRows.length - needsAttentionCount;
   const processedCount   = filteredAttendanceRows.filter((r) => r.weeklyStatus === "Processed").length;
@@ -3210,14 +3248,14 @@ export default function AttendancePage() {
                 const isProcessed = row.weeklyStatus === "Processed";
                 // Same conflict check Attendance Review flags per-day and in its own
                 // footer status (see ReviewModal) — an approved PTO/Sick Leave on file
-                // for a date where more than 240 min (4h) of raw Worksnap Time was also
-                // logged. Adjusted Time isn't available here (only fetched per-contractor
-                // when Attendance Review itself opens), so this uses raw Worksnap Time
-                // only — a "Reviewed" row is downgraded to "Need Attention" here too, so
-                // the weekly table always agrees with what Attendance Review would show.
+                // for a date where more than 240 min (4h) was also logged (Adjusted
+                // Time when set, else raw Worksnap Time) — a "Reviewed" row is
+                // downgraded to "Need Attention" here too, so the weekly table always
+                // agrees with what Attendance Review would show.
                 const rowEmailForConflict = row.role.includes("@") ? row.role : "";
                 const rowLeaveRequestsForConflict = leaveRequests.filter((r) => r.email === rowEmailForConflict);
-                const needsAttention = isReviewed && rowHasLeaveOverworkConflict(row, weekDates, rowLeaveRequestsForConflict);
+                const rowAdjustedDaily = adjustedByEmail.get(rowEmailForConflict.trim().toLowerCase());
+                const needsAttention = isReviewed && rowHasLeaveOverworkConflict(row, weekDates, rowLeaveRequestsForConflict, rowAdjustedDaily);
                 const appliedOffsetCredit = appliedOffsetCreditFor(row);
                 const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
                 const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
