@@ -65,8 +65,8 @@ function contractorFullName(contractor: Contractor) {
   return contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ");
 }
 
-// Live-computed from Hire Date + the current Cut Off Time, rather than
-// trusting the stored snapshot — so a Cut Off Time change is reflected
+// Live-computed from Engagement Start Date + the current Cut Off Time, rather
+// than trusting the stored snapshot — so a Cut Off Time change is reflected
 // immediately without waiting for each contractor to be saved again.
 function getContractorTimeOff(contractor: Contractor, cutoff: CutoffDate) {
   return {
@@ -81,10 +81,10 @@ function getContractorTimeOff(contractor: Contractor, cutoff: CutoffDate) {
 function exportCSV(rows: Contractor[], cutoff: CutoffDate) {
   const headers = [
     "Unique ID","First Name","Middle Name","Surname","Full Name","DOB","Gender",
-    "Contractor ID","Department","Sub-Department","Role","Location","Status",
-    "Hire Date","PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
-    "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate",
-    "Email","Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Shift Type",
+    "Contractor ID","Assigned Team","Functional Team","Role","Location","Status",
+    "Engagement Start Date","PTO Balance","PTO Used","Sick Leave Balance","Sick Leave Used",
+    "Work Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate",
+    "Email","Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Period","Shift Type",
     "Equipment Provided","Created On","Dismissal Date","Dismissal Reason",
   ];
   const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
@@ -127,9 +127,9 @@ function pageNumbers(current: number, total: number): (number | "…")[] {
 
 const COLS = [
   "Full Name","Date of Birth","Gender",
-  "Contractor ID","Department","Sub-Department","Role","Location","Status","Hire Date",
-  "Office Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
-  "Pay Category","Shift Hours","Rest Day","Manager","Pay Period","Equipment Provided",
+  "Contractor ID","Assigned Team","Functional Team","Role","Location","Status","Engagement Start Date",
+  "Work Location","Currency","Monthly Rate","Weekly Rate","Hourly Rate","Email",
+  "Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Period","Equipment Provided",
   "Created On","Dismissal Date","Dismissal Reason","Action",
 ];
 

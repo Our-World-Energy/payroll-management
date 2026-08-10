@@ -364,14 +364,14 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* Office Locations */}
+      {/* Work Locations */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <button onClick={() => toggleSection("officeLocations")} className="flex items-start gap-2 text-left flex-1">
             {openSections.officeLocations ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
             <div>
-              <h4 className="text-base font-semibold text-[#003527]">Office Locations</h4>
-              <p className="text-xs text-slate-400 mt-0.5">These appear in the Office Location dropdown when adding a contractor.</p>
+              <h4 className="text-base font-semibold text-[#003527]">Work Locations</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the Work Location dropdown when adding a contractor.</p>
             </div>
           </button>
           <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{officeLocations.length} locations</span>
@@ -411,11 +411,11 @@ export default function SettingsPage() {
           <button onClick={() => toggleSection("managers")} className="flex items-start gap-2 text-left flex-1">
             {openSections.managers ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
             <div>
-              <h4 className="text-base font-semibold text-[#003527]">Managers</h4>
-              <p className="text-xs text-slate-400 mt-0.5">These appear in the Manager dropdown when adding a contractor.</p>
+              <h4 className="text-base font-semibold text-[#003527]">OWE Contacts</h4>
+              <p className="text-xs text-slate-400 mt-0.5">These appear in the OWE Contact dropdown when adding a contractor.</p>
             </div>
           </button>
-          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{managers.length} managers</span>
+          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{managers.length} OWE Contacts</span>
         </div>
         {openSections.managers && (
           <div className="px-6 py-5 space-y-4">
@@ -487,17 +487,17 @@ export default function SettingsPage() {
         )}
       </section>
 
-      {/* Department / Sub-department / Roles */}
+      {/* Assigned Team / Functional Team / Roles */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <button onClick={() => toggleSection("departments")} className="flex items-start gap-2 text-left flex-1">
             {openSections.departments ? <LuChevronUp size={15} className="text-slate-400 shrink-0 mt-0.5" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0 mt-0.5" />}
             <div>
-              <h4 className="text-base font-semibold text-[#003527]">Departments, Sub-departments & Roles</h4>
+              <h4 className="text-base font-semibold text-[#003527]">Assigned Teams, Functional Teams & Roles</h4>
               <p className="text-xs text-slate-400 mt-0.5">Manage the interconnected dropdowns shown in the Add Contractor form.</p>
             </div>
           </button>
-          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{Object.keys(deptTree).length} departments</span>
+          <span className="text-xs font-semibold text-slate-400 bg-slate-100 px-2 py-1 rounded-full">{Object.keys(deptTree).length} assigned teams</span>
         </div>
         {openSections.departments && (
         <div className="px-6 py-5 space-y-3">
@@ -506,12 +506,12 @@ export default function SettingsPage() {
               value={newDept}
               onChange={(e) => setNewDept(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAddDepartment()}
-              placeholder="New department name"
+              placeholder="New assigned team name"
               className={INPUT}
             />
             <button onClick={handleAddDepartment} disabled={busy}
               className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
-              <LuPlus size={15} strokeWidth={2.5} />Add Dept
+              <LuPlus size={15} strokeWidth={2.5} />Add Team
             </button>
           </div>
 
@@ -524,7 +524,7 @@ export default function SettingsPage() {
                 >
                   {expandedDept === dept ? <LuChevronUp size={15} /> : <LuChevronDown size={15} />}
                   {dept}
-                  <span className="text-xs font-normal text-slate-400 ml-1">{Object.keys(subs).length} sub-dept{Object.keys(subs).length !== 1 ? "s" : ""}</span>
+                  <span className="text-xs font-normal text-slate-400 ml-1">{Object.keys(subs).length} functional team{Object.keys(subs).length !== 1 ? "s" : ""}</span>
                 </button>
                 <button onClick={() => askConfirm(dept, () => handleRemoveDepartment(dept))} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
                   <LuX size={14} strokeWidth={2.5} />
@@ -538,12 +538,12 @@ export default function SettingsPage() {
                       value={newSub[dept] ?? ""}
                       onChange={(e) => setNewSub({ ...newSub, [dept]: e.target.value })}
                       onKeyDown={(e) => e.key === "Enter" && handleAddSubDepartment(dept)}
-                      placeholder="New sub-department"
+                      placeholder="New functional team"
                       className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
                     />
                     <button onClick={() => handleAddSubDepartment(dept)} disabled={busy}
                       className="shrink-0 inline-flex items-center gap-1 px-3 py-1.5 bg-teal-600 text-white text-xs font-semibold rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50">
-                      <LuPlus size={13} strokeWidth={2.5} />Add Sub
+                      <LuPlus size={13} strokeWidth={2.5} />Add Sub-Team
                     </button>
                   </div>
 

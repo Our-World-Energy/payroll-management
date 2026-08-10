@@ -1126,7 +1126,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
   const details = [
     ["Shift Type", shiftType],
-    ["Rest Day", restDaysForAttendanceRow(record as AttendanceRow)],
+    ["Typical Non-Working Days", restDaysForAttendanceRow(record as AttendanceRow)],
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Total Completion Time", totalCompletionTimeMinutes > 0 ? formatMinutesAsMins(totalCompletionTimeMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
   ];
@@ -2084,7 +2084,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         </div>
         <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center gap-3">
           <select value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
-            <option value="All">All Departments</option>
+            <option value="All">All Assigned Teams</option>
             {deptOptions.map((d) => <option key={d} value={d}>{d}</option>)}
           </select>
           <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-teal-500">
@@ -2105,7 +2105,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} className="h-4 w-4 rounded border-slate-300 accent-[#003527] cursor-pointer" aria-label="Select all" />
                 </th>
                 <th className="sticky left-[52px] z-20 bg-slate-50 px-4 py-3 w-[220px] min-w-[220px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Contractor</th>
-                <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Department</th>
+                <th className="sticky left-[272px] z-20 bg-slate-50 px-4 py-3 w-[160px] min-w-[160px] text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">Assigned Team</th>
                 {["Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
                   "Local HO Time", "Total Time Off Request Time", "Ind Time",
@@ -3107,8 +3107,8 @@ export default function AttendancePage() {
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by department">
-              <option value="All">All Departments</option>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+              <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </FilterSelect>
             <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={statusFilter} onChange={setStatusFilter} label="Filter by status">
@@ -3142,7 +3142,7 @@ export default function AttendancePage() {
             <thead className="sticky top-0 z-30" style={{ background: "#003527" }}>
               <tr>
                 {[
-                  "Contractor", "Department", "Actual Time",
+                  "Contractor", "Assigned Team", "Actual Time",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
                   "Total Local HO Time", "Total Time Off Request Time", "Ind Time",
                   "Variance", "Status", "Actions",

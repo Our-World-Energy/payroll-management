@@ -32,7 +32,7 @@ const DAY_ABBREVIATIONS: Record<string, string> = {
   mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
 };
 
-// Rest Days is saved as "Monday, Tuesday" (this modal's own format), but a
+// Typical Non-Working Days is saved as "Monday, Tuesday" (this modal's own format), but a
 // contractor imported via CSV (see ImportContractorsModal) can carry its
 // rest_days column through with a different separator, spacing, casing, or
 // day abbreviation — a strict split(", ") on that value would silently match
@@ -326,7 +326,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
             <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Role & Location</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Department → resets sub + role */}
-              <FIELD label="Department">
+              <FIELD label="Assigned Team">
                 <select className={SELECT} value={form.department} onChange={(e) =>
                   setForm((f) => ({ ...f, department: e.target.value, subDepartment: "", role: "" }))
                 }>
@@ -334,8 +334,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
 
-              {/* Sub-Department → depends on Dept, resets role */}
-              <FIELD label="Sub-Department">
+              {/* Functional Team → depends on Assigned Team, resets role */}
+              <FIELD label="Functional Team">
                 <select className={SELECT} value={form.subDepartment} disabled={!subDepts.length}
                   onChange={(e) => setForm((f) => ({ ...f, subDepartment: e.target.value, role: "" }))}>
                   <option value="">— Select —</option>
@@ -361,13 +361,13 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
 
-              <FIELD label="Office Location">
+              <FIELD label="Work Location">
                 <select className={SELECT} value={form.officeLocation} onChange={(e) => set("officeLocation", e.target.value)}>
                   {officeLocations.map((o) => <option key={o}>{o}</option>)}
                 </select>
               </FIELD>
 
-              <FIELD label="Manager">
+              <FIELD label="OWE Contact">
                 <select className={SELECT} value={form.manager} onChange={(e) => set("manager", e.target.value)}>
                   {managers.map((m) => <option key={m}>{m}</option>)}
                 </select>
@@ -379,9 +379,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           <section>
             <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
 
-            {/* Row 1: Hire Date · Pay Category · Pay Period */}
+            {/* Row 1: Engagement Start Date · Pay Category · Pay Period */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-              <FIELD label="Hire Date" required>
+              <FIELD label="Engagement Start Date" required>
                 <input type="date" className={INPUT} value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
                 {errors.hireDate && <span className="text-xs text-red-500">{errors.hireDate}</span>}
               </FIELD>
@@ -462,10 +462,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
             </div>
 
-            {/* Rest Days */}
+            {/* Typical Non-Working Days */}
             <div className="mt-4 flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Rest Days<span className="text-red-400 ml-0.5">*</span>
+                  Typical Non-Working Days<span className="text-red-400 ml-0.5">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {WEEK_DAYS.map((day) => {
@@ -486,9 +486,9 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </div>
           </section>
 
-          {/* ── Compensation ── */}
+          {/* ── Contract Rate ── */}
           <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Compensation</p>
+            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Contract Rate</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <FIELD label="Currency">
                 <select className={SELECT} value={form.currency} onChange={(e) => set("currency", e.target.value)}>

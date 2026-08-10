@@ -341,7 +341,7 @@ export default function AdminPage() {
               <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
-                    {["Name", "Department", "Date", "Status"].map((h) => (
+                    {["Name", "Assigned Team", "Date", "Status"].map((h) => (
                       <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -398,7 +398,7 @@ export default function AdminPage() {
               <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
-                    {["Name", "Department", "Date", "Detail"].map((h) => (
+                    {["Name", "Assigned Team", "Date", "Detail"].map((h) => (
                       <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -453,7 +453,7 @@ export default function AdminPage() {
               <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
-                    {["Name", "Department", "Date", "Status"].map((h) => (
+                    {["Name", "Assigned Team", "Date", "Status"].map((h) => (
                       <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>

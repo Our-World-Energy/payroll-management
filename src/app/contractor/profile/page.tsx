@@ -136,10 +136,10 @@ export default function ContractorProfilePage() {
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
             <CardTitle icon={<LuBriefcase size={16} strokeWidth={1.75} />}>Contractor Details</CardTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-              <Field label="Department"        value={profile.department} />
-              <Field label="Sub-Department"    value={profile.subDepartment} />
-              <Field label="Contract Start Date" value={profile.hireDate} />
-              <Field label="Manager"           value={profile.manager} />
+              <Field label="Assigned Team"     value={profile.department} />
+              <Field label="Functional Team"   value={profile.subDepartment} />
+              <Field label="Engagement Start Date" value={profile.hireDate} />
+              <Field label="OWE Contact"       value={profile.manager} />
             </div>
           </div>
 
@@ -147,14 +147,14 @@ export default function ContractorProfilePage() {
             <CardTitle icon={<LuClock size={16} strokeWidth={1.75} />}>Operational Details</CardTitle>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
               <Field label="Work Location"      value={profile.officeLocation} />
-              <Field label="Shift Hours"        value={profile.shiftHours} />
-              <Field label="Rest Day"           value={profile.restDay} />
+              <Field label="Agreed Schedule"    value={profile.shiftHours} />
+              <Field label="Typical Non-Working Days" value={profile.restDay} />
               <Field label="Equipment Provided" value={profile.equipmentProvided ? "Yes" : "No"} />
             </div>
           </div>
         </div>
 
-        {/* Right: Personal Info + Compensation */}
+        {/* Right: Personal Info + Contract Rate */}
         <div className="space-y-6">
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
             <CardTitle icon={<LuUser size={16} strokeWidth={1.75} />}>Personal Info</CardTitle>
@@ -166,7 +166,7 @@ export default function ContractorProfilePage() {
           </div>
 
           <div className="bg-emerald-50 rounded-2xl border border-emerald-100 shadow-sm p-6">
-            <CardTitle icon={<LuBanknote size={16} strokeWidth={1.75} />}>Compensation</CardTitle>
+            <CardTitle icon={<LuBanknote size={16} strokeWidth={1.75} />}>Contract Rate</CardTitle>
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Monthly Rate</p>

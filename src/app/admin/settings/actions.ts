@@ -152,7 +152,7 @@ export async function removeDepartment(name: string): Promise<{ ok: boolean; err
   return { ok: true };
 }
 
-// ── Sub-departments ───────────────────────────────────────────────────────────
+// ── Functional Teams (sub-departments) ────────────────────────────────────────
 
 export async function addSubDepartment(
   deptName: string,
@@ -164,7 +164,7 @@ export async function addSubDepartment(
     .select("id")
     .eq("name", deptName)
     .single();
-  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Department not found" };
+  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Assigned team not found" };
   const now = new Date().toISOString();
   const { error } = await sb
     .from("org_sub_departments")
@@ -183,7 +183,7 @@ export async function removeSubDepartment(
     .select("id")
     .eq("name", deptName)
     .single();
-  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Department not found" };
+  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Assigned team not found" };
   const { error } = await sb
     .from("org_sub_departments")
     .delete()
@@ -206,14 +206,14 @@ export async function addRole(
     .select("id")
     .eq("name", deptName)
     .single();
-  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Department not found" };
+  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Assigned team not found" };
   const { data: sub, error: subErr } = await sb
     .from("org_sub_departments")
     .select("id")
     .eq("departmentId", dept.id)
     .eq("name", subName)
     .single();
-  if (subErr || !sub) return { ok: false, error: subErr?.message ?? "Sub-department not found" };
+  if (subErr || !sub) return { ok: false, error: subErr?.message ?? "Functional team not found" };
   const now = new Date().toISOString();
   const { error } = await sb
     .from("org_roles")
@@ -233,14 +233,14 @@ export async function removeRole(
     .select("id")
     .eq("name", deptName)
     .single();
-  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Department not found" };
+  if (fetchErr || !dept) return { ok: false, error: fetchErr?.message ?? "Assigned team not found" };
   const { data: sub, error: subErr } = await sb
     .from("org_sub_departments")
     .select("id")
     .eq("departmentId", dept.id)
     .eq("name", subName)
     .single();
-  if (subErr || !sub) return { ok: false, error: subErr?.message ?? "Sub-department not found" };
+  if (subErr || !sub) return { ok: false, error: subErr?.message ?? "Functional team not found" };
   const { error } = await sb
     .from("org_roles")
     .delete()

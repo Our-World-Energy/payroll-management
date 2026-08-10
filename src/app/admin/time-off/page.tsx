@@ -381,7 +381,7 @@ export default function TimeOffPage() {
 
   const [nameSearch,         setNameSearch]         = useState("");
   const [countryFilter,      setCountryFilter]      = useState("All Countries");
-  const [departmentFilter,   setDepartmentFilter]   = useState("All Departments");
+  const [departmentFilter,   setDepartmentFilter]   = useState("All Assigned Teams");
   const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
 
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
@@ -470,9 +470,9 @@ export default function TimeOffPage() {
 
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
-    // Live-computed from Hire Date + the current Cut Off Time, rather than
-    // trusting the stored snapshot — so a Cut Off Time change is reflected
-    // immediately without waiting for this contractor to be saved again.
+    // Live-computed from Engagement Start Date + the current Cut Off Time,
+    // rather than trusting the stored snapshot — so a Cut Off Time change is
+    // reflected immediately without waiting for this contractor to be saved again.
     const ptoBalance       = calculatePtoBalance(c.hireDate, cutoff);
     const sickLeaveBalance = calculateSickLeaveBalance(c.hireDate, cutoff);
     // An imported/legacy baseline (pto_used_import / sick_used_import) takes
@@ -517,12 +517,12 @@ export default function TimeOffPage() {
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Departments" || reviewStatusFilter !== "All Statuses";
+  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || reviewStatusFilter !== "All Statuses";
 
   const filteredRows = rows.filter((r) => {
     const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
     const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
-    const dm = departmentFilter === "All Departments" || (r.department || "Unassigned") === departmentFilter;
+    const dm = departmentFilter === "All Assigned Teams" || (r.department || "Unassigned") === departmentFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
     return nm && cm && dm && sm;
   });
@@ -555,7 +555,7 @@ export default function TimeOffPage() {
   const isIndia = countryFilter === "India";
 
   const COLS = [
-    "Contractor", "Country", "Department", "Hire Date",
+    "Contractor", "Country", "Assigned Team", "Engagement Start Date",
     ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Used Import", "PTO Accrual Available"] : []),
     "Sick Leave Accrual", "Sick Used", "Sick Used Import", "Sick Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
@@ -564,7 +564,7 @@ export default function TimeOffPage() {
 
   function exportCSV() {
     const headers = [
-      "Name", "Country", "Department", "Hire Date",
+      "Name", "Country", "Assigned Team", "Engagement Start Date",
       "PTO Accrual (h)", "PTO Used (h)", "PTO Used Import (h)", "PTO Available (h)",
       "Sick Leave Accrual (h)", "Sick Used (h)", "Sick Used Import (h)", "Sick Available (h)",
       "Advance PTO/Birthday Leave (h)", "Advance Sick Leave (h)",
@@ -651,7 +651,7 @@ export default function TimeOffPage() {
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-2">
                       {([
-                        ["Hire Date",      fmtDate(selectedRow.hireDate)],
+                        ["Engagement Start Date", fmtDate(selectedRow.hireDate)],
                         ["Status Request", selectedRow.latestRequest?.type ?? "—"],
                         ["Request Days",   selectedRow.latestRequest ? (selectedRow.latestRequest.type.endsWith("Half Day") ? "Half day" : `${selectedRow.latestRequest.durationDays} day${selectedRow.latestRequest.durationDays !== 1 ? "s" : ""}`) : "—"],
                         ["Review Status",  reviewStatus === "-" ? "—" : reviewStatus],
@@ -1472,7 +1472,7 @@ export default function TimeOffPage() {
         </select>
         <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} disabled={loading}
           className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
-          <option>All Departments</option>
+          <option>All Assigned Teams</option>
           {departmentOptions.map((d) => <option key={d}>{d}</option>)}
         </select>
         <select value={reviewStatusFilter} onChange={(e) => setReviewStatusFilter(e.target.value)} disabled={loading}
@@ -1483,7 +1483,7 @@ export default function TimeOffPage() {
           <option value="Rejected">Rejected</option>
         </select>
         {filtersActive && (
-          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Departments"); setReviewStatusFilter("All Statuses"); }}
+          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setReviewStatusFilter("All Statuses"); }}
             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={16} strokeWidth={2} />
           </button>
@@ -1677,7 +1677,7 @@ export default function TimeOffPage() {
           <p className="text-xs text-slate-400 font-medium">{filteredRows.length} of {rows.length} contractors</p>
           <div className="flex items-center gap-1.5 text-xs text-slate-400">
             <LuTrendingUp size={13} className="text-teal-500" />
-            Balances calculated from hire date
+            Balances calculated from engagement start date
           </div>
         </div>
       </div>

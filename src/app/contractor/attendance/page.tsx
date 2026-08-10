@@ -273,12 +273,12 @@ export default function ContractorAttendancePage() {
               <p className="text-[11px] text-slate-400 mt-1.5 tabular-nums">{summary.todayMins.toLocaleString()} minutes logged</p>
             </div>
 
-            {/* Rest days — deep brand-gradient accent */}
+            {/* Typical Non-Working Days — deep brand-gradient accent */}
             <div className="relative overflow-hidden rounded-2xl p-4 text-white shadow-sm bg-brand-gradient">
               <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
               <div className="relative flex flex-col h-full">
                 <div className="flex items-start justify-between">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/80 mt-0.5">Rest Days</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200/80 mt-0.5">Typical Non-Working Days</p>
                   <span className="grid place-items-center w-8 h-8 rounded-lg bg-white/10 text-emerald-300">
                     <LuBadgeCheck size={16} strokeWidth={2} />
                   </span>

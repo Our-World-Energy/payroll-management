@@ -557,8 +557,8 @@ export default function PayrollPage() {
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by department">
-              <option value="All">All Departments</option>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+              <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </FilterSelect>
 
@@ -583,7 +583,7 @@ export default function PayrollPage() {
           <table className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
-                {["Name", "Country", "Department", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+                {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Off Request Time",
                   "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th

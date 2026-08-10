@@ -56,9 +56,9 @@ export async function fetchContractorTimeOff(email: string): Promise<ContractorT
     fullName:         String(data.fullName ?? ""),
     hireDate,
     location:         String(data.location ?? ""),
-    // Live-computed from Hire Date + the current Cut Off Time, rather than
-    // trusting the stored snapshot — so a Cut Off Time change is reflected
-    // immediately without waiting for this contractor to be saved again.
+    // Live-computed from Engagement Start Date + the current Cut Off Time,
+    // rather than trusting the stored snapshot — so a Cut Off Time change is
+    // reflected immediately without waiting for this contractor to be saved again.
     ptoBalance:       calculatePtoBalance(hireDate, cutoff),
     ptoUsed:          Number(data.ptoUsed          ?? 0),
     sickLeaveBalance: calculateSickLeaveBalance(hireDate, cutoff),

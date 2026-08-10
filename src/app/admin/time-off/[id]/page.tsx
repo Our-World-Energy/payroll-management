@@ -165,9 +165,9 @@ export default function ContractorTimeOffPage() {
     await loadData();
   }
 
-  // Live-computed from Hire Date + the current Cut Off Time, rather than
-  // trusting the stored snapshot — so a Cut Off Time change is reflected
-  // immediately without waiting for this contractor to be saved again.
+  // Live-computed from Engagement Start Date + the current Cut Off Time,
+  // rather than trusting the stored snapshot — so a Cut Off Time change is
+  // reflected immediately without waiting for this contractor to be saved again.
   const ptoBalance       = contractor ? calculatePtoBalance(contractor.hireDate, cutoff) : 0;
   // Same formula as the main Time Off Management page: an imported/legacy
   // baseline supersedes the computed value wherever it's set, and Advance
