@@ -8,7 +8,7 @@ import Link from "next/link";
 import {
   LuLogOut, LuMenu, LuUser, LuUmbrella,
   LuClipboardCheck, LuLayoutDashboard, LuWallet,
-  LuChevronLeft, LuChevronRight, LuSun, LuMoon,
+  LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
 
@@ -26,12 +26,13 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   const router   = useRouter();
   const pathname = usePathname();
 
-  const [checked,     setChecked]     = useState(false);
-  const [email,       setEmail]       = useState("");
-  const [initials,    setInitials]    = useState("U");
-  const [drawerOpen,  setDrawerOpen]  = useState(false);
-  const [collapsed,   setCollapsed]   = useState(false);
-  const [dark,        setDark]        = useState(false);
+  const [checked,        setChecked]        = useState(false);
+  const [email,          setEmail]          = useState("");
+  const [initials,       setInitials]       = useState("U");
+  const [drawerOpen,     setDrawerOpen]     = useState(false);
+  const [collapsed,      setCollapsed]      = useState(false);
+  const [dark,           setDark]           = useState(false);
+  const [isAdminViewing, setIsAdminViewing] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -42,8 +43,16 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal?.currentLevel !== "aal2") { router.replace("/two-factor"); return; }
 
-      const role = session.user.user_metadata?.role ?? "admin";
-      if (role !== "user") { router.replace("/admin"); return; }
+      const role     = session.user.user_metadata?.role ?? "admin";
+      const override = localStorage.getItem("role_override");
+
+      // Allow admins who clicked "Contractor View" to pass through
+      if (role !== "user" && override !== "contractor") {
+        router.replace("/admin");
+        return;
+      }
+
+      if (role !== "user") setIsAdminViewing(true);
 
       const em = session.user.email ?? "";
       setEmail(em);
@@ -54,7 +63,13 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
     })();
   }, [router]);
 
+  function switchToAdmin() {
+    localStorage.removeItem("role_override");
+    router.push("/admin");
+  }
+
   async function handleLogout() {
+    localStorage.removeItem("role_override");
     const supabase = createClient();
     await supabase.auth.signOut();
     router.replace("/login");
@@ -218,13 +233,27 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
 
           {/* Right */}
           <div className="flex items-center gap-3">
+            {isAdminViewing && (
+              <button
+                onClick={switchToAdmin}
+                title="Back to Admin View"
+                className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                  dark
+                    ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                }`}
+              >
+                <LuArrowLeftRight size={13} strokeWidth={2} />
+                Admin View
+              </button>
+            )}
             <ContractorBell dark={dark} />
             <div className={`flex items-center gap-2.5 pl-3 border-l ${dark ? "border-white/10" : "border-slate-200"}`}>
               <div className="text-right hidden sm:block">
                 <p className={`text-sm font-semibold leading-tight truncate max-w-40 ${dark ? "text-white" : "text-emerald-900"}`}>
                   {email.split("@")[0]}
                 </p>
-                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>Contractor</p>
+                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{isAdminViewing ? "Admin (Viewing)" : "Contractor"}</p>
               </div>
               <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
                 {initials}

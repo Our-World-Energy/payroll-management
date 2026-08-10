@@ -1,6 +1,7 @@
 "use client";
 
-import { LuSearch, LuMenu } from "react-icons/lu";
+import { LuSearch, LuMenu, LuArrowLeftRight } from "react-icons/lu";
+import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { NotificationBell } from "./NotificationBell";
@@ -8,6 +9,12 @@ import { NotificationBell } from "./NotificationBell";
 export function AdminTopbar() {
   const { toggle } = useSidebar();
   const { dark } = useAdminTheme();
+  const router = useRouter();
+
+  function switchToContractor() {
+    localStorage.setItem("role_override", "contractor");
+    router.push("/contractor/dashboard");
+  }
 
   const bar = dark
     ? "bg-[#0f1a15] border-white/5 text-white"
@@ -42,6 +49,19 @@ export function AdminTopbar() {
 
       {/* Right */}
       <div className="flex items-center gap-3 ml-3">
+        <button
+          onClick={switchToContractor}
+          title="Switch to Contractor View"
+          className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+            dark
+              ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
+              : "bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700"
+          }`}
+        >
+          <LuArrowLeftRight size={13} strokeWidth={2} />
+          Contractor View
+        </button>
+
         <NotificationBell dark={dark} />
 
         <div className={`flex items-center gap-2.5 pl-3 border-l ${dark ? "border-white/10" : "border-slate-200"}`}>
