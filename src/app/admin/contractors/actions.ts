@@ -102,11 +102,12 @@ export type FetchParams = {
   status: string;
   rules: FilterRule[];
   search?: string;
+  payCategory?: string;
 };
 
 // Apply quick-filter + advanced rules to a Supabase query builder
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyFilters(query: any, country: string, status: string, rules: FilterRule[], search = "") {
+function applyFilters(query: any, country: string, status: string, rules: FilterRule[], search = "", payCategory = "All Categories") {
   if (country !== "All Countries") {
     // locations are stored as "City, Country" — just ilike "%Country" covers both
     // "Gujarat, India" and "India" without the comma parsing issue in .or()
@@ -115,6 +116,10 @@ function applyFilters(query: any, country: string, status: string, rules: Filter
 
   if (status !== "All Statuses") {
     query = query.eq("status", status);
+  }
+
+  if (payCategory !== "All Categories") {
+    query = query.eq("payCategory", payCategory);
   }
 
   // Name search — fullName can be blank in the DB with the display name only
@@ -200,7 +205,7 @@ export async function fetchContractorsPage(params: FetchParams): Promise<{
   const to = from + params.pageSize - 1;
 
   let query = sb.from(TABLE).select("*", { count: "exact" });
-  query = applyFilters(query, params.country, params.status, params.rules, params.search);
+  query = applyFilters(query, params.country, params.status, params.rules, params.search, params.payCategory);
   query = query.order("fullName", { ascending: true }).range(from, to);
 
   const { data, error, count } = await query;
@@ -215,7 +220,7 @@ export async function fetchAllContractors(
 ): Promise<Contractor[]> {
   const sb = getSupabase();
   let query = sb.from(TABLE).select("*");
-  query = applyFilters(query, params.country, params.status, params.rules, params.search);
+  query = applyFilters(query, params.country, params.status, params.rules, params.search, params.payCategory);
   query = query.order("id", { ascending: false });
 
   const { data, error } = await query;

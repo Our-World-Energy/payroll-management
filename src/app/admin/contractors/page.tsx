@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import type { Contractor, FilterRule } from "./types";
 import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, type CutoffDate } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
-import { AddContractorModal } from "@/components/AddContractorModal";
+import { AddContractorModal, PAY_CATEGORIES } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
 import {
@@ -29,8 +29,8 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 type CacheEntry = { rows: Contractor[]; total: number; key: string };
 let pageCache: CacheEntry | null = null;
 
-function cacheKey(page: number, pageSize: number, country: string, status: string, rules: FilterRule[], search: string) {
-  return `${page}|${pageSize}|${country}|${status}|${JSON.stringify(rules)}|${search}`;
+function cacheKey(page: number, pageSize: number, country: string, status: string, rules: FilterRule[], search: string, payCategory: string) {
+  return `${page}|${pageSize}|${country}|${status}|${JSON.stringify(rules)}|${search}|${payCategory}`;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -149,6 +149,7 @@ export default function ContractorsPage() {
   // re-fetching a second time once the param is applied.
   const [country, setCountry]     = useState(() => searchParams.get("country") || "All Countries");
   const [status, setStatus]       = useState("All Statuses");
+  const [payCategory, setPayCategory] = useState("All Categories");
   const [activeRules, setActiveRules] = useState<FilterRule[]>([]);
   // nameSearchInput updates immediately as the user types; nameSearch (the
   // value actually sent to the server) is debounced so each keystroke
@@ -167,10 +168,10 @@ export default function ContractorsPage() {
   const fetchIdRef = useRef(0);
 
   const loadPage = useCallback(async (
-    p: number, ps: number, c: string, s: string, rules: FilterRule[], search: string,
+    p: number, ps: number, c: string, s: string, rules: FilterRule[], search: string, pc: string,
     { force = false } = {}
   ) => {
-    const key = cacheKey(p, ps, c, s, rules, search);
+    const key = cacheKey(p, ps, c, s, rules, search, pc);
     // Serve from cache unless forced (e.g. after add/edit/import)
     if (!force && pageCache?.key === key) {
       setRows(pageCache.rows);
@@ -181,7 +182,7 @@ export default function ContractorsPage() {
     const id = ++fetchIdRef.current;
     setLoading(true);
     try {
-      const params: FetchParams = { page: p, pageSize: ps, country: c, status: s, rules, search };
+      const params: FetchParams = { page: p, pageSize: ps, country: c, status: s, rules, search, payCategory: pc };
       const result = await fetchContractorsPage(params);
       if (id !== fetchIdRef.current) return; // stale
       pageCache = { rows: result.rows, total: result.total, key };
@@ -203,15 +204,16 @@ export default function ContractorsPage() {
   }, [nameSearchInput]);
 
   useEffect(() => {
-    loadPage(page, pageSize, country, status, activeRules, nameSearch);
-  }, [page, pageSize, country, status, activeRules, nameSearch, loadPage]);
+    loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory);
+  }, [page, pageSize, country, status, activeRules, nameSearch, payCategory, loadPage]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  function changeFilter(newCountry: string, newStatus: string, newRules: FilterRule[]) {
+  function changeFilter(newCountry: string, newStatus: string, newRules: FilterRule[], newPayCategory = payCategory) {
     setCountry(newCountry);
     setStatus(newStatus);
     setActiveRules(newRules);
+    setPayCategory(newPayCategory);
     setPage(1);
   }
 
@@ -222,7 +224,7 @@ export default function ContractorsPage() {
   }
 
   const reset = () => {
-    changeFilter("All Countries", "All Statuses", []);
+    changeFilter("All Countries", "All Statuses", [], "All Categories");
     setNameSearchInput("");
     setNameSearch("");
   };
@@ -249,7 +251,7 @@ export default function ContractorsPage() {
       await createContractor(c);
       pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
+      await loadPage(1, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true });
       toast.success("Contractor added successfully");
     } catch (err) {
       toast.error(`Failed to add contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -263,7 +265,7 @@ export default function ContractorsPage() {
     try {
       await updateContractor(c);
       pageCache = null;
-      await loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true });
+      await loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true });
       toast.success("Contractor updated successfully");
     } catch (err) {
       toast.error(`Failed to update contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -281,7 +283,7 @@ export default function ContractorsPage() {
       const ok      = results.length - failed;
       pageCache = null;
       setPage(1);
-      await loadPage(1, pageSize, country, status, activeRules, nameSearch, { force: true });
+      await loadPage(1, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true });
       if (failed === 0) {
         toast.success(`${ok} contractor${ok !== 1 ? "s" : ""} imported successfully`, { id: tid });
       } else {
@@ -305,7 +307,7 @@ export default function ContractorsPage() {
       // If we just deleted the last row on this page, go back one
       const newPage = rows.length === 1 && page > 1 ? page - 1 : page;
       setPage(newPage);
-      await loadPage(newPage, pageSize, country, status, activeRules, nameSearch, { force: true });
+      await loadPage(newPage, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true });
       toast.success(`${name} deleted successfully`);
     } catch (err) {
       toast.error(`Failed to delete contractor: ${err instanceof Error ? err.message : "Unknown error"}`);
@@ -389,7 +391,7 @@ export default function ContractorsPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
-              onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, nameSearch, { force: true }); }}
+              onClick={() => { pageCache = null; loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true }); }}
               disabled={loading}
               title="Refresh"
               className="p-2 text-slate-400 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40"
@@ -438,6 +440,15 @@ export default function ContractorsPage() {
             </div>
 
             <select
+              value={payCategory}
+              onChange={(e) => changeFilter(country, status, activeRules, e.target.value)}
+              className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <option>All Categories</option>
+              {PAY_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+
+            <select
               value={country}
               onChange={(e) => changeFilter(e.target.value, status, activeRules)}
               className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500"
@@ -478,7 +489,7 @@ export default function ContractorsPage() {
               )}
             </button>
 
-            {(country !== "All Countries" || status !== "All Statuses" || activeRules.length > 0 || nameSearchInput !== "") && (
+            {(country !== "All Countries" || status !== "All Statuses" || payCategory !== "All Categories" || activeRules.length > 0 || nameSearchInput !== "") && (
               <button
                 onClick={reset}
                 className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"

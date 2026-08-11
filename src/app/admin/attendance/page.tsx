@@ -4,13 +4,16 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminTheme } from "@/components/AdminThemeContext";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint } from "react-icons/lu";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer } from "react-icons/lu";
+import { toast } from "sonner";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
+import { fetchFixedTimeForWeek, saveFixedTime } from "./actions";
+import type { Contractor } from "../contractors/types";
 
 
 // Transparently retries a fetch on network failure or a 5xx/429 response —
@@ -179,9 +182,8 @@ function evaluatedTimeFor(worksnapTime: string, attendanceStatus = "No Status", 
 
   const approved = attendanceStatus === "Approved";
 
-  if (worksnapMinutes < 480) return formatMinutesAsMins(worksnapMinutes);
-  if (worksnapMinutes > 540) return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(540);
-  return formatMinutesAsMins(worksnapMinutes);
+  if (worksnapMinutes <= 480) return formatMinutesAsMins(worksnapMinutes);
+  return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(480);
 }
 
 function worksnapTimeFor(date: string) {
@@ -800,8 +802,8 @@ function approvalStatusClassName(status: string) {
 
 function worksnapTimeClassName(value: string) {
   const minutes = timeValueToMinutes(value);
-  if (minutes && (minutes < 480 || minutes > 540)) return "text-red-600 font-semibold";
-  if (minutes >= 480 && minutes <= 540) return "text-emerald-600 font-semibold";
+  if (minutes && minutes !== 480) return "text-red-600 font-semibold";
+  if (minutes === 480) return "text-emerald-600 font-semibold";
   return "text-slate-600";
 }
 
@@ -858,7 +860,7 @@ function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekD
   for (const date of weekDates) {
     if (isRestDayDate(date, restDaysStr)) continue;
     const mins = dailyWorksnapMinutes[date] ?? 0;
-    if (mins > 0 && (mins < 480 || mins > 540)) return "For Review";
+    if (mins > 0 && mins !== 480) return "For Review";
   }
   return "Standard Met";
 }
@@ -2678,6 +2680,135 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
   );
 }
 
+// Fixed-Mex only — lets an admin enter each contractor's standard weekly
+// Regular Time (minutes) for the selected week, saved to the fixed_time
+// table (Name, email, regular_time, date — date is this week's Sunday).
+// Loads the full Fixed-Mex roster rather than just this week's Worksnap
+// rows, since a contractor with zero logged time this week still needs
+// this settable.
+function FixedTimeModal({ week, onClose }: { week: string; onClose: () => void }) {
+  const [contractors, setContractors] = useState<Contractor[]>([]);
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [savingEmail, setSavingEmail] = useState<string | null>(null);
+  // A row with an already-saved value is locked (read-only, button reads
+  // "Edit") until explicitly unlocked — prevents accidentally overwriting a
+  // saved value by leaving the field always editable.
+  const [savedUids, setSavedUids] = useState<Set<string>>(new Set());
+  const [unlockedUids, setUnlockedUids] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let isCancelled = false;
+    Promise.all([
+      fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
+      fetchFixedTimeForWeek(week),
+    ])
+      .then(([all, savedByEmail]) => {
+        if (isCancelled) return;
+        const fixedMex = all
+          .filter((c) => c.payCategory.trim().toLowerCase() === "fixed-mex")
+          .sort((a, b) => (a.fullName || a.firstName).localeCompare(b.fullName || b.firstName));
+        setContractors(fixedMex);
+        setEditValues(Object.fromEntries(
+          fixedMex.map((c) => {
+            const saved = savedByEmail[c.email.trim().toLowerCase()];
+            return [c.uid, saved != null ? String(saved) : ""];
+          })
+        ));
+        setSavedUids(new Set(
+          fixedMex.filter((c) => savedByEmail[c.email.trim().toLowerCase()] != null).map((c) => c.uid)
+        ));
+        setUnlockedUids(new Set());
+      })
+      .catch(() => { if (!isCancelled) setLoadError("Unable to load Fixed-Mex contractors. Please try again."); })
+      .finally(() => { if (!isCancelled) setLoading(false); });
+    return () => { isCancelled = true; };
+  }, [week]);
+
+  function isLocked(uid: string) {
+    return savedUids.has(uid) && !unlockedUids.has(uid);
+  }
+
+  async function handleSave(c: Contractor) {
+    const raw = (editValues[c.uid] ?? "").trim();
+    const minutes = raw === "" ? null : Math.max(0, Math.round(parseFloat(raw) || 0));
+    setSavingEmail(c.email);
+    try {
+      const name = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
+      await saveFixedTime(week, { name, email: c.email, regularTime: minutes });
+      setSavedUids((prev) => {
+        const next = new Set(prev);
+        if (minutes == null) next.delete(c.uid); else next.add(c.uid);
+        return next;
+      });
+      setUnlockedUids((prev) => { const next = new Set(prev); next.delete(c.uid); return next; });
+      toast.success(`${name}'s fixed weekly time ${minutes == null ? "cleared" : "saved"} successfully.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save. Please try again.");
+    } finally {
+      setSavingEmail(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <div>
+            <h3 className="text-lg font-bold text-[#003527]">Fixed Time</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Set each Fixed-Mex contractor&apos;s Regular Time (minutes) for {weekLabel(week)}.</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+            <LuX size={18} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-400">
+              <LuRefreshCw size={16} className="animate-spin" /> Loading…
+            </div>
+          ) : loadError ? (
+            <p className="py-10 text-center text-sm text-red-500">{loadError}</p>
+          ) : contractors.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-400">No Fixed-Mex contractors found.</p>
+          ) : (
+            <div className="space-y-2">
+              {contractors.map((c) => (
+                <div key={c.uid} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-800">{c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ")}</p>
+                    <p className="truncate text-xs text-slate-400">{c.email}</p>
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="e.g. 2400"
+                    value={editValues[c.uid] ?? ""}
+                    onChange={(e) => setEditValues((prev) => ({ ...prev, [c.uid]: e.target.value }))}
+                    disabled={isLocked(c.uid)}
+                    className="w-28 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                  <button
+                    onClick={() => isLocked(c.uid)
+                      ? setUnlockedUids((prev) => new Set(prev).add(c.uid))
+                      : handleSave(c)}
+                    disabled={savingEmail === c.email}
+                    className="w-20 rounded-lg bg-[#003527] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#064E3B] disabled:opacity-50"
+                  >
+                    {savingEmail === c.email ? "Saving…" : isLocked(c.uid) ? "Edit" : "Save"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AttendancePage() {
   const { dark } = useAdminTheme();
   const router = useRouter();
@@ -2715,6 +2846,7 @@ export default function AttendancePage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [showBulkApproveModal, setShowBulkApproveModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
+  const [showFixedTimeModal, setShowFixedTimeModal] = useState(false);
   const [offsetCreditsByWeek, setOffsetCreditsByWeek] = useState<Record<string, Record<string, number>>>({});
   const [usaHolidays, setUsaHolidays] = useState<HolidayEntry[]>([]);
   const [allHolidays, setAllHolidays] = useState<HolidayEntry[]>([]);
@@ -3010,6 +3142,13 @@ export default function AttendancePage() {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap gap-2 sm:gap-3">
+            <button
+              onClick={() => setShowFixedTimeModal(true)}
+              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm"
+            >
+              <LuTimer size={14} strokeWidth={2} />
+              Fixed Time
+            </button>
             <button
               onClick={handleSync}
               disabled={syncing}
@@ -3568,6 +3707,11 @@ export default function AttendancePage() {
           onClose={() => setShowProcessModal(false)}
           onProcessed={handleBulkApprove}
         />
+      )}
+
+      {/* Fixed Time Modal */}
+      {showFixedTimeModal && (
+        <FixedTimeModal week={rangeFrom} onClose={() => setShowFixedTimeModal(false)} />
       )}
 
       {breakdownTarget && breakdownTarget.worksnapUserId != null && (

@@ -18,6 +18,7 @@ import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
+import { PAY_CATEGORIES } from "@/components/AddContractorModal";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -303,6 +304,7 @@ type TimeOffRow = {
   email: string;
   country: string;
   department: string;
+  payCategory: string;
   role: string;
   hireDate: string;
   ptoBalance: number;
@@ -382,6 +384,7 @@ export default function TimeOffPage() {
   const [nameSearch,         setNameSearch]         = useState("");
   const [countryFilter,      setCountryFilter]      = useState("All Countries");
   const [departmentFilter,   setDepartmentFilter]   = useState("All Assigned Teams");
+  const [payCategoryFilter,  setPayCategoryFilter]  = useState("All Categories");
   const [reviewStatusFilter, setReviewStatusFilter] = useState("All Statuses");
 
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
@@ -500,7 +503,7 @@ export default function TimeOffPage() {
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
-      department: c.department, role: c.role, hireDate: c.hireDate,
+      department: c.department, payCategory: c.payCategory, role: c.role, hireDate: c.hireDate,
       ptoBalance, ptoUsed, ptoUsedImport: c.ptoUsedImport, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickUsedImport: c.sickUsedImport, sickLeaveAvailable,
       birthdayLeave:    ptoAdvanceReset.birthdayLeave,
@@ -517,14 +520,15 @@ export default function TimeOffPage() {
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || reviewStatusFilter !== "All Statuses";
+  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses";
 
   const filteredRows = rows.filter((r) => {
     const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
     const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
     const dm = departmentFilter === "All Assigned Teams" || (r.department || "Unassigned") === departmentFilter;
+    const pm = payCategoryFilter === "All Categories" || r.payCategory === payCategoryFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
-    return nm && cm && dm && sm;
+    return nm && cm && dm && pm && sm;
   });
 
   const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
@@ -1466,6 +1470,11 @@ export default function TimeOffPage() {
             </button>
           )}
         </div>
+        <select value={payCategoryFilter} onChange={(e) => setPayCategoryFilter(e.target.value)} disabled={loading}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          <option>All Categories</option>
+          {PAY_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+        </select>
         <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} disabled={loading}
           className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Countries</option>
@@ -1484,7 +1493,7 @@ export default function TimeOffPage() {
           <option value="Rejected">Rejected</option>
         </select>
         {filtersActive && (
-          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setReviewStatusFilter("All Statuses"); }}
+          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); }}
             className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={16} strokeWidth={2} />
           </button>
