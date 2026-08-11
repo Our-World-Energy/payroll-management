@@ -45,6 +45,34 @@ export function computePayComponents(hourlyRate: number, totals: VoucherTimeTota
   };
 }
 
+// Fixed-Ind and Fixed-Mex — no OT/holiday multiplier breakdown applies to
+// either: Fixed-Ind's Completion Time comes from attendance_week_status
+// (same weekly-review source Hourly contractors use), Fixed-Mex's from the
+// "Fixed Time" button on Attendance Management (fixed_time table) — either
+// way, their whole week's pay is simply Completion Time (hours) × Hourly
+// Rate (from Contractor Details), folded into the same shape
+// computePayComponents returns so every voucher/gross calculation can call
+// this one function regardless of pay category.
+export function payComponentsFor(
+  payCategory: string,
+  hourlyRate: number,
+  completionMinutes: number | null,
+  totals: VoucherTimeTotals
+) {
+  const category = payCategory.trim().toLowerCase();
+  const isFixed = category === "fixed-mex" || category === "fixed-ind";
+  if (isFixed && completionMinutes != null) {
+    const regHours = completionMinutes / 60;
+    const regPay = regHours * hourlyRate;
+    return {
+      regHours, regOtHours: 0, rdOtHours: 0, usHolidayHours: 0, hoOtHours: 0, localHolidayHours: 0,
+      regPay, regOtPay: 0, rdOtPay: 0, usHolidayPay: 0, hoOtPay: 0, localHolidayPay: 0,
+      grossPay: regPay,
+    };
+  }
+  return computePayComponents(hourlyRate, totals);
+}
+
 // PTO hours for the voucher's PTO HRS line — regular PTO ("PTO"/"PTO Half
 // Day"), Advance PTO/Birthday Leave and Advance Sick Leave overrides, and
 // Special Leave (excludes regular Medical Unavailability/Sick Leave

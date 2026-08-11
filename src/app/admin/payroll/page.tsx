@@ -11,7 +11,8 @@ import {
   processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow, type ProcessedSnapshot,
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
-import { computePayComponents, totalPtoHoursFor } from "@/lib/payrollVoucher";
+import { payComponentsFor, totalPtoHoursFor } from "@/lib/payrollVoucher";
+import { fetchFixedTimeForWeek } from "../attendance/actions";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 
@@ -176,7 +177,7 @@ export default function PayrollPage() {
       setLoadError("");
 
       try {
-        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments, processedSnapshotByEmail] = await Promise.all([
+        const [contractors, entriesResult, weekStatusResult, dayStatusResult, holidays, leaveRequests, adjustments, processedSnapshotByEmail, fixedTimeByEmail] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/worksnap-entries?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => r.json()),
           fetch(`/api/attendance/week-status?from=${encodeURIComponent(rangeFrom)}&to=${encodeURIComponent(rangeTo)}`).then((r) => (r.ok ? r.json() : { weekStatuses: [] })),
@@ -185,6 +186,7 @@ export default function PayrollPage() {
           fetchAllLeaveRequestsAdmin().catch(() => []),
           fetchPayrollAdjustments(rangeFrom).catch(() => []),
           fetchProcessedWeeklyPayroll(rangeFrom).catch(() => ({} as Record<string, ProcessedSnapshot>)),
+          fetchFixedTimeForWeek(rangeFrom).catch(() => ({} as Record<string, number>)),
         ]);
 
         if (!isMounted) return;
@@ -236,14 +238,23 @@ export default function PayrollPage() {
         const adjustmentByEmail = new Map(adjustments.map((a) => [a.email.trim().toLowerCase(), a]));
 
         const nextRows: PayrollRow[] = contractors
-          .filter((c) => c.email && (c.payCategory || "").trim().toLowerCase() !== "fixed-ind")
+          .filter((c) => c.email)
           .map((c) => {
             const email = c.email.trim().toLowerCase();
             const actualMinutes = minutesByEmail.get(email) ?? 0;
             const saved = weekStatusByEmail.get(email);
             const isReviewed = saved?.requestStatus === "APPROVED" && saved.completionMinutes != null;
             const hourlyRate = parseFloat(c.hourlyRate) || 0;
-            const hours = isReviewed ? (saved!.completionMinutes as number) / 60 : null;
+            // Fixed-Mex: the admin-entered Regular Time from the "Fixed Time"
+            // button on Attendance Management (fixed_time table) is this
+            // contractor's Completion Time for the week, taking priority over
+            // the normal Worksnap-review-derived value.
+            const isFixedMex = (c.payCategory || "").trim().toLowerCase() === "fixed-mex";
+            const fixedMinutes = fixedTimeByEmail[email];
+            const completionMinutes = isFixedMex && fixedMinutes != null
+              ? fixedMinutes
+              : (isReviewed ? (saved!.completionMinutes as number) : null);
+            const hours = completionMinutes != null ? completionMinutes / 60 : null;
             const country = countryFromLocation(c.location || "");
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
             const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
@@ -263,10 +274,11 @@ export default function PayrollPage() {
 
             // Gross Pay is the sum of each payroll component calculated independently
             // (its own time total × Hourly Rate × its own multiplier), plus PTO Pay
-            // and the Manual Payroll Adjustment earnings — see computePayComponents —
+            // and the Manual Payroll Adjustment earnings — see payComponentsFor —
             // so this always matches the voucher's total exactly.
-            const gross = isReviewed
-              ? computePayComponents(hourlyRate, {
+            const hasGrossInputs = (isFixedMex && fixedMinutes != null) || isReviewed;
+            const gross = hasGrossInputs
+              ? payComponentsFor(c.payCategory || "", hourlyRate, completionMinutes, {
                   totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
                   totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
                   totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
@@ -324,7 +336,7 @@ export default function PayrollPage() {
               monthlyRate: parseFloat(c.monthlyRate) || 0,
               weeklyRate: parseFloat(c.weeklyRate) || 0,
               actualMinutes,
-              completionMinutes: isReviewed ? (saved!.completionMinutes as number) : null,
+              completionMinutes,
               hours,
               gross,
               deductions,
@@ -757,7 +769,7 @@ function PayrollVoucherModal({
     setIsSaving(true);
     setSaveError("");
     try {
-      const live = computePayComponents(row.hourlyRate, {
+      const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
         totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: row.totalRegularOtMinutes,
         totalRdOtMinutes: row.totalRdOtMinutes,
@@ -863,7 +875,7 @@ function PayrollVoucherModal({
         evaluatedDailyMinutes: processedSnapshot!.evaluatedDailyMinutes,
       }
     : (() => {
-        const live = computePayComponents(row.hourlyRate, {
+        const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
           totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
           totalRegularOtMinutes: row.totalRegularOtMinutes,
           totalRdOtMinutes: row.totalRdOtMinutes,
@@ -924,13 +936,6 @@ function PayrollVoucherModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors z-10"
-        >
-          <LuX size={18} strokeWidth={2} />
-        </button>
-
         <div className="p-4 md:p-5 text-sm text-slate-800">
           {canProcess && (
             <div className="flex items-center justify-start gap-3 mb-2.5">
@@ -1077,6 +1082,15 @@ function PayrollVoucherModal({
             Check Date is always the Friday following the pay cycle&apos;s end date.
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
+
+          <div className="flex justify-end mt-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+            >
+              Close
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1425,7 +1439,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
 
   function buildItems(rowsToProcess: PayrollRow[]): ProcessedPayrollRow[] {
     return rowsToProcess.map((r) => {
-      const live = computePayComponents(r.hourlyRate, {
+      const live = payComponentsFor(r.payCategory, r.hourlyRate, r.completionMinutes, {
         totalEvaluatedRegularMinutes: r.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: r.totalRegularOtMinutes,
         totalRdOtMinutes: r.totalRdOtMinutes,
