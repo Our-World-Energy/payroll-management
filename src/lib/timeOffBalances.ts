@@ -216,6 +216,28 @@ export function resetAdvanceSickLeaveIfCaughtUp(
   return { advanceSickLeave: currentAdvanceSickLeave, advanceSickLeaveUsed: currentAdvanceSickLeaveUsed };
 }
 
+// Fixed-Ind only — a Special Leave Credit grant expires 60 days after the
+// date it was added (specialLeaveGrantedAt), resetting the credit pool
+// back to 0. Used is left as-is (Available is already floored at 0
+// elsewhere, so a stale Used can't produce a negative balance) — no
+// expiry applies to any other pay category.
+export function resetSpecialLeaveIfExpired(
+  payCategory: string,
+  grantedAt: string | null,
+  currentSpecialLeaveCredits: number,
+  currentSpecialLeaveUsed: number,
+  today: Date = new Date()
+): { specialLeaveCredits: number; specialLeaveUsed: number } {
+  const isFixedInd = payCategory.trim().toLowerCase() === "fixed-ind";
+  const grantedDate = grantedAt ? parseDate(grantedAt) : null;
+  if (!isFixedInd || !grantedDate) {
+    return { specialLeaveCredits: currentSpecialLeaveCredits, specialLeaveUsed: currentSpecialLeaveUsed };
+  }
+  const daysSinceGrant = Math.floor((today.getTime() - grantedDate.getTime()) / 86400000);
+  if (daysSinceGrant > 60) return { specialLeaveCredits: 0, specialLeaveUsed: currentSpecialLeaveUsed };
+  return { specialLeaveCredits: currentSpecialLeaveCredits, specialLeaveUsed: currentSpecialLeaveUsed };
+}
+
 export function calculateUnusedSickLeaveBalance(
   name: string,
   hireDate: string,

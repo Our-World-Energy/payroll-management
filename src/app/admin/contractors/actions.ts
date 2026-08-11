@@ -92,6 +92,7 @@ function toContractor(row: Record<string, unknown>): Contractor {
     advanceSickLeaveUsed: Number(row.advanceSickLeaveUsed ?? 0),
     specialLeaveCredits: Number(row.specialLeaveCredits ?? 0),
     specialLeaveUsed:    Number(row.specialLeaveUsed    ?? 0),
+    specialLeaveGrantedAt: row.specialLeaveGrantedAt == null ? null : String(row.specialLeaveGrantedAt),
   };
 }
 
@@ -371,7 +372,7 @@ export async function updateTimeOffUsage(
   fields: Partial<{
     ptoUsed: number; sickLeaveUsed: number; birthdayLeave: number; birthdayLeaveUsed: number;
     advanceSickLeave: number; advanceSickLeaveUsed: number;
-    specialLeaveCredits: number; specialLeaveUsed: number;
+    specialLeaveCredits: number; specialLeaveUsed: number; specialLeaveGrantedAt: string | null;
   }>
 ): Promise<void> {
   const sb = getSupabase();

@@ -159,6 +159,7 @@ function rowToContractor(data: Record<string, string>): Contractor {
 
   return {
     uid:           `UID-${Math.floor(10000 + Math.random() * 89999)}`,
+    specialLeaveGrantedAt: null,
     contractorId:  data.contractor_id?.trim() || `#C-${Math.floor(1000 + Math.random() * 8999)}`,
     avatar:        ((firstName[0] ?? "") + (surname[0] ?? "")).toUpperCase(),
     fullName:      [firstName, middleName, surname].filter(Boolean).join(" "),

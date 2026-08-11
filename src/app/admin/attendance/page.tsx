@@ -369,12 +369,48 @@ function completionTimeFor(evaluatedTime: string, timeOffTime: string, holidayTi
   return formatMinutesAsMins(evaluatedMinutes + timeOffMinutes + holidayMinutes + rdOtMinutes);
 }
 
-type HolidayEntry = { date: string; country: string; name: string; arizonaDate?: string | null };
+type HolidayEntry = { date: string; country: string; name: string; arizonaDate?: string | null; timeZone?: string | null };
 
 // The Arizona-equivalent calendar date for a holiday — falls back to the raw
 // (country-local) date for older rows that predate the arizonaDate column.
 function arizonaDateOf(holiday: HolidayEntry): string {
   return (holiday.arizonaDate ?? holiday.date).slice(0, 10);
+}
+
+// The holiday's own true 24h window (midnight-to-midnight in ITS OWN
+// country's timezone), as real UTC instants — not collapsed into a single
+// Arizona calendar date first. Needed because a large offset from Arizona
+// (e.g. the Philippines, 15h ahead) means one local calendar day can
+// straddle two different Arizona calendar days; collapsing to one loses
+// whichever portion of a contractor's shift falls on the other side. Falls
+// back to null for legacy rows saved before the timeZone column existed.
+function localHolidayUtcWindow(holiday: HolidayEntry): [number, number] | null {
+  if (!holiday.timeZone) return null;
+  const localDate = holiday.date.slice(0, 10);
+  const start = utcInstantForLocalTime(localDate, 0, 0, holiday.timeZone).getTime();
+  const end = utcInstantForLocalTime(addDaysIso(localDate, 1), 0, 0, holiday.timeZone).getTime();
+  return [start, end];
+}
+
+function arizonaDayUtcWindow(date: string): [number, number] {
+  const start = utcInstantForLocalTime(date, 0, 0, ARIZONA_TIME_ZONE).getTime();
+  const end = utcInstantForLocalTime(addDaysIso(date, 1), 0, 0, ARIZONA_TIME_ZONE).getTime();
+  return [start, end];
+}
+
+// The holiday (if any) whose own true local-country window overlaps this
+// Arizona-bucketed day at all — not just the single Arizona date it's
+// nominally assigned to (arizonaDateOf), since that assignment only
+// captures where the holiday's local midnight falls, not its full 24h span.
+function matchingLocalHoliday(date: string, country: string, holidays: HolidayEntry[]): HolidayEntry | undefined {
+  const [arizonaDayStart, arizonaDayEnd] = arizonaDayUtcWindow(date);
+  return holidays.find((h) => {
+    if (h.country !== country) return false;
+    const window = localHolidayUtcWindow(h);
+    if (!window) return arizonaDateOf(h) === date;
+    const [holidayStart, holidayEnd] = window;
+    return holidayEnd > arizonaDayStart && holidayStart < arizonaDayEnd;
+  });
 }
 
 function holidayTimeFor(
@@ -410,51 +446,52 @@ function holidayTimeFor(
 }
 
 // The contractor's own-country holiday name for a given date, or "" if none —
-// looked up from the full holidays table (not just the US subset). Matched by
-// the holiday's ARIZONA-equivalent date, since `date` here is itself an
-// Arizona-bucketed calendar date (same bucketing as Worksnap Time/entryDate),
-// not the country's own local date.
+// looked up from the full holidays table (not just the US subset). `date` is
+// an Arizona-bucketed calendar date (same bucketing as Worksnap Time/
+// entryDate); matching goes through matchingLocalHoliday so a holiday whose
+// true local-country window straddles two Arizona days is named on both,
+// consistent with where localHolidayMinutesFor below can actually grant credit.
 function localHolidayNameFor(date: string, country: string, holidays: HolidayEntry[]): string {
-  return holidays.find((h) => h.country === country && arizonaDateOf(h) === date)?.name ?? "";
+  return matchingLocalHoliday(date, country, holidays)?.name ?? "";
 }
 
 type DailyLogEntry = { entryDate: string; firstIn: string; lastOut: string; worksnapUserId?: number; totalMins?: number };
 
 // Minutes of ALL the contractor's shifts (firstIn→lastOut, real UTC instants)
-// that overlap the holiday's Arizona calendar day — [date 00:00, date+1 00:00)
-// in America/Phoenix. `date` is already an Arizona-bucketed date (matching
-// entryDate/Worksnap Time's own bucketing), so the window itself must be
-// built in Arizona time too, not the country's own timezone — building it in
-// the country's timezone would misalign the window against these Arizona-real
-// timestamps and badly over- or under-count.
+// that overlap the holiday's OWN true local-country window, restricted to
+// whatever part of that window also falls on this Arizona-bucketed day (so a
+// holiday spanning two Arizona days — see localHolidayUtcWindow — doesn't get
+// double-credited across both when this is called once per weekDate).
 // Every shift in `dailyLogs` is checked (not just the one whose own entryDate
 // is `date`) because a shift can straddle the Arizona midnight boundary: its
 // own bucketed day might be the day before or after, while a portion of it
 // still falls inside this holiday's window. Summing per-shift overlap against
-// this single, non-overlapping 24h window is safe — a shift that doesn't
+// this single, non-overlapping window is safe — a shift that doesn't
 // genuinely fall inside it always contributes exactly 0.
 // Each shift's contribution is capped at its own totalMins — firstIn→lastOut
 // is only the outer span of the day's activity and can contain large gaps
 // (breaks/idle time), so raw span-overlap alone can wildly overstate actual
 // worked minutes; totalMins is the real accumulated work for that day.
-// Returns null when `date` isn't a local holiday for `country` at all.
+// Returns null when `date` isn't (any part of) a local holiday for `country`.
 function localHolidayMinutesFor(
   date: string,
   dailyLogs: DailyLogEntry[],
   country: string,
   holidays: HolidayEntry[]
 ): number | null {
-  const isLocalHoliday = holidays.some((h) => h.country === country && arizonaDateOf(h) === date);
-  if (!isLocalHoliday) return null;
+  const holiday = matchingLocalHoliday(date, country, holidays);
+  if (!holiday) return null;
 
-  const dayStart = utcInstantForLocalTime(date, 0, 0, ARIZONA_TIME_ZONE).getTime();
-  const dayEnd = utcInstantForLocalTime(addDaysIso(date, 1), 0, 0, ARIZONA_TIME_ZONE).getTime();
+  const [arizonaDayStart, arizonaDayEnd] = arizonaDayUtcWindow(date);
+  const [holidayStart, holidayEnd] = localHolidayUtcWindow(holiday) ?? [arizonaDayStart, arizonaDayEnd];
+  const windowStart = Math.max(holidayStart, arizonaDayStart);
+  const windowEnd = Math.min(holidayEnd, arizonaDayEnd);
 
   return dailyLogs.reduce((sum, log) => {
     const start = new Date(log.firstIn).getTime();
     const end = new Date(log.lastOut).getTime();
-    const overlapStart = Math.max(start, dayStart);
-    const overlapEnd = Math.min(end, dayEnd);
+    const overlapStart = Math.max(start, windowStart);
+    const overlapEnd = Math.min(end, windowEnd);
     const overlapMinutes = overlapEnd > overlapStart ? Math.round((overlapEnd - overlapStart) / 60000) : 0;
     const cappedMinutes = log.totalMins != null ? Math.min(overlapMinutes, log.totalMins) : overlapMinutes;
     return sum + cappedMinutes;

@@ -15,10 +15,11 @@ import {
 } from "../contractors/actions";
 import { fetchCutOffTime } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
+import { arizonaTodayIso, addDaysIso } from "@/lib/weekUtils";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -322,6 +323,7 @@ type TimeOffRow = {
   specialLeaveCredits: number;
   specialLeaveUsed: number;
   specialLeaveAvailable: number;
+  specialLeaveGrantedAt: string | null;
   unusedSickLeave: number;
   latestRequest: AdminLeaveRequest | null;
 };
@@ -492,7 +494,12 @@ export default function TimeOffPage() {
     // silently masked to 0.
     const ptoAvailable       = roundBalance(ptoBalance - ptoUsed);
     const sickLeaveAvailable = roundBalance(sickLeaveBalance - sickLeaveUsed);
-    const specialLeaveAvailable = roundBalance(Math.max(c.specialLeaveCredits - c.specialLeaveUsed, 0));
+    // Fixed-Ind only — a Special Leave Credit grant expires 60 days after
+    // it was added, live-resetting the credit pool to 0 (see
+    // resetSpecialLeaveIfExpired) the same way the Advance PTO/Sick Leave
+    // resets above work — immediately, without waiting for a save.
+    const specialLeaveReset = resetSpecialLeaveIfExpired(c.payCategory, c.specialLeaveGrantedAt, c.specialLeaveCredits, c.specialLeaveUsed);
+    const specialLeaveAvailable = roundBalance(Math.max(specialLeaveReset.specialLeaveCredits - specialLeaveReset.specialLeaveUsed, 0));
     // Live-computed the same way as ptoAvailable/sickLeaveAvailable above —
     // once accrual alone covers a full day, the stale advance balance is
     // masked to 0 here immediately rather than waiting for this contractor
@@ -510,9 +517,10 @@ export default function TimeOffPage() {
       birthdayLeaveUsed: ptoAdvanceReset.birthdayLeaveUsed,
       advanceSickLeave: sickAdvanceReset.advanceSickLeave,
       advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
-      specialLeaveCredits: c.specialLeaveCredits,
-      specialLeaveUsed:    c.specialLeaveUsed,
+      specialLeaveCredits: specialLeaveReset.specialLeaveCredits,
+      specialLeaveUsed:    specialLeaveReset.specialLeaveUsed,
       specialLeaveAvailable,
+      specialLeaveGrantedAt: c.specialLeaveGrantedAt,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed, cutoff),
       latestRequest:    latestByEmail[c.email] ?? null,
     };
@@ -617,7 +625,7 @@ export default function TimeOffPage() {
                   <div>
                     <p className="text-[11px] font-semibold text-white/60 uppercase tracking-wider">Contractor Time Away – Advance Leave Request Details</p>
                     <h3 className="text-lg font-bold text-white mt-0.5">{selectedRow.fullName}</h3>
-                    <p className="text-sm text-white/60 mt-0.5">{selectedRow.department || "—"}</p>
+                    <p className="text-sm text-white/60 mt-0.5">{selectedRow.department || "—"}{selectedRow.payCategory ? `/${selectedRow.payCategory}` : ""}</p>
                     <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
                   </div>
                 </div>
@@ -1157,9 +1165,13 @@ export default function TimeOffPage() {
                     const hoursToAdd = parseFloat(specialHours) || 0;
                     if (hoursToAdd <= 0) return;
                     const newCredits = selectedRow.specialLeaveCredits + hoursToAdd;
-                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits });
+                    // Stamps today as the grant date — for Fixed-Ind, this is
+                    // what the 60-day expiry (resetSpecialLeaveIfExpired) counts
+                    // from, so every new grant restarts the expiry clock.
+                    const grantedAt = arizonaTodayIso();
+                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits, specialLeaveGrantedAt: grantedAt });
                     setContractors((prev) => prev.map((c) =>
-                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits } : c
+                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits, specialLeaveGrantedAt: grantedAt } : c
                     ));
                     setSpecialHours(""); setSpecialReason("");
                   }
@@ -1178,9 +1190,12 @@ export default function TimeOffPage() {
                     if (!selectedRow) return;
                     const newCredits = Math.max(0, parseFloat(editSpecialCredits) || 0);
                     const newUsed = Math.max(0, parseFloat(editSpecialUsed) || 0);
-                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits, specialLeaveUsed: newUsed });
+                    // Setting Credits to a new positive value restarts the
+                    // Fixed-Ind 60-day expiry clock, same as a fresh Grant.
+                    const grantedAt = newCredits > 0 ? arizonaTodayIso() : selectedRow.specialLeaveGrantedAt;
+                    await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits, specialLeaveUsed: newUsed, specialLeaveGrantedAt: grantedAt });
                     setContractors((prev) => prev.map((c) =>
-                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits, specialLeaveUsed: newUsed } : c
+                      c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits, specialLeaveUsed: newUsed, specialLeaveGrantedAt: grantedAt } : c
                     ));
                     setIsEditingSpecialBalance(false);
                   }
@@ -1243,6 +1258,15 @@ export default function TimeOffPage() {
                           used={selectedRow.specialLeaveUsed}
                           available={selectedRow.specialLeaveAvailable}
                         />
+                      )}
+
+                      {selectedRow.specialLeaveGrantedAt && (
+                        <p className="text-xs text-slate-500">
+                          Date Added: <span className="font-semibold text-slate-700">{fmtDate(selectedRow.specialLeaveGrantedAt)}</span>
+                          {selectedRow.payCategory.trim().toLowerCase() === "fixed-ind" && (
+                            <> — <span className="text-purple-700 font-semibold">expires {fmtDate(addDaysIso(selectedRow.specialLeaveGrantedAt, 60))}</span> (Fixed-Ind credits reset to 0 after 60 days)</>
+                          )}
+                        </p>
                       )}
 
                       <div>

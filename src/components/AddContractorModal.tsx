@@ -186,6 +186,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
     const contractor: Contractor = {
       uid:            initial?.uid          ?? `UID-${Math.floor(10000 + Math.random() * 89999)}`,
+      specialLeaveGrantedAt: initial?.specialLeaveGrantedAt ?? null,
       contractorId:   form.contractorId,
       avatar:         (form.firstName[0] + form.surname[0]).toUpperCase(),
       fullName:       [form.firstName, form.middleName, form.surname].filter(Boolean).join(" "),

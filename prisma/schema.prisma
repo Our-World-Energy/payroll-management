@@ -242,6 +242,7 @@ model ContractorProfile {
   advanceSickLeaveUsed Float    @default(0) // cumulative amount repaid so far from newly-accrued Sick Leave
   specialLeaveCredits  Float    @default(0) // admin-granted bonus leave balance, drawable via Leave Override
   specialLeaveUsed     Float    @default(0)
+  specialLeaveGrantedAt String? // "YYYY-MM-DD" of the most recent grant — Fixed-Ind credits expire (reset to 0) 60 days after this date
 
   @@map("contractor_profiles")
 }
