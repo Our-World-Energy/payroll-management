@@ -104,7 +104,10 @@ function exportCSV(rows: Contractor[], cutoff: CutoffDate) {
       ].map(escape).join(",");
     }),
   ];
-  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  // Leading BOM — without it, Excel misreads the UTF-8 file as its default
+  // codepage and garbles anything beyond plain ASCII (accented names, etc.).
+  const csvContent = String.fromCharCode(0xFEFF) + lines.join("\n");
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement("a");
   a.href = url; a.download = "contractors.csv"; a.click();

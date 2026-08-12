@@ -391,6 +391,45 @@ export default function PayrollPage() {
   const shiftTypeOptions = Array.from(new Set(rows.map((r) => r.shiftType).filter((c) => c !== "-"))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department).filter((c) => c !== "-"))).sort();
 
+  function handleExportCSV() {
+    const headers = [
+      "Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+      "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
+      "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status",
+    ];
+    const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [
+      headers.join(","),
+      ...filteredRows.map((r) => [
+        r.name, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
+        r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—",
+        r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—",
+        r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—",
+        r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—",
+        r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—",
+        r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—",
+        r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—",
+        r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—",
+        `${r.currency} ${r.hourlyRate.toFixed(2)}`, r.hourlyRate.toFixed(2),
+        r.gross != null ? fmtMoney(r.gross, r.currency) : "—",
+        r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "—",
+        r.net != null ? fmtMoney(r.net, r.currency) : "—",
+        r.status,
+      ].map(escape).join(",")),
+    ];
+    // Leading BOM — without it, Excel misreads the UTF-8 file as its default
+    // codepage and garbles anything beyond plain ASCII (the "—" placeholders,
+    // currency symbols, accented names).
+    const csvContent = String.fromCharCode(0xFEFF) + lines.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payroll_${rangeFrom || "export"}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const forReviewCount   = filteredRows.filter((r) => r.status === "For Review").length;
   const reviewedCount    = filteredRows.filter((r) => r.status === "Reviewed").length;
   const noActivityCount  = filteredRows.filter((r) => r.status === "No Activity").length;
@@ -478,7 +517,11 @@ export default function PayrollPage() {
             <span className="hidden sm:inline">Import Earning/Deduction</span>
             <span className="sm:hidden">Import</span>
           </button>
-          <button className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50">
+          <button
+            onClick={handleExportCSV}
+            disabled={filteredRows.length === 0}
+            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             <LuDownload size={14} strokeWidth={2} />
             <span className="hidden sm:inline">Export CSV</span>
             <span className="sm:hidden">Export</span>

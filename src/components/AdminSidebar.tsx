@@ -87,7 +87,7 @@ export function AdminSidebar() {
                 height={28}
                 priority
               />
-              <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${s.label}`}>
+              <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 text-center ${s.label}`}>
                 Admin Console
               </p>
             </div>
