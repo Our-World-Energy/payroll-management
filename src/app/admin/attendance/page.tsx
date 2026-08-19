@@ -301,12 +301,15 @@ function isApprovedFullTimeOffRequestDay(date: string, leaveRequests: AdminLeave
   return timeValueToMinutes(approvedTimeOffRequestMinutesFor(date, leaveRequests)) === 480;
 }
 
-const HALF_DAY_LEAVE_TYPES = ["PTO Half Day", "Sick Leave Half Day"];
+const HALF_DAY_LEAVE_TYPES = [
+  "PTO Half Day", "Sick Leave Half Day",
+  "Advance PTO/Birthday Leave Half Day", "Advance Sick Leave Half Day",
+];
 
-// Whether an approved PTO Half Day / Sick Leave Half Day request (240 min)
-// covers `date` — the one case where Regular OT can still be borrowed to
-// complete the day (see weeklyEvaluatedRegularAllocation), capped at exactly
-// the 240 min still needed. No other shortfall day borrows OT at all.
+// Whether an approved half-day-equivalent leave request (240 min) covers
+// `date` — the one case where Regular OT can still be borrowed to complete
+// the day (see weeklyEvaluatedRegularAllocation), capped at exactly the 240
+// min still needed. No other shortfall day borrows OT at all.
 function isApprovedHalfDayLeaveDate(date: string, leaveRequests: AdminLeaveRequest[]) {
   return leaveRequests.some((r) =>
     HALF_DAY_LEAVE_TYPES.includes(r.type) && r.status === "Approved" && date >= r.startDate && date <= r.endDate
@@ -318,12 +321,13 @@ const APPROVED_LEAVE_CONFLICT_TYPES = [
   "Advance PTO/Birthday Leave", "Advance Sick Leave", "Special Leave",
 ];
 
-// Whether an approved PTO/Sick Leave (full or half day, including Advance
-// PTO/Birthday Leave, Advance Sick Leave, and Special Leave overrides — all
-// full-day only, no half-day variant exists for any of the three) portal
-// request covers `date` — used to flag a day the contractor filed one of
-// these for but also logged Worksnap Time on, so the admin can spot the
-// conflict at a glance.
+// Whether an approved PTO/Sick Leave (full or half day, including the
+// full-day Advance PTO/Birthday Leave, Advance Sick Leave, and Special Leave
+// overrides — their own Half Day variants are excluded here the same way
+// PTO Half Day/Sick Leave Half Day are, since half the day is still expected
+// to be worked) portal request covers `date` — used to flag a day the
+// contractor filed one of these for but also logged Worksnap Time on, so the
+// admin can spot the conflict at a glance.
 function hasApprovedLeaveRequestFor(date: string, leaveRequests: AdminLeaveRequest[]) {
   return leaveRequests.some((r) =>
     APPROVED_LEAVE_CONFLICT_TYPES.includes(r.type) && r.status === "Approved" && date >= r.startDate && date <= r.endDate
@@ -341,8 +345,8 @@ function hasApprovedLeaveRequestFor(date: string, leaveRequests: AdminLeaveReque
 function rowHasLeaveOverworkConflict(row: AttendanceRow, weekDates: string[], rowLeaveRequests: AdminLeaveRequest[], adjustedDaily?: Record<string, number>) {
   return weekDates.some((date) => {
     if (!hasApprovedLeaveRequestFor(date, rowLeaveRequests)) return false;
-    const adjustedMinutes = adjustedDaily?.[date] ?? 0;
-    const loggedMinutes = adjustedMinutes > 0 ? adjustedMinutes : (row.dailyWorksnapMinutes?.[date] ?? 0);
+    const hasAdjustedTime = adjustedDaily?.[date] !== undefined;
+    const loggedMinutes = hasAdjustedTime ? adjustedDaily![date] : (row.dailyWorksnapMinutes?.[date] ?? 0);
     return loggedMinutes > 240;
   });
 }
@@ -579,12 +583,13 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 //   needed to reach the full 480-min day — this covers a day with no
 //   Worksnap Time logged at all, or logged time still short of 480.
 // A day already covered by an approved PTO Half Day / Sick Leave Half Day
-// (halfDayOffByDate > 0) never borrows, regardless of how much was actually
-// worked — that Work Status already accounts for the missing half of the
-// day (credited separately as Time Off Time), so Required Regular Hours for
-// that day is the reduced (worked-only) amount, not the full 480; pulling in
-// OT/HO OT to "complete" it would just reclassify another day's premium-rate
-// hours as regular-rate for no reason.
+// (halfDayOffByDate > 0) only needs 240 min worked, not 480 — that Work
+// Status already accounts for the other half of the day (credited
+// separately as Time Off Time). If less than 240 min was actually worked,
+// the shortfall (240 − worked) is borrowed from the week's Regular OT pool
+// only — never the HO OT pool, and never more than what's needed to reach
+// 240 — so any Regular OT beyond that stays Regular OT rather than being
+// pulled in to "complete" a full 480-min day that was never required here.
 // If the day itself isn't Approved yet, nothing is borrowed and it stays
 // blank/unfilled, same as any other not-yet-approved day. Any OT a lending
 // day doesn't actually give up stays credited to that same day. This
@@ -615,9 +620,23 @@ function weeklyEvaluatedRegularAllocation(
 
     const regularTime = regularTimeByDate[date] ?? 0;
     const halfDayCredit = halfDayOffByDate[date] ?? 0;
-    // A Work Status (approved half-day leave) already accounts for the rest
-    // of this day — never borrow into it, no matter how little was worked.
-    if (halfDayCredit > 0) return;
+    // A half-day leave only requires 240 min worked — borrow just enough
+    // Regular OT (never HO OT) to reach that reduced requirement, capped at
+    // exactly what's missing, then stop.
+    if (halfDayCredit > 0) {
+      if (regularTime >= 240) return;
+      let missingHalfDay = 240 - regularTime;
+      for (const otDate of weekDates) {
+        if (missingHalfDay <= 0) break;
+        const available = remainingRegularOt[otDate];
+        if (available <= 0) continue;
+        const take = Math.min(missingHalfDay, available);
+        remainingRegularOt[otDate] -= take;
+        missingHalfDay -= take;
+        borrowedByDate[date] += take;
+      }
+      return;
+    }
 
     if (!shortfallEligibleByDate[date] || regularTime >= 480) return;
     let missing = 480 - regularTime;
@@ -647,9 +666,20 @@ function weeklyEvaluatedRegularAllocation(
 
   const result: Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number; hoOtMinutes: number }> = {};
   weekDates.forEach((date) => {
+    const regularTime = regularTimeByDate[date] ?? 0;
+    const halfDayCredit = halfDayOffByDate[date] ?? 0;
+    // Mirror image of the 240-min borrow above: on a half-day-leave day,
+    // Evaluated Regular Time is capped at the reduced 240-min requirement —
+    // anything worked beyond that is this day's own Regular OT instead of
+    // Regular Time (never borrowed away, and never blended into the 480-min
+    // full-day math below).
+    const halfDayExcess = halfDayCredit > 0 && regularTime > 240 ? regularTime - 240 : 0;
+    const evaluatedRegularTime = halfDayCredit > 0
+      ? Math.min(regularTime, 240) + borrowedByDate[date]
+      : regularTime + borrowedByDate[date];
     result[date] = {
-      evaluatedRegularTime: (regularTimeByDate[date] ?? 0) + borrowedByDate[date],
-      regularOtMinutes: remainingRegularOt[date],
+      evaluatedRegularTime,
+      regularOtMinutes: remainingRegularOt[date] + halfDayExcess,
       rdOtMinutes: rdOtByDate[date] ?? 0,
       hoOtMinutes: remainingHoOt[date],
     };
@@ -671,9 +701,12 @@ function worksnapTotalMinutesFor(weekDates: string[], dailyWorksnapMinutes: Reco
 function effectiveDailyMinutesFor(row: AttendanceRow, adjustedDaily?: Record<string, number>) {
   const raw = row.dailyWorksnapMinutes ?? {};
   if (!adjustedDaily || Object.keys(adjustedDaily).length === 0) return raw;
+  // Every key present in adjustedDaily was an explicit Adjusted Time entry —
+  // including an explicit 0 ("no time worked") — so it always overrides,
+  // same as the ReviewModal's own effectiveDailyMinutes.
   const merged: Record<string, number> = { ...raw };
   for (const [date, minutes] of Object.entries(adjustedDaily)) {
-    if (minutes > 0) merged[date] = minutes;
+    merged[date] = minutes;
   }
   return merged;
 }
@@ -1054,18 +1087,20 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   // otherwise silently wave through a week with an unresolved conflict on it.
   const weekHasLeaveWorkConflict = weekDates.some((date) => {
     if (!hasApprovedLeaveRequestFor(date, leaveRequests)) return false;
-    const adjustedMinutes = timeValueToMinutes(adjustedTimes[date] ?? "");
-    const loggedMinutes = adjustedMinutes > 0 ? adjustedMinutes : (dailyWorksnapMinutes[date] ?? 0);
+    const hasAdjustedTime = (adjustedTimes[date] ?? "").trim() !== "";
+    const loggedMinutes = hasAdjustedTime ? timeValueToMinutes(adjustedTimes[date]) : (dailyWorksnapMinutes[date] ?? 0);
     return loggedMinutes > 240;
   });
-  // Adjusted Time is the secondary time source: once a valid value is entered
-  // for a date, it overrides Worksnap Time entirely for every calculation
-  // (evaluated time, regular/OT allocation, holiday eligibility, completion
-  // time, totals). Worksnap Time itself is left untouched and still shown for
-  // reference in its own column — only this derived map feeds calculations.
+  // Adjusted Time is the secondary time source: once a value is entered for a
+  // date — including an explicit 0, meaning "no time worked" — it overrides
+  // Worksnap Time entirely for every calculation (evaluated time, regular/OT
+  // allocation, holiday eligibility, completion time, totals). Only a truly
+  // empty (untouched) Adjusted Time falls back to Worksnap Time. Worksnap
+  // Time itself is left untouched and still shown for reference in its own
+  // column — only this derived map feeds calculations.
   const effectiveDailyMinutes = weekDates.reduce<Record<string, number>>((acc, d) => {
-    const adjustedMinutes = timeValueToMinutes(adjustedTimes[d] ?? "");
-    acc[d] = adjustedMinutes > 0 ? adjustedMinutes : (dailyWorksnapMinutes[d] ?? 0);
+    const hasAdjustedTime = (adjustedTimes[d] ?? "").trim() !== "";
+    acc[d] = hasAdjustedTime ? timeValueToMinutes(adjustedTimes[d]) : (dailyWorksnapMinutes[d] ?? 0);
     return acc;
   }, {});
   const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
@@ -1357,7 +1392,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             date,
             decisionStatus: decisionStatusToApi(dailyDecisionStatus),
             evaluatedMinutes: evaluatedMinutesWithBorrow(evaluatedTime, regularTimeMinutes, allocation.evaluatedRegularTime),
-            adjustedMinutes: adjustedMinutesParsed > 0 ? adjustedMinutesParsed : null,
+            adjustedMinutes: adjustedTime.trim() !== "" ? adjustedMinutesParsed : null,
             holidayMinutes: boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rawRdOtMinutes),
             localHoliday: localHoliday || null,
             localHolidayMinutes,
@@ -1575,8 +1610,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     // No approved leave that day means neither highlight applies.
                     const hasApprovedLeave = hasApprovedLeaveRequestFor(date, leaveRequests);
                     const rawWorksnapMinutes = timeValueToMinutes(rawWorksnapTime);
-                    const adjustedMinutesValue = timeValueToMinutes(adjustedTime);
-                    const loggedMinutes = adjustedMinutesValue > 0 ? adjustedMinutesValue : rawWorksnapMinutes;
+                    const hasAdjustedTime = adjustedTime.trim() !== "";
+                    const loggedMinutes = hasAdjustedTime ? timeValueToMinutes(adjustedTime) : rawWorksnapMinutes;
                     const isShortDay = hasApprovedLeave && loggedMinutes > 0 && loggedMinutes <= 240;
                     const hasLeaveWorkConflict = rawWorksnapTime !== "-" && hasApprovedLeave && !isShortDay;
                     const conflictCellClass = hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "text-slate-600";
@@ -2037,7 +2072,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     const adjustedByEmail = new Map<string, Record<string, number>>();
     for (const d of dayStatusDays) {
       const email = String(d.email ?? "").trim().toLowerCase();
-      if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+      if (!email || d.adjustedMinutes == null) continue;
       const map = adjustedByEmail.get(email) ?? {};
       map[String(d.date ?? "")] = d.adjustedMinutes;
       adjustedByEmail.set(email, map);
@@ -2602,7 +2637,7 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
         const adjustedByEmail = new Map<string, Record<string, number>>();
         for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
           const email = String(d.email ?? "").trim().toLowerCase();
-          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          if (!email || d.adjustedMinutes == null) continue;
           const map = adjustedByEmail.get(email) ?? {};
           map[String(d.date ?? "")] = d.adjustedMinutes;
           adjustedByEmail.set(email, map);
@@ -3024,7 +3059,7 @@ export default function AttendancePage() {
         const map = new Map<string, Record<string, number>>();
         for (const d of (dayStatusResult.days ?? [])) {
           const email = String(d.email ?? "").trim().toLowerCase();
-          if (!email || d.adjustedMinutes == null || d.adjustedMinutes <= 0) continue;
+          if (!email || d.adjustedMinutes == null) continue;
           const record = map.get(email) ?? {};
           record[String(d.date ?? "")] = d.adjustedMinutes;
           map.set(email, record);

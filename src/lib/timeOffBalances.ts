@@ -46,6 +46,8 @@ export const LEAVE_TYPE_HOURS: Record<string, number> = {
   "Sick Leave Half Day": 4,
   "Unpaid Leave": 0,
   "Special Leave": 8,
+  "Advance PTO/Birthday Leave Half Day": 4,
+  "Advance Sick Leave Half Day": 4,
 };
 
 export function leaveTypeHours(type: string): number {

@@ -80,7 +80,10 @@ export function payComponentsFor(
 // sickLeaveUsedHours regardless of which advance pool they draw from (see
 // createAdvanceLeaveOverride), while Special Leave has its own dedicated
 // specialLeaveUsedHours column (see LEAVE_BUCKET_FIELDS).
-export const PTO_HRS_TYPES = ["PTO", "PTO Half Day", "Advance PTO/Birthday Leave", "Advance Sick Leave", "Special Leave"];
+export const PTO_HRS_TYPES = [
+  "PTO", "PTO Half Day", "Advance PTO/Birthday Leave", "Advance Sick Leave",
+  "Advance PTO/Birthday Leave Half Day", "Advance Sick Leave Half Day", "Special Leave",
+];
 
 export function totalPtoHoursFor(
   rangeFrom: string,

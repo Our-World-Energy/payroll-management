@@ -534,8 +534,8 @@ export async function resetOutstandingBalances(): Promise<{ updated: number }> {
 // misleading. Pending requests are left alone (still awaiting a decision),
 // and Special Leave is untouched (its own separate bucket, not part of
 // PTO/Sick Leave Used at all). Does not touch ptoUsedImport/sickUsedImport.
-const PTO_SIDE_TYPES = ["PTO", "PTO Half Day", "Advance PTO/Birthday Leave"];
-const MEDICAL_SIDE_TYPES = ["Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Advance Sick Leave"];
+const PTO_SIDE_TYPES = ["PTO", "PTO Half Day", "Advance PTO/Birthday Leave", "Advance PTO/Birthday Leave Half Day"];
+const MEDICAL_SIDE_TYPES = ["Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Advance Sick Leave", "Advance Sick Leave Half Day"];
 
 export async function resetUsedHours(): Promise<{ updated: number }> {
   const sb = getSupabase();
@@ -829,14 +829,14 @@ export async function createLeaveOverride(params: {
 // purely for the historical-request display, not for any balance math.
 export async function createAdvanceLeaveOverride(params: {
   email: string;
-  type: "Advance PTO/Birthday Leave" | "Advance Sick Leave";
+  type: "Advance PTO/Birthday Leave" | "Advance Sick Leave" | "Advance PTO/Birthday Leave Half Day" | "Advance Sick Leave Half Day";
   startDate: string;
   endDate: string;
   reason: string;
 }): Promise<{ ok: boolean; error?: string; request?: AdminLeaveRequest }> {
   const sb = getSupabase();
 
-  const isPto = params.type === "Advance PTO/Birthday Leave";
+  const isPto = params.type.startsWith("Advance PTO/Birthday Leave");
   const standardHours = leaveTypeHours(params.type);
 
   const { data: profile, error: profileErr } = await sb
@@ -945,8 +945,8 @@ async function reverseApprovedBalanceIfNeeded(
   // need their own reversal against birthdayLeaveUsed/advanceSickLeaveUsed
   // instead, or leaveBucketFor would misroute them into the normal
   // sickLeaveUsed field and corrupt it.
-  if (type === "Advance PTO/Birthday Leave" || type === "Advance Sick Leave") {
-    const isPto = type === "Advance PTO/Birthday Leave";
+  if (type.startsWith("Advance PTO/Birthday Leave") || type.startsWith("Advance Sick Leave")) {
+    const isPto = type.startsWith("Advance PTO/Birthday Leave");
     const hours = Number(req.sickLeaveUsedHours) || 0;
 
     if (hours > 0) {

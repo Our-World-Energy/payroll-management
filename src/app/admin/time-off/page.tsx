@@ -523,7 +523,10 @@ export default function TimeOffPage() {
   const [editSpecialCredits, setEditSpecialCredits] = useState("");
   const [editSpecialUsed, setEditSpecialUsed] = useState("");
 
-  const OVERRIDE_TYPES = ["PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Special Leave", "Advance PTO/Birthday Leave", "Advance Sick Leave"] as const;
+  const OVERRIDE_TYPES = [
+    "PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Special Leave",
+    "Advance PTO/Birthday Leave", "Advance PTO/Birthday Leave Half Day", "Advance Sick Leave", "Advance Sick Leave Half Day",
+  ] as const;
   const [overrideType,       setOverrideType]       = useState<typeof OVERRIDE_TYPES[number]>("PTO");
   const [overrideStartDate,  setOverrideStartDate]  = useState("");
   const [overrideEndDate,    setOverrideEndDate]    = useState("");
@@ -1159,12 +1162,12 @@ export default function TimeOffPage() {
                   // below entirely.
                   async function submitAdvanceOverride() {
                     if (!selectedRow) return;
-                    const isAdvancePto = overrideType === "Advance PTO/Birthday Leave";
+                    const isAdvancePto = overrideType.startsWith("Advance PTO/Birthday Leave");
                     setOverrideError("");
                     setOverrideSubmitting(true);
                     const result = await createAdvanceLeaveOverride({
                       email: selectedRow.email,
-                      type: overrideType as "Advance PTO/Birthday Leave" | "Advance Sick Leave",
+                      type: overrideType as "Advance PTO/Birthday Leave" | "Advance Sick Leave" | "Advance PTO/Birthday Leave Half Day" | "Advance Sick Leave Half Day",
                       startDate: overrideStartDate,
                       endDate: overrideEndDate,
                       reason: overrideReason,
@@ -1198,8 +1201,8 @@ export default function TimeOffPage() {
                       return;
                     }
 
-                    if (overrideType === "Advance PTO/Birthday Leave" || overrideType === "Advance Sick Leave") {
-                      const isAdvancePto = overrideType === "Advance PTO/Birthday Leave";
+                    if (overrideType.startsWith("Advance PTO/Birthday Leave") || overrideType.startsWith("Advance Sick Leave")) {
+                      const isAdvancePto = overrideType.startsWith("Advance PTO/Birthday Leave");
                       // Available (balance - already used), not the raw balance —
                       // the balance itself never shrinks on its own, only Used grows.
                       const available = isAdvancePto
@@ -1309,9 +1312,9 @@ export default function TimeOffPage() {
                           onChange={(e) => setOverrideType(e.target.value as typeof OVERRIDE_TYPES[number])}
                           className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                         >
-                          {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) && t !== "Advance PTO/Birthday Leave" : true)
-                            .filter((t) => t !== "Advance PTO/Birthday Leave" || selectedRow.ptoAvailable < 8)
-                            .filter((t) => t !== "Advance Sick Leave" || selectedRow.sickLeaveAvailable < 8)
+                          {OVERRIDE_TYPES.filter((t) => isRowIndia ? !isPtoLeaveType(t) && !t.startsWith("Advance PTO/Birthday Leave") : true)
+                            .filter((t) => !t.startsWith("Advance PTO/Birthday Leave") || selectedRow.ptoAvailable < 8)
+                            .filter((t) => !t.startsWith("Advance Sick Leave") || selectedRow.sickLeaveAvailable < 8)
                             .map((t) => <option key={t} value={t}>{leaveTypeDisplayLabel(t)}</option>)}
                         </select>
                       </div>
