@@ -44,6 +44,8 @@ export type Contractor = {
   specialLeaveCredits: number;
   specialLeaveUsed: number;
   specialLeaveGrantedAt: string | null;
+  outstandingLeaveBalance: number;
+  outstandingMedicalBalance: number;
 };
 
 export type ColumnDef = {

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAdminTheme } from "@/components/AdminThemeContext";
-import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks, LuBanknote } from "react-icons/lu";
+import { LuDownload, LuUpload, LuCircleCheck, LuClock, LuCircleAlert, LuSearch, LuCalendar, LuX, LuRefreshCw, LuEye, LuPencil, LuListChecks, LuBanknote, LuCalendarDays, LuFingerprint } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "../contractors/actions";
 import { fetchHolidays, type Holiday } from "../holidays/actions";
 import {
@@ -137,6 +138,8 @@ function fmtMoney(n: number, currency: string) {
 
 export default function PayrollPage() {
   const { dark } = useAdminTheme();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
@@ -163,6 +166,37 @@ export default function PayrollPage() {
     setWeeks(list);
     setWeek((current) => current || list[0]);
   }, []);
+
+  // Deep link from Attendance Review's "Open in Payroll" shortcut — carries
+  // over the week being reviewed there (the voucher is week-scoped), so this
+  // overrides the current-week anchor above once the param is present.
+  useEffect(() => {
+    const weekParam = searchParams.get("week");
+    if (weekParam) setWeek(weekParam);
+  }, [searchParams]);
+
+  // Resolves by email since Attendance only knows the contractor's email, not
+  // their contractor_profiles uid. Waits for rows (for the requested week, see
+  // above) to load before it can find a match.
+  useEffect(() => {
+    const openEmail = searchParams.get("openEmail");
+    if (openEmail && rows.length > 0 && !voucherTarget) {
+      const match = rows.find((r) => r.email.toLowerCase() === openEmail.toLowerCase());
+      if (match) setVoucherTarget(match);
+      router.replace("/admin/payroll");
+    }
+  }, [searchParams, rows, voucherTarget, router]);
+
+  // Keeps an open Payroll Voucher modal in sync with its own week selector:
+  // switching weeks from inside the modal changes this page's `week` state,
+  // which reloads `rows` for that week — once the new data lands, swap in
+  // the matching row so the voucher reflects the newly selected week instead
+  // of staying frozen on the week it was opened for.
+  useEffect(() => {
+    if (!voucherTarget) return;
+    const match = rows.find((r) => r.email === voucherTarget.email);
+    if (match && match !== voucherTarget) setVoucherTarget(match);
+  }, [rows, voucherTarget]);
 
   const rangeFrom = week;
   const rangeTo = week ? addDaysIso(week, 6) : "";
@@ -402,24 +436,24 @@ export default function PayrollPage() {
       headers.join(","),
       ...filteredRows.map((r) => [
         r.name, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
-        r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "—",
-        r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "—",
-        r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "—",
-        r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "—",
-        r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "—",
-        r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—",
-        r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—",
-        r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—",
+        r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "",
+        r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "",
+        r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "",
+        r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "",
+        r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "",
+        r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "",
+        r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
+        r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
         `${r.currency} ${r.hourlyRate.toFixed(2)}`, r.hourlyRate.toFixed(2),
-        r.gross != null ? fmtMoney(r.gross, r.currency) : "—",
-        r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "—",
-        r.net != null ? fmtMoney(r.net, r.currency) : "—",
+        r.gross != null ? fmtMoney(r.gross, r.currency) : "",
+        r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "",
+        r.net != null ? fmtMoney(r.net, r.currency) : "",
         r.status,
       ].map(escape).join(",")),
     ];
     // Leading BOM — without it, Excel misreads the UTF-8 file as its default
-    // codepage and garbles anything beyond plain ASCII (the "—" placeholders,
-    // currency symbols, accented names).
+    // codepage and garbles anything beyond plain ASCII (currency symbols,
+    // accented names).
     const csvContent = String.fromCharCode(0xFEFF) + lines.join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -745,6 +779,9 @@ export default function PayrollPage() {
           processedSnapshot={processedByEmail[voucherTarget.email]}
           onClose={() => setVoucherTarget(null)}
           onProcessed={handleProcessed}
+          weeks={weeks}
+          week={week}
+          onSelectWeek={setWeek}
         />
       )}
 
@@ -784,7 +821,7 @@ const REST_DAY_TO_LABEL: Record<string, string> = {
 };
 
 function PayrollVoucherModal({
-  row, rangeFrom, rangeTo, processedSnapshot, onClose, onProcessed,
+  row, rangeFrom, rangeTo, processedSnapshot, onClose, onProcessed, weeks, week, onSelectWeek,
 }: {
   row: PayrollRow;
   rangeFrom: string;
@@ -792,20 +829,38 @@ function PayrollVoucherModal({
   processedSnapshot?: ProcessedSnapshot;
   onClose: () => void;
   onProcessed: () => void;
+  weeks: string[];
+  week: string;
+  onSelectWeek: (week: string) => void;
 }) {
+  const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [showWeekJump, setShowWeekJump] = useState(false);
+  const weekJumpButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Jumps to this same contractor in Time Away Management / Attendance,
+  // carrying this voucher's week over to Attendance (which is week-scoped
+  // like Payroll) so it opens the matching week's row.
+  function goToTimeAway() {
+    router.push(`/admin/time-off?openEmail=${encodeURIComponent(row.email)}`);
+  }
+  function goToAttendance() {
+    router.push(`/admin/attendance?openEmail=${encodeURIComponent(row.email)}&week=${rangeFrom}`);
+  }
 
   // Same button either processes this contractor for the first time or
   // re-saves an already-"Processed" one — only the label/wording changes,
   // the save itself is identical (an upsert on email+weekStart).
   const canProcess = row.status === "Reviewed" || row.status === "Processed";
   const isReprocess = row.status === "Processed";
-  // Once "Processed", the voucher is a frozen document: every figure below
-  // comes straight from the saved process_weekly_payroll snapshot rather
-  // than being recomputed from today's live Contractor Details/Time
-  // Off/Attendance data (which is exactly what "hasChangedSinceProcessed"
-  // would flag as drifted).
+  // Once "Processed", the voucher is a frozen document: every figure below —
+  // including Contractor Name and Role — comes straight from the saved
+  // process_weekly_payroll snapshot rather than being recomputed from
+  // today's live Contractor Details/Time Off/Attendance data (which is
+  // exactly what "hasChangedSinceProcessed" would flag as drifted). A
+  // contractor renamed or reassigned a new Role after processing won't
+  // change what an already-processed voucher shows unless it's re-processed.
   const usingSnapshot = row.status === "Processed" && !!processedSnapshot;
 
   async function handleProcessClick() {
@@ -886,6 +941,8 @@ function PayrollVoucherModal({
   // "Processed", otherwise computed live exactly as before.
   const figures = usingSnapshot
     ? {
+        name: processedSnapshot!.name,
+        role: processedSnapshot!.role,
         regHours: processedSnapshot!.regHours,
         regOtHours: processedSnapshot!.regOtHours,
         rdOtHours: processedSnapshot!.rdOtHours,
@@ -930,6 +987,8 @@ function PayrollVoucherModal({
         const grossPay = live.grossPay + ptoPay + row.bonus + row.misc + row.retroPay + row.reim;
         const totalDeductions = row.cashAdvance + row.hmo + row.tax;
         return {
+          name: row.name,
+          role: row.role,
           regHours: live.regHours,
           regOtHours: live.regOtHours,
           rdOtHours: live.rdOtHours,
@@ -980,6 +1039,50 @@ function PayrollVoucherModal({
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
         <div className="p-4 md:p-5 text-sm text-slate-800">
+          <div className="flex justify-end mb-2">
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm overflow-x-auto">
+              <div className="flex gap-0.5">
+                {weeks.slice(0, 4).map((w) => (
+                  <button
+                    key={w}
+                    onClick={() => onSelectWeek(w)}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-md whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}
+                  >
+                    {weekLabel(w)}
+                  </button>
+                ))}
+              </div>
+              <div className="h-4 w-px mx-0.5 shrink-0 bg-slate-200" />
+              <div className="relative shrink-0">
+                <button
+                  ref={weekJumpButtonRef}
+                  onClick={() => setShowWeekJump((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-md whitespace-nowrap transition-colors ${showWeekJump ? "text-teal-700 bg-teal-50" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}
+                >
+                  <LuCalendar size={12} strokeWidth={2} />
+                  <span className="text-[10px] font-bold">Jump to Week</span>
+                </button>
+                {showWeekJump && (
+                  <WeekJumpDropdown
+                    anchorRef={weekJumpButtonRef}
+                    onApply={(d) => onSelectWeek(sundayOf(d))}
+                    onClose={() => setShowWeekJump(false)}
+                  />
+                )}
+              </div>
+              <div className="h-4 w-px mx-0.5 shrink-0 bg-slate-200" />
+              <select
+                value={week}
+                onChange={(e) => onSelectWeek(e.target.value)}
+                title="Select any week from the last few months, including previous months"
+                className="h-6 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-bold text-slate-600 outline-none focus:ring-2 focus:ring-teal-500"
+              >
+                {weeks.map((w) => (
+                  <option key={w} value={w}>{weekLabel(w)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
           {canProcess && (
             <div className="flex items-center justify-start gap-3 mb-2.5">
               <button
@@ -1010,9 +1113,9 @@ function PayrollVoucherModal({
 
           {/* Contractor info */}
           <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs mt-2.5 mb-3">
-            <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{row.name}</span></p>
+            <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{figures.name}</span></p>
             <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
-            <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{row.role}</span></p>
+            <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{figures.role}</span></p>
             <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.weeklyRate)}</span></p>
           </div>
 
@@ -1126,7 +1229,21 @@ function PayrollVoucherModal({
             Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
           </p>
 
-          <div className="flex justify-end mt-3">
+          <div className="flex justify-end gap-2 mt-3">
+            <button
+              onClick={goToTimeAway}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              title="Open in Time Away Management"
+            >
+              <LuCalendarDays size={13} strokeWidth={2} /> Time Away
+            </button>
+            <button
+              onClick={goToAttendance}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
+              title="Open in Attendance"
+            >
+              <LuFingerprint size={13} strokeWidth={2} /> Attendance
+            </button>
             <button
               onClick={onClose}
               className="px-4 py-1.5 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"

@@ -243,6 +243,7 @@ export async function processWeeklyPayroll(
 // here is purely for the frozen voucher display.
 export type ProcessedSnapshot = {
   processedAt: string;
+  name: string;
   department: string;
   role: string;
   restDay: string;
@@ -286,11 +287,12 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
   const sb = getSupabase();
   const { data, error } = await sb
     .from(PROCESS_TABLE)
-    .select("email, processedAt, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
+    .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
     .eq("weekStart", weekStart);
   if (error || !data) return {};
   return Object.fromEntries(data.map((r) => [String(r.email), {
     processedAt: String(r.processedAt),
+    name: String(r.name),
     department: String(r.department),
     role: String(r.role),
     restDay: String(r.restDay ?? ""),

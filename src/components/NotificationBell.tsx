@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
-  LuBell, LuX, LuFileClock, LuUserX, LuClock, LuCake, LuMegaphone, LuLoader,
+  LuBell, LuX, LuFileClock, LuUserX, LuClock, LuCake, LuMegaphone, LuLoader, LuCircleAlert,
 } from "react-icons/lu";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "@/app/admin/contractors/actions";
 import { fetchAnnouncements } from "@/app/admin/announcements/actions";
+import { fetchAlerts } from "@/app/admin/settings/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 
@@ -56,6 +57,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
   const [lateRows, setLateRows] = useState<AlertRow[]>([]);
   const [birthdaysToday, setBirthdaysToday] = useState<BirthdayRow[]>([]);
   const [announcementsToday, setAnnouncementsToday] = useState<AnnouncementRow[]>([]);
+  const [alertsToday, setAlertsToday] = useState<{ name: string }[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   // The "+N more" popup below is portaled to document.body, outside ref's
@@ -86,12 +88,19 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
       const now = new Date();
 
       try {
-        const [contractors, leaveRequests, announcements] = await Promise.all([
+        const [contractors, leaveRequests, announcements, alerts] = await Promise.all([
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetchAllLeaveRequestsAdmin().catch(() => []),
           fetchAnnouncements().catch(() => []),
+          fetchAlerts().catch(() => []),
         ]);
         if (!active) return;
+
+        setAlertsToday(
+          alerts
+            .filter((a) => a.alertDate === todayLocal)
+            .map((a) => ({ name: a.name }))
+        );
 
         setPendingApprovals(
           leaveRequests
@@ -177,7 +186,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
     return () => { active = false; };
   }, []);
 
-  const totalCount = pendingApprovals.length + absentRows.length + lateRows.length + birthdaysToday.length + announcementsToday.length;
+  const totalCount = pendingApprovals.length + absentRows.length + lateRows.length + birthdaysToday.length + announcementsToday.length + alertsToday.length;
 
   // Each item links straight to that specific record — PTO into Time Away's
   // existing ?open= contractor-detail deep link, Absent/Late into Attendance
@@ -185,6 +194,11 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
   // no per-contractor detail view to deep-link into, so those stay plain text
   // under the section's own "view all" link.
   const sections = [
+    {
+      key: "alert", label: "Alerts Today", icon: LuCircleAlert, count: alertsToday.length,
+      color: "text-red-600 bg-red-50", href: "/admin/settings",
+      items: alertsToday.map((r): NotificationItem => ({ text: r.name })),
+    },
     {
       key: "pending", label: "Pending Approvals", icon: LuFileClock, count: pendingApprovals.length,
       color: "text-amber-600 bg-amber-50", href: "/admin/time-off?status=Pending",

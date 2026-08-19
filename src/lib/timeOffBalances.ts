@@ -117,6 +117,34 @@ function latestResetDateFor(date: Date, cutoff: CutoffDate) {
   return date >= cutoffThisYear ? cutoffThisYear : new Date(date.getFullYear() - 1, cutoff.month, cutoff.day);
 }
 
+// Local-calendar "YYYY-MM-DD" (deliberately not toISOString(), which converts
+// to UTC and can shift the date depending on timezone) — matches how
+// parseDate() above reads these strings back.
+function formatDateIso(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// Advance PTO/Birthday Leave and Advance Sick Leave are manually-granted
+// amounts with no time-based accrual formula, so — unlike PTO/Sick Leave
+// Accrual, which is recomputed fresh from hireDate on every call — resetting
+// them on the same Cut Off Time schedule needs a stored marker
+// (advanceLeaveResetAt, the cutoff cycle last reset for) to fire exactly once
+// per cutoff crossing. Without it, checking again after the cutoff has
+// already passed would keep wiping out Advance Leave newly granted since.
+// Returns the cycle's cutoff date (to stamp as the new advanceLeaveResetAt)
+// when a reset is due, or null when this cycle's reset already happened.
+export function advanceLeaveResetDueAt(
+  lastResetAt: string | null,
+  cutoff: CutoffDate,
+  today: Date = new Date()
+): string | null {
+  const latestReset = latestResetDateFor(today, cutoff);
+  const lastResetDate = lastResetAt ? parseDate(lastResetAt) : null;
+  if (lastResetDate && lastResetDate >= latestReset) return null;
+  return formatDateIso(latestReset);
+}
+
 export function roundBalance(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -187,33 +215,6 @@ export function calculatePtoBalance(hireDate: string, cutoff: CutoffDate = DEFAU
 
 export function calculateSickLeaveBalance(hireDate: string, cutoff: CutoffDate = DEFAULT_CUTOFF) {
   return calculatePolicyBalance(hireDate, SICK_LEAVE_MONTHLY_ACCRUAL, SICK_LEAVE_HALF_MONTH_ACCRUAL, cutoff);
-}
-
-// Once a contractor's real PTO accrual has a full day (>=8h) available,
-// any outstanding Advance PTO/Birthday Leave balance is wiped entirely —
-// both the remaining pool (Time) and the running Used total — since the
-// advance mechanism exists only to cover a shortfall and there's nothing
-// left to cover once PTO has caught up. Independent of the Sick Leave
-// bucket (mirrors the independent PTO/Sick eligibility check that gates
-// granting a NEW advance leave request in the first place).
-export function resetAdvancePtoIfCaughtUp(
-  ptoAvailable: number,
-  currentBirthdayLeave: number,
-  currentBirthdayLeaveUsed: number
-): { birthdayLeave: number; birthdayLeaveUsed: number } {
-  if (ptoAvailable >= 8) return { birthdayLeave: 0, birthdayLeaveUsed: 0 };
-  return { birthdayLeave: currentBirthdayLeave, birthdayLeaveUsed: currentBirthdayLeaveUsed };
-}
-
-// Mirrors resetAdvancePtoIfCaughtUp for the Advance Sick Leave bucket —
-// resets once Sick Leave accrual alone has a full day (>=8h) available.
-export function resetAdvanceSickLeaveIfCaughtUp(
-  sickLeaveAvailable: number,
-  currentAdvanceSickLeave: number,
-  currentAdvanceSickLeaveUsed: number
-): { advanceSickLeave: number; advanceSickLeaveUsed: number } {
-  if (sickLeaveAvailable >= 8) return { advanceSickLeave: 0, advanceSickLeaveUsed: 0 };
-  return { advanceSickLeave: currentAdvanceSickLeave, advanceSickLeaveUsed: currentAdvanceSickLeaveUsed };
 }
 
 // Fixed-Ind only — a Special Leave Credit grant expires 60 days after the

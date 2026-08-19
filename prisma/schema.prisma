@@ -243,6 +243,9 @@ model ContractorProfile {
   specialLeaveCredits  Float    @default(0) // admin-granted bonus leave balance, drawable via Leave Override
   specialLeaveUsed     Float    @default(0)
   specialLeaveGrantedAt String? // "YYYY-MM-DD" of the most recent grant — Fixed-Ind credits expire (reset to 0) 60 days after this date
+  outstandingLeaveBalance   Float @default(0) // snapshot of PTO Available when negative, written by the Time Away "Process" action — untouched while PTO Available is non-negative
+  outstandingMedicalBalance Float @default(0) // snapshot of Medical Unavailability Available when negative, written by the Time Away "Process" action — untouched while it's non-negative
+  advanceLeaveResetAt String? // "YYYY-MM-DD" cutoff cycle Advance PTO/Birthday Leave + Advance Sick Leave were last zeroed for — see resetAdvanceLeaveIfDue/advanceLeaveResetDueAt (api/cron/leave-balance-reset)
 
   @@map("contractor_profiles")
 }
@@ -582,6 +585,18 @@ model CutOffTime {
   updatedAt       DateTime @updatedAt
 
   @@map("cut_off_time")
+}
+
+/// Custom admin-defined alerts (Settings → Notifications) — a name + a
+/// one-time scheduled date. Replaces the old static notification-toggle list.
+model AdminAlert {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  alertDate String   @map("alert_date") // "YYYY-MM-DD"
+  alertTime String   @default("") @map("alert_time") // "HH:MM", optional (empty = no specific time)
+  createdAt DateTime @default(now())
+
+  @@map("admin_alerts")
 }
 
 /// Per-employee per-DAY attendance review snapshot (admin picks the date) —

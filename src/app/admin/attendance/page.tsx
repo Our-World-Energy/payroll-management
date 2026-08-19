@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminTheme } from "@/components/AdminThemeContext";
-import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer } from "react-icons/lu";
+import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer, LuCalendarDays, LuBanknote } from "react-icons/lu";
 import { toast } from "sonner";
 import { CONTRACTORS, TIME_OFF, type AttendanceRecord } from "@/lib/data";
 import { parseIsoDate, datesBetween, addDaysIso, sundayOf, recentWeeks, weekLabel, arizonaTodayIso } from "@/lib/weekUtils";
@@ -61,6 +61,9 @@ type ReviewModalProps = {
   allHolidays: HolidayEntry[];
   allLeaveRequests: AdminLeaveRequest[];
   isWeekEnded: boolean;
+  weeks: string[];
+  week: string;
+  onSelectWeek: (week: string) => void;
 };
 
 type WorksnapEntry = {
@@ -565,27 +568,29 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
   return isRestDay && isUsHoliday && isApproved ? base + rdOtMinutes : base;
 }
 
-// OT is never redistributed between days, with two exceptions, both drawing
-// from the same WEEK's Regular OT pool first, then — if that pool alone
-// isn't enough — the week's HO OT pool as a fallback (RD OT is never
-// touched, by either tier):
-//   1. A day that is itself Approved (approvedByDate — Attendance Review's
-//      own daily decision, not the leave request's approval) AND covered by
-//      an approved PTO Half Day / Sick Leave Half Day (240 min, via
-//      halfDayOffByDate) may borrow the remaining 240 min actually needed
-//      to complete the day, never more.
-//   2. A day that is itself Approved, has no leave request of any kind
-//      covering it (halfDayOffByDate <= 0), and isn't a rest day, full-day
-//      PTO/Sick Leave, US Holiday, or before a mid-week hire's start
-//      (shortfallEligibleByDate) may borrow whatever's still needed to
-//      reach the full 480-min day — this covers a day with no Worksnap
-//      Time logged at all, or logged time still short of 480.
+// OT is never redistributed between days, with one exception, drawing from
+// the same WEEK's Regular OT pool first, then — if that pool alone isn't
+// enough — the week's HO OT pool as a fallback (RD OT is never touched):
+//   A day that is itself Approved (approvedByDate — Attendance Review's own
+//   daily decision, not the leave request's approval), has no leave request
+//   of any kind covering it (halfDayOffByDate <= 0), and isn't a rest day,
+//   full-day PTO/Sick Leave, a Holiday (US or local), or before a mid-week
+//   hire's start (shortfallEligibleByDate) may borrow whatever's still
+//   needed to reach the full 480-min day — this covers a day with no
+//   Worksnap Time logged at all, or logged time still short of 480.
+// A day already covered by an approved PTO Half Day / Sick Leave Half Day
+// (halfDayOffByDate > 0) never borrows, regardless of how much was actually
+// worked — that Work Status already accounts for the missing half of the
+// day (credited separately as Time Off Time), so Required Regular Hours for
+// that day is the reduced (worked-only) amount, not the full 480; pulling in
+// OT/HO OT to "complete" it would just reclassify another day's premium-rate
+// hours as regular-rate for no reason.
 // If the day itself isn't Approved yet, nothing is borrowed and it stays
 // blank/unfilled, same as any other not-yet-approved day. Any OT a lending
 // day doesn't actually give up stays credited to that same day. This
 // guarantees a later re-save of an already-approved week can never
-// retroactively shift OT away from the day it was earned, beyond these two
-// bounded exceptions.
+// retroactively shift OT away from the day it was earned, beyond this one
+// bounded exception.
 function weeklyEvaluatedRegularAllocation(
   weekDates: string[],
   regularTimeByDate: Record<string, number>,
@@ -610,17 +615,12 @@ function weeklyEvaluatedRegularAllocation(
 
     const regularTime = regularTimeByDate[date] ?? 0;
     const halfDayCredit = halfDayOffByDate[date] ?? 0;
-    let missing: number;
-    if (halfDayCredit > 0) {
-      const alreadyCovered = regularTime + halfDayCredit;
-      if (alreadyCovered >= 480) return;
-      // Hard-capped at 240 — halfDayCredit is always 240, so 480 minus that
-      // (minus any of the day's own worked minutes) can never exceed 240.
-      missing = Math.min(480 - alreadyCovered, 240);
-    } else {
-      if (!shortfallEligibleByDate[date] || regularTime >= 480) return;
-      missing = 480 - regularTime;
-    }
+    // A Work Status (approved half-day leave) already accounts for the rest
+    // of this day — never borrow into it, no matter how little was worked.
+    if (halfDayCredit > 0) return;
+
+    if (!shortfallEligibleByDate[date] || regularTime >= 480) return;
+    let missing = 480 - regularTime;
 
     for (const otDate of weekDates) {
       if (missing <= 0) break;
@@ -756,7 +756,10 @@ function buildBulkApproveDaySnapshots(
     hoOtByDate[date] = hoOtMinutes;
     approvedByDate[date] = dailyDecisionStatus === "Approved";
     halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
-    shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, row.hireDate) && timeValueToMinutes(holidayTime) <= 0;
+    // isHolidayDay (US or local), not just the US-specific holidayTime check
+    // — a local holiday already accounts for the day too, so it shouldn't be
+    // topped up with borrowed OT/HO OT any more than a US holiday should.
+    shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, row.hireDate) && !isHolidayDay;
   });
 
   const regularAllocationByDate = weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate, hoOtByDate);
@@ -1002,9 +1005,25 @@ function payCategoryForAttendanceRow(row: AttendanceRow) {
   return "-";
 }
 
-function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests, isWeekEnded }: ReviewModalProps) {
+function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSave, usaHolidays, allHolidays, allLeaveRequests, isWeekEnded, weeks, week, onSelectWeek }: ReviewModalProps) {
+  const router = useRouter();
+  const [showWeekJump, setShowWeekJump] = useState(false);
+  const weekJumpButtonRef = useRef<HTMLButtonElement>(null);
   const name = record.name;
   const role = record.role;
+  const contractorEmail = role.includes("@") ? role : "";
+  // Jumps straight to this same contractor in Time Away Management / Payroll
+  // (carrying the currently-reviewed week over to Payroll, since its voucher
+  // is week-scoped) — a shortcut instead of re-searching for them there.
+  function goToTimeAway() {
+    if (!contractorEmail) return;
+    router.push(`/admin/time-off?openEmail=${encodeURIComponent(contractorEmail)}`);
+  }
+  function goToPayroll() {
+    if (!contractorEmail) return;
+    const weekStart = weekDates[0] ?? "";
+    router.push(`/admin/payroll?openEmail=${encodeURIComponent(contractorEmail)}${weekStart ? `&week=${weekStart}` : ""}`);
+  }
   const actual = record.actualMinutes;
   const variance = record.actualMinutes - record.standardMinutes;
   const type = record.actualMinutes > record.standardMinutes ? "overtime" : "undertime";
@@ -1144,7 +1163,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       hoOtByDate[date] = hoOtMinutes;
       approvedByDate[date] = dailyDecisionStatus === "Approved";
       halfDayOffByDate[date] = isApprovedHalfDayLeaveDate(date, leaveRequests) ? 240 : 0;
-      shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, hireDate) && timeValueToMinutes(holidayTime) <= 0;
+      // isHolidayDay (US or local), not just the US-specific holidayTime check
+      // — a local holiday already accounts for the day too, so it shouldn't be
+      // topped up with borrowed OT/HO OT any more than a US holiday should.
+      shortfallEligibleByDate[date] = !isRestDay && !isFullTimeOffDay && !isBeforeHireDate(date, hireDate) && !isHolidayDay;
     });
 
     return weeklyEvaluatedRegularAllocation(weekDates, regularTimeByDate, regularOtByDate, rdOtByDate, approvedByDate, halfDayOffByDate, shortfallEligibleByDate, hoOtByDate);
@@ -1179,6 +1201,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     ["Typical Non-Working Days", restDaysForAttendanceRow(record as AttendanceRow)],
     ["Worksnap Actual Time", formatMinutesAsMins(worksnapTotalMinutes)],
     ["Total Completion Time", totalCompletionTimeMinutes > 0 ? formatMinutesAsMins(totalCompletionTimeMinutes) : attendanceTimeValue(dashIfEmpty(record.checkOut))],
+    ["Regular Hours", formatMinutesAsHours(totalEvaluatedRegularMinutes)],
   ];
 
   // Resets the locally-edited review fields whenever a different
@@ -1380,7 +1403,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative flex max-h-[97vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 px-4 py-2 sm:px-5 sm:py-2.5 border-b border-[#003527] bg-[#003527]">
+        <div className="flex items-center justify-between gap-4 px-4 py-2 sm:px-5 sm:py-2.5 border-b border-[#003527] bg-[#003527]">
           <div>
             <h3 className="text-xs font-bold text-white">Attendance Review</h3>
             <p className="mt-0.5 text-base font-bold text-white">{name}</p>
@@ -1391,14 +1414,80 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               {(record as AttendanceRow).hireDate ? ` / ${fmtHireDate((record as AttendanceRow).hireDate)}` : ""}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
-            aria-label="Close attendance review"
-            title="Close"
-          >
-            <LuX size={15} strokeWidth={2} />
-          </button>
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-3">
+            <div className="flex items-center gap-1 rounded-xl border border-white/15 bg-white/5 p-1 shadow-sm overflow-x-auto">
+              <div className="flex gap-1">
+                {weeks.slice(0, 4).map((w) => (
+                  <button
+                    key={w}
+                    onClick={() => onSelectWeek(w)}
+                    className={`px-2.5 py-1 text-[11px] font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-white text-[#003527] shadow-sm" : "text-green-200 hover:text-white hover:bg-white/10"}`}
+                  >
+                    {weekLabel(w)}
+                  </button>
+                ))}
+              </div>
+              <div className="h-5 w-px mx-0.5 shrink-0 bg-white/20" />
+              <div className="relative shrink-0">
+                <button
+                  ref={weekJumpButtonRef}
+                  onClick={() => setShowWeekJump((v) => !v)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg whitespace-nowrap transition-colors ${showWeekJump ? "text-white bg-white/15" : "text-green-200 hover:text-white hover:bg-white/10"}`}
+                >
+                  <LuCalendar size={13} strokeWidth={2} />
+                  <span className="text-[11px] font-bold">Jump to Week</span>
+                </button>
+                {showWeekJump && (
+                  <WeekJumpDropdown
+                    anchorRef={weekJumpButtonRef}
+                    onApply={(d) => onSelectWeek(sundayOf(d))}
+                    onClose={() => setShowWeekJump(false)}
+                  />
+                )}
+              </div>
+              <div className="h-5 w-px mx-0.5 shrink-0 bg-white/20" />
+              <select
+                value={week}
+                onChange={(e) => onSelectWeek(e.target.value)}
+                title="Select any week from the last few months, including previous months"
+                className="h-7 shrink-0 rounded-lg border border-white/15 bg-white/5 px-2 text-[11px] font-bold text-green-100 outline-none focus:ring-2 focus:ring-teal-400"
+              >
+                {weeks.map((w) => (
+                  <option key={w} value={w} className="text-slate-900">{weekLabel(w)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {contractorEmail && (
+                <>
+                  <button
+                    onClick={goToTimeAway}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
+                    aria-label="Open in Time Away Management"
+                    title="Open in Time Away Management"
+                  >
+                    <LuCalendarDays size={15} strokeWidth={2} />
+                  </button>
+                  <button
+                    onClick={goToPayroll}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
+                    aria-label="Open in Payroll"
+                    title="Open in Payroll"
+                  >
+                    <LuBanknote size={15} strokeWidth={2} />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={onClose}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-green-200 transition-colors hover:bg-[#064E3B] hover:text-white"
+                aria-label="Close attendance review"
+                title="Close"
+              >
+                <LuX size={15} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
         </div>
         {isLoadingReviewData && (
           <p className="flex items-center gap-1.5 px-5 py-1.5 text-xs font-medium text-teal-700 bg-teal-50 border-b border-teal-100 sm:px-6">
@@ -1418,9 +1507,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         )}
         <div className="min-h-0 overflow-y-auto px-5 py-2.5 sm:px-6 sm:py-3">
           <div className="sticky top-0 z-40 bg-white">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
               {details.map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-slate-200 p-2 bg-slate-50">
+                <div key={label} className={`rounded-xl border border-slate-200 p-2 bg-slate-50 ${label === "Total Completion Time" || label === "Regular Hours" ? "sm:col-span-1" : "sm:col-span-2"}`}>
                   <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
                   <p className={`text-xs font-medium mt-0.5 break-words ${detailValueClassName(label, value)}`}>{value}</p>
                 </div>
@@ -2955,6 +3044,14 @@ export default function AttendancePage() {
     setWeek((current) => current || list[0]);
   }, []);
 
+  // Deep link from Time Away Management / Payroll's "Open in Attendance"
+  // shortcuts — carries over the week being viewed there, overriding the
+  // current-week anchor above once the param is present.
+  useEffect(() => {
+    const weekParam = searchParams.get("week");
+    if (weekParam) setWeek(weekParam);
+  }, [searchParams]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -3068,6 +3165,34 @@ export default function AttendancePage() {
   // instead (banner + Retry), and the table stays empty until a real load
   // succeeds.
   const attendanceRows: AttendanceRow[] = worksnapRows;
+
+  // Deep link from Time Away Management / Payroll's "Open in Attendance"
+  // shortcuts — resolves by email (row.role holds it for real contractor
+  // rows) since neither of those pages knows this page's own row identity.
+  // Waits for attendanceRows (for the requested week, see the week-param
+  // effect above) to load before it can find a match.
+  useEffect(() => {
+    const openEmail = searchParams.get("openEmail");
+    if (openEmail && attendanceRows.length > 0 && !reviewTarget) {
+      const match = attendanceRows.find((r) => r.role.toLowerCase() === openEmail.toLowerCase());
+      if (match) setReviewTarget({ record: match, source: "view" });
+      router.replace("/admin/attendance");
+    }
+  }, [searchParams, attendanceRows, reviewTarget, router]);
+
+  // Keeps the open Attendance Review modal in sync with its week selector:
+  // switching weeks from inside the modal changes this page's own `week`
+  // state, which reloads attendanceRows for that week — once the new data
+  // lands, swap in the matching row so the modal reflects the newly
+  // selected week instead of staying frozen on the week it was opened for.
+  useEffect(() => {
+    if (!reviewTarget) return;
+    const match = attendanceRows.find((r) => r.contractorId === reviewTarget.record.contractorId);
+    if (match && match !== reviewTarget.record) {
+      setReviewTarget((current) => (current ? { ...current, record: match } : current));
+    }
+  }, [attendanceRows, reviewTarget]);
+
   const filteredAttendanceRows = attendanceRows.filter((row) => {
     const query = nameSearch.trim().toLowerCase();
     const department = departmentForAttendanceRow(row);
@@ -3716,6 +3841,9 @@ export default function AttendancePage() {
           allHolidays={allHolidays}
           allLeaveRequests={leaveRequests}
           isWeekEnded={isSelectedWeekEnded}
+          weeks={weeks}
+          week={week}
+          onSelectWeek={setWeek}
         />
       )}
 

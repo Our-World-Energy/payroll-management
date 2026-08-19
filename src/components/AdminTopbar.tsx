@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { NotificationBell } from "./NotificationBell";
+import { NAV_ITEMS } from "@/lib/adminNav";
 
 export function AdminTopbar() {
   const { toggle } = useSidebar();
@@ -15,13 +16,48 @@ export function AdminTopbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  const matches = query.trim()
+    ? NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : NAV_ITEMS;
+
+  function goTo(href: string) {
+    router.push(href);
+    setQuery("");
+    setSearchOpen(false);
+  }
+
+  function onSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlighted((i) => Math.min(i + 1, matches.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (matches[highlighted]) goTo(matches[highlighted].href);
+    } else if (e.key === "Escape") {
+      setSearchOpen(false);
+    }
+  }
+
   useEffect(() => {
     function onOutsideClick(e: MouseEvent) {
       if (!menuRef.current?.contains(e.target as Node)) setMenuOpen(false);
+      if (!searchRef.current?.contains(e.target as Node)) setSearchOpen(false);
     }
     document.addEventListener("mousedown", onOutsideClick);
     return () => document.removeEventListener("mousedown", onOutsideClick);
   }, []);
+
+  useEffect(() => {
+    setHighlighted(0);
+  }, [query]);
 
   function switchToContractor() {
     setSwitching(true);
@@ -46,7 +82,7 @@ export function AdminTopbar() {
         </button>
 
         {/* Search */}
-        <div className="relative w-full max-w-xs sm:max-w-sm md:max-w-md">
+        <div ref={searchRef} className="relative w-full max-w-xs sm:max-w-sm md:max-w-md">
           <LuSearch
             size={16}
             strokeWidth={1.75}
@@ -54,9 +90,39 @@ export function AdminTopbar() {
           />
           <input
             type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setSearchOpen(true)}
+            onKeyDown={onSearchKeyDown}
             placeholder="Search insights..."
             className={`w-full pl-10 pr-4 py-2 border border-transparent rounded-lg text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all ${dark ? "bg-white/5 text-white placeholder:text-white/30" : "bg-slate-50 text-slate-800"}`}
           />
+
+          {searchOpen && (
+            <div className={`absolute left-0 top-full mt-1.5 w-full rounded-lg shadow-xl border overflow-hidden z-50 ${
+              dark ? "bg-[#0f1a15] border-white/10" : "bg-white border-slate-200"
+            }`}>
+              {matches.length === 0 ? (
+                <p className={`px-4 py-3 text-sm ${dark ? "text-white/40" : "text-slate-400"}`}>No matching pages</p>
+              ) : (
+                matches.map((item, i) => (
+                  <button
+                    key={item.href}
+                    onClick={() => goTo(item.href)}
+                    onMouseEnter={() => setHighlighted(i)}
+                    className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-left transition-colors cursor-pointer ${
+                      i === highlighted
+                        ? dark ? "bg-white/10 text-white" : "bg-emerald-50 text-emerald-700"
+                        : dark ? "text-white/80" : "text-slate-700"
+                    }`}
+                  >
+                    <item.Icon size={15} strokeWidth={1.75} className="shrink-0" />
+                    {item.label}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
 

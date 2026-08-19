@@ -233,6 +233,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       advanceSickLeaveUsed: initial?.advanceSickLeaveUsed ?? 0,
       specialLeaveCredits: initial?.specialLeaveCredits ?? 0,
       specialLeaveUsed:    initial?.specialLeaveUsed    ?? 0,
+      outstandingLeaveBalance:   initial?.outstandingLeaveBalance   ?? 0,
+      outstandingMedicalBalance: initial?.outstandingMedicalBalance ?? 0,
     };
 
     setIsSaving(true);

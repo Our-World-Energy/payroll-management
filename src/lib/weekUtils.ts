@@ -46,6 +46,18 @@ export function arizonaTodayIso(): string {
   }).format(new Date());
 }
 
+// The current date + time in Arizona (America/Phoenix, no DST), as
+// { date: "YYYY-MM-DD", time: "HH:MM" } (24h) — for comparing "now" against
+// a scheduled trigger date/time, not just a calendar day.
+export function arizonaNowParts(): { date: string; time: string } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Phoenix", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
+}
+
 // The most recent N weeks (Sun→Sat), most-recent first, anchored to the
 // current Arizona week. e.g. on 2026-07-01 → ["2026-06-28", "2026-06-21", …].
 export function recentWeeks(count = 12): string[] {

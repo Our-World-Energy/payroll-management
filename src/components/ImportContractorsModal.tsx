@@ -203,6 +203,8 @@ function rowToContractor(data: Record<string, string>): Contractor {
     advanceSickLeaveUsed: 0,
     specialLeaveCredits: 0,
     specialLeaveUsed:    0,
+    outstandingLeaveBalance:   0,
+    outstandingMedicalBalance: 0,
   };
 }
 

@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 
 const TABLE = "contractor_profiles";
@@ -93,6 +93,8 @@ function toContractor(row: Record<string, unknown>): Contractor {
     specialLeaveCredits: Number(row.specialLeaveCredits ?? 0),
     specialLeaveUsed:    Number(row.specialLeaveUsed    ?? 0),
     specialLeaveGrantedAt: row.specialLeaveGrantedAt == null ? null : String(row.specialLeaveGrantedAt),
+    outstandingLeaveBalance:   Number(row.outstandingLeaveBalance   ?? 0),
+    outstandingMedicalBalance: Number(row.outstandingMedicalBalance ?? 0),
   };
 }
 
@@ -312,9 +314,6 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const birthdayLeave     = existing?.birthdayLeave     ?? (c.birthdayLeave     ?? 0);
   const birthdayLeaveUsed = existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0);
 
-  const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
-  const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
-
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -351,10 +350,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
     ptoUsed,
     sickLeaveBalance,
     sickLeaveUsed,
-    birthdayLeave:        ptoAdvanceReset.birthdayLeave,
-    birthdayLeaveUsed:    ptoAdvanceReset.birthdayLeaveUsed,
-    advanceSickLeave:     sickAdvanceReset.advanceSickLeave,
-    advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
+    birthdayLeave,
+    birthdayLeaveUsed,
+    advanceSickLeave,
+    advanceSickLeaveUsed,
     specialLeaveCredits: c.specialLeaveCredits ?? 0,
     specialLeaveUsed:    c.specialLeaveUsed    ?? 0,
   }).eq("uid", c.uid);
@@ -421,16 +420,181 @@ export async function backfillLeaveBalances(): Promise<{ updated: number }> {
     const ptoUsed           = row.ptoUsed           ?? 0;
     const birthdayLeave     = row.birthdayLeave     ?? 0;
     const birthdayLeaveUsed = row.birthdayLeaveUsed ?? 0;
-    const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoBalance - ptoUsed, birthdayLeave, birthdayLeaveUsed);
-    const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveBalance - sickLeaveUsed, advanceSickLeave, advanceSickLeaveUsed);
     await sb.from(TABLE).update({
       ptoBalance, ptoUsed, sickLeaveBalance, sickLeaveUsed,
-      birthdayLeave: ptoAdvanceReset.birthdayLeave,
-      birthdayLeaveUsed: ptoAdvanceReset.birthdayLeaveUsed,
-      advanceSickLeave: sickAdvanceReset.advanceSickLeave,
-      advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
+      birthdayLeave,
+      birthdayLeaveUsed,
+      advanceSickLeave,
+      advanceSickLeaveUsed,
     }).eq("uid", row.uid);
     updated++;
+  }
+  return { updated };
+}
+
+// Zeroes Advance PTO/Birthday Leave and Advance Sick Leave once per Cut Off
+// Time cycle — the same annual boundary PTO/Sick Leave Accrual resets on
+// (Settings → Time Away Settings, defaulting to March 1st/end of February).
+// Unlike the accrual formulas, these are manually-granted amounts with no
+// time-based formula, so advanceLeaveResetAt marks the cutoff cycle each
+// contractor was last reset for — a contractor already reset this cycle is
+// left untouched, so Advance Leave granted after the cutoff survives this
+// running again before the next one. Called daily by api/cron/leave-balance-reset.
+export async function resetAdvanceLeaveIfDue(): Promise<{ updated: number }> {
+  const sb = getSupabase();
+  const { data, error } = await sb.from(TABLE)
+    .select("uid, birthdayLeave, birthdayLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, advanceLeaveResetAt");
+  if (error) throw new Error(error.message);
+
+  const cutoff = cutoffFromSaved(await fetchCutOffTime());
+  let updated = 0;
+  for (const row of data ?? []) {
+    const resetDueIso = advanceLeaveResetDueAt(row.advanceLeaveResetAt ?? null, cutoff);
+    if (!resetDueIso) continue;
+    const { error: updateError } = await sb.from(TABLE).update({
+      birthdayLeave: 0,
+      birthdayLeaveUsed: 0,
+      advanceSickLeave: 0,
+      advanceSickLeaveUsed: 0,
+      advanceLeaveResetAt: resetDueIso,
+    }).eq("uid", row.uid);
+    if (updateError) throw new Error(updateError.message);
+    updated++;
+  }
+  return { updated };
+}
+
+// Snapshot of a currently-negative PTO/Medical Unavailability Available onto
+// contractor_profiles, run on demand from the Time Away "Process" action
+// (not live-computed like the balances themselves) so the deficit an admin
+// saw at process time is preserved even if later usage brings Available back
+// to zero or positive. Only ever written while negative — a row whose
+// Available is non-negative is left untouched entirely, never reset to 0.
+// Stored as a positive magnitude (e.g. -8 saves as 8) since these are
+// "outstanding" deduction amounts, not signed balances.
+export async function processOutstandingBalances(
+  entries: { uid: string; ptoAvailable: number; sickLeaveAvailable: number }[]
+): Promise<{ updated: number }> {
+  const sb = getSupabase();
+  let updated = 0;
+  for (const entry of entries) {
+    const fields: Record<string, number> = {};
+    if (entry.ptoAvailable < 0) fields.outstandingLeaveBalance = Math.abs(entry.ptoAvailable);
+    if (entry.sickLeaveAvailable < 0) fields.outstandingMedicalBalance = Math.abs(entry.sickLeaveAvailable);
+    if (Object.keys(fields).length === 0) continue;
+    const { error } = await sb.from(TABLE).update(fields).eq("uid", entry.uid);
+    if (error) throw new Error(error.message);
+    updated++;
+  }
+  return { updated };
+}
+
+// Clears the outstandingLeaveBalance/outstandingMedicalBalance snapshot back
+// to 0 for every contractor that has one on file — the Time Away "Reset"
+// action, only enabled once no contractor's PTO/Medical Unavailability
+// Available is currently negative (see negativeCount in ProcessTimeOffModal),
+// so this never wipes a deficit that's still outstanding.
+export async function resetOutstandingBalances(): Promise<{ updated: number }> {
+  const sb = getSupabase();
+  const { data, error } = await sb.from(TABLE)
+    .select("uid, outstandingLeaveBalance, outstandingMedicalBalance")
+    .or("outstandingLeaveBalance.neq.0,outstandingMedicalBalance.neq.0");
+  if (error) throw new Error(error.message);
+
+  let updated = 0;
+  for (const row of data ?? []) {
+    const { error: updateError } = await sb.from(TABLE).update({
+      outstandingLeaveBalance: 0,
+      outstandingMedicalBalance: 0,
+    }).eq("uid", row.uid);
+    if (updateError) throw new Error(updateError.message);
+    updated++;
+  }
+  return { updated };
+}
+
+// Zeroes ptoUsed/birthdayLeave/birthdayLeaveUsed (the PTO side) and
+// sickLeaveUsed/advanceSickLeave/advanceSickLeaveUsed (the Medical side) for
+// every contractor — the Time Away "Reset PTO Used / Sick Leave Used" action.
+//
+// Before zeroing each side, it captures that side's CURRENT deficit into
+// outstandingLeaveBalance/outstandingMedicalBalance — the same "negative
+// Available → positive magnitude" logic processOutstandingBalances uses for
+// the "Process" action, just run inline here instead of requiring Process to
+// have already been clicked. If Available on that side isn't negative,
+// Outstanding Balance is set to 0 (there's nothing owed). This replaces the
+// old behavior of skipping a side entirely while its Outstanding Balance was
+// still nonzero — that existed only because stale Used data could double
+// count against a stale Outstanding Balance; recomputing Outstanding Balance
+// fresh from live data here removes the need for that precondition.
+//
+// Archives that contractor's "Approved" requests of the matching leave
+// type(s) on each side — their hours were just zeroed out of the profile, so
+// leaving them sitting as "Approved" in Request History would be stale/
+// misleading. Pending requests are left alone (still awaiting a decision),
+// and Special Leave is untouched (its own separate bucket, not part of
+// PTO/Sick Leave Used at all). Does not touch ptoUsedImport/sickUsedImport.
+const PTO_SIDE_TYPES = ["PTO", "PTO Half Day", "Advance PTO/Birthday Leave"];
+const MEDICAL_SIDE_TYPES = ["Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Advance Sick Leave"];
+
+export async function resetUsedHours(): Promise<{ updated: number }> {
+  const sb = getSupabase();
+  const cutoff = cutoffFromSaved(await fetchCutOffTime());
+  const { data, error } = await sb.from(TABLE)
+    .select("uid, email, hireDate, ptoUsed, pto_used_import, sickLeaveUsed, sick_used_import, birthdayLeave, birthdayLeaveUsed, advanceSickLeave, advanceSickLeaveUsed, outstandingLeaveBalance, outstandingMedicalBalance");
+  if (error) throw new Error(error.message);
+
+  const now = new Date().toISOString();
+  let updated = 0;
+  for (const row of data ?? []) {
+    const hireDate = String(row.hireDate ?? "");
+    if (!hireDate) continue;
+
+    const ptoUsedImport = Number(row.pto_used_import ?? 0);
+    const sickUsedImport = Number(row.sick_used_import ?? 0);
+    const birthdayLeaveUsed = Number(row.birthdayLeaveUsed ?? 0);
+    const advanceSickLeaveUsed = Number(row.advanceSickLeaveUsed ?? 0);
+
+    const ptoBalance = calculatePtoBalance(hireDate, cutoff);
+    const sickLeaveBalance = calculateSickLeaveBalance(hireDate, cutoff);
+    const effectivePtoUsed = (ptoUsedImport > 0 ? ptoUsedImport : Number(row.ptoUsed ?? 0)) + birthdayLeaveUsed;
+    const effectiveSickUsed = (sickUsedImport > 0 ? sickUsedImport : Number(row.sickLeaveUsed ?? 0)) + advanceSickLeaveUsed;
+    const ptoAvailableRaw = ptoBalance - effectivePtoUsed;
+    const sickAvailableRaw = sickLeaveBalance - effectiveSickUsed;
+
+    const newOutstandingLeaveBalance = ptoAvailableRaw < 0 ? Math.abs(ptoAvailableRaw) : 0;
+    const newOutstandingMedicalBalance = sickAvailableRaw < 0 ? Math.abs(sickAvailableRaw) : 0;
+    const currentOutstandingLeaveBalance = row.outstandingLeaveBalance ?? 0;
+    const currentOutstandingMedicalBalance = row.outstandingMedicalBalance ?? 0;
+
+    const fields: Record<string, number> = {};
+    let ptoSideTouched = false;
+    let medicalSideTouched = false;
+
+    if (row.ptoUsed) { fields.ptoUsed = 0; ptoSideTouched = true; }
+    if (row.birthdayLeave) { fields.birthdayLeave = 0; ptoSideTouched = true; }
+    if (row.birthdayLeaveUsed) { fields.birthdayLeaveUsed = 0; ptoSideTouched = true; }
+    if (newOutstandingLeaveBalance !== currentOutstandingLeaveBalance) { fields.outstandingLeaveBalance = newOutstandingLeaveBalance; ptoSideTouched = true; }
+
+    if (row.sickLeaveUsed) { fields.sickLeaveUsed = 0; medicalSideTouched = true; }
+    if (row.advanceSickLeave) { fields.advanceSickLeave = 0; medicalSideTouched = true; }
+    if (row.advanceSickLeaveUsed) { fields.advanceSickLeaveUsed = 0; medicalSideTouched = true; }
+    if (newOutstandingMedicalBalance !== currentOutstandingMedicalBalance) { fields.outstandingMedicalBalance = newOutstandingMedicalBalance; medicalSideTouched = true; }
+
+    if (Object.keys(fields).length === 0) continue;
+    const { error: updateError } = await sb.from(TABLE).update(fields).eq("uid", row.uid);
+    if (updateError) throw new Error(updateError.message);
+    updated++;
+
+    const email = String(row.email ?? "");
+    if (email && ptoSideTouched) {
+      await sb.from(LEAVE_TABLE).update({ status: "Archived", updatedAt: now })
+        .eq("email", email).eq("status", "Approved").in("type", PTO_SIDE_TYPES);
+    }
+    if (email && medicalSideTouched) {
+      await sb.from(LEAVE_TABLE).update({ status: "Archived", updatedAt: now })
+        .eq("email", email).eq("status", "Approved").in("type", MEDICAL_SIDE_TYPES);
+    }
   }
   return { updated };
 }
@@ -766,6 +930,64 @@ export async function createAdvanceLeaveOverride(params: {
 // the request was Approved, its balance deduction is reversed first so
 // deleting it never leaves ptoUsed/sickLeaveUsed permanently inflated with
 // no record left to explain the number.
+// Shared by delete and archive below — if the request being removed from view
+// was "Approved", its balance deduction needs reversing exactly once,
+// regardless of which of the two actually happens to the row afterward.
+async function reverseApprovedBalanceIfNeeded(
+  sb: ReturnType<typeof getSupabase>,
+  req: { email: unknown; type: unknown; status: unknown; ptoUsedHours: unknown; sickLeaveUsedHours: unknown; specialLeaveUsedHours: unknown }
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (String(req.status) !== "Approved") return { ok: true };
+  const type = String(req.type);
+
+  // Advance PTO/Birthday Leave and Advance Sick Leave don't run through the
+  // normal PTO/Sick/Special buckets (see createAdvanceLeaveOverride) — they
+  // need their own reversal against birthdayLeaveUsed/advanceSickLeaveUsed
+  // instead, or leaveBucketFor would misroute them into the normal
+  // sickLeaveUsed field and corrupt it.
+  if (type === "Advance PTO/Birthday Leave" || type === "Advance Sick Leave") {
+    const isPto = type === "Advance PTO/Birthday Leave";
+    const hours = Number(req.sickLeaveUsedHours) || 0;
+
+    if (hours > 0) {
+      const { data: profile, error: profileErr } = await sb
+        .from(TABLE)
+        .select("birthdayLeaveUsed, advanceSickLeaveUsed")
+        .eq("email", String(req.email))
+        .single();
+      if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+
+      const currentUsed = isPto ? Number(profile.birthdayLeaveUsed ?? 0) : Number(profile.advanceSickLeaveUsed ?? 0);
+      const { error: profileUpdateErr } = isPto
+        ? await sb.from(TABLE).update({ birthdayLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email))
+        : await sb.from(TABLE).update({ advanceSickLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email));
+      if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+    }
+  } else {
+    const bucket = leaveBucketFor(type);
+    const { usedField, hoursColumn } = LEAVE_BUCKET_FIELDS[bucket];
+    const hours = Number(req[hoursColumn as "ptoUsedHours" | "sickLeaveUsedHours" | "specialLeaveUsedHours"]) || 0;
+
+    if (hours > 0) {
+      const { data: profile, error: profileErr } = await sb
+        .from(TABLE)
+        .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
+        .eq("email", String(req.email))
+        .single();
+      if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+
+      const currentUsed = Number(profile[usedField] ?? 0);
+      const { error: profileUpdateErr } = await sb
+        .from(TABLE)
+        .update({ [usedField]: Math.max(currentUsed - hours, 0) })
+        .eq("email", String(req.email));
+      if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+    }
+  }
+
+  return { ok: true };
+}
+
 export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
 
@@ -776,57 +998,34 @@ export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
 
-  if (String(req.status) === "Approved") {
-    const type = String(req.type);
-
-    // Advance PTO/Birthday Leave and Advance Sick Leave don't run through the
-    // normal PTO/Sick/Special buckets (see createAdvanceLeaveOverride) — they
-    // need their own reversal against birthdayLeaveUsed/advanceSickLeaveUsed
-    // instead, or leaveBucketFor would misroute them into the normal
-    // sickLeaveUsed field and corrupt it.
-    if (type === "Advance PTO/Birthday Leave" || type === "Advance Sick Leave") {
-      const isPto = type === "Advance PTO/Birthday Leave";
-      const hours = Number(req.sickLeaveUsedHours) || 0;
-
-      if (hours > 0) {
-        const { data: profile, error: profileErr } = await sb
-          .from(TABLE)
-          .select("birthdayLeaveUsed, advanceSickLeaveUsed")
-          .eq("email", String(req.email))
-          .single();
-        if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
-
-        const currentUsed = isPto ? Number(profile.birthdayLeaveUsed ?? 0) : Number(profile.advanceSickLeaveUsed ?? 0);
-        const { error: profileUpdateErr } = isPto
-          ? await sb.from(TABLE).update({ birthdayLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email))
-          : await sb.from(TABLE).update({ advanceSickLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email));
-        if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
-      }
-    } else {
-      const bucket = leaveBucketFor(type);
-      const { usedField, hoursColumn } = LEAVE_BUCKET_FIELDS[bucket];
-      const hours = Number(req[hoursColumn]) || 0;
-
-      if (hours > 0) {
-        const { data: profile, error: profileErr } = await sb
-          .from(TABLE)
-          .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
-          .eq("email", String(req.email))
-          .single();
-        if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
-
-        const currentUsed = Number(profile[usedField] ?? 0);
-        const { error: profileUpdateErr } = await sb
-          .from(TABLE)
-          .update({ [usedField]: Math.max(currentUsed - hours, 0) })
-          .eq("email", String(req.email));
-        if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
-      }
-    }
-  }
+  const reversal = await reverseApprovedBalanceIfNeeded(sb, req);
+  if (!reversal.ok) return reversal;
 
   const { error: deleteErr } = await sb.from(LEAVE_TABLE).delete().eq("id", id);
   if (deleteErr) return { ok: false, error: deleteErr.message };
+
+  return { ok: true };
+}
+
+// Same balance reversal as delete above — an archived request is treated
+// exactly like a deleted one for balance purposes, clearing whatever it had
+// deducted — but the row itself is kept and just re-stamped with status
+// "Archived" instead of being removed from contractor_leave_requests.
+export async function archiveLeaveRequestAdmin(id: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+
+  const { data: req, error: fetchErr } = await sb
+    .from(LEAVE_TABLE)
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
+    .eq("id", id)
+    .single();
+  if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
+
+  const reversal = await reverseApprovedBalanceIfNeeded(sb, req);
+  if (!reversal.ok) return reversal;
+
+  const { error: updateErr } = await sb.from(LEAVE_TABLE).update({ status: "Archived", updatedAt: new Date().toISOString() }).eq("id", id);
+  if (updateErr) return { ok: false, error: updateErr.message };
 
   return { ok: true };
 }

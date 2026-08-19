@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader, LuSettings } from "react-icons/lu";
+import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader, LuSettings, LuSave, LuPencil } from "react-icons/lu";
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
 import {
   addOfficeLocation, removeOfficeLocation,
@@ -12,6 +12,7 @@ import {
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
   fetchCutOffTime, saveCutOffTime,
+  fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
@@ -26,6 +27,21 @@ const MONTHS = [
 // given 29 days to allow the leap-year date rather than locking it out.
 function daysInMonth(monthIndex: number) {
   return new Date(2000, monthIndex + 1, 0).getDate();
+}
+
+// Parses "YYYY-MM-DD" as a local date (not UTC, which could shift the day
+// depending on timezone) before formatting for display.
+function fmtAlertDate(iso: string): string {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return iso;
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Parses "HH:MM" (24h, from <input type="time">) into a 12h "h:MM AM/PM" display string.
+function fmtAlertTime(time: string): string {
+  const [hour, minute] = time.split(":").map(Number);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return time;
+  return new Date(2000, 0, 1, hour, minute).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 export default function SettingsPage() {
@@ -50,7 +66,6 @@ export default function SettingsPage() {
     departments: false,
     currencies: false,
     timeOff: false,
-    notifications: false,
   });
   function toggleSection(key: string) {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -107,6 +122,50 @@ export default function SettingsPage() {
     } finally {
       setCutoffSaving(false);
     }
+  }
+
+  // ── Reset Time Off trigger date+time (a single scheduled entry — once
+  // saved, the form collapses into a summary with an Edit button rather than
+  // offering to add another) ─────────────────────────────────────────────────
+  const RESET_TIME_OFF_ALERT_NAME = "Reset Time Off";
+  const [alerts, setAlerts] = useState<AdminAlert[]>([]);
+  const [newAlertDate, setNewAlertDate] = useState("");
+  const [newAlertTime, setNewAlertTime] = useState("");
+  const [isEditingAlert, setIsEditingAlert] = useState(false);
+  const currentAlert = alerts[0] ?? null;
+
+  useEffect(() => {
+    fetchAlerts().then(setAlerts);
+  }, []);
+
+  function startEditingAlert() {
+    setNewAlertDate(currentAlert?.alertDate ?? "");
+    setNewAlertTime(currentAlert?.alertTime ?? "");
+    setIsEditingAlert(true);
+  }
+
+  async function handleSaveAlert() {
+    if (!newAlertDate) return;
+    const prev = alerts;
+    if (currentAlert) {
+      const optimistic: AdminAlert = { ...currentAlert, alertDate: newAlertDate, alertTime: newAlertTime };
+      setAlerts([optimistic]);
+      setIsEditingAlert(false);
+      await run(() => updateAlert(currentAlert.id, newAlertDate, newAlertTime), () => setAlerts(prev));
+    } else {
+      const optimistic: AdminAlert = { id: crypto.randomUUID(), name: RESET_TIME_OFF_ALERT_NAME, alertDate: newAlertDate, alertTime: newAlertTime };
+      setAlerts([optimistic]);
+      setIsEditingAlert(false);
+      await run(() => addAlert(RESET_TIME_OFF_ALERT_NAME, newAlertDate, newAlertTime), () => setAlerts(prev));
+    }
+    fetchAlerts().then(setAlerts);
+  }
+
+  async function handleRemoveAlert(id: string) {
+    const prev = alerts;
+    setAlerts(alerts.filter((a) => a.id !== id));
+    setIsEditingAlert(false);
+    await run(() => removeAlert(id), () => setAlerts(prev));
   }
 
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, revertFn?: () => void) {
@@ -690,36 +749,58 @@ export default function SettingsPage() {
               </div>
               {cutoffError && <p className="mt-2 text-xs font-medium text-red-600">{cutoffError}</p>}
             </div>
-          </div>
-        )}
-      </section>
 
-      {/* Notifications */}
-      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <button
-          onClick={() => toggleSection("notifications")}
-          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
-        >
-          {openSections.notifications ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
-          <h4 className="text-base font-semibold text-[#003527]">Notifications</h4>
-        </button>
-        {openSections.notifications && (
-          <div className="px-6 py-5 space-y-3">
-            {[
-              "Email alerts for certification expiry",
-              "Notify admin on new leave requests",
-              "Weekly payroll summary digest",
-              "Absence alerts (same-day)",
-            ].map((label) => (
-              <label key={label} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0 cursor-pointer">
-                <span className="text-sm text-slate-700">{label}</span>
-                <div className="relative">
-                  <input type="checkbox" defaultChecked className="sr-only peer" />
-                  <div className="w-10 h-5 bg-slate-200 peer-checked:bg-teal-500 rounded-full transition-colors" />
-                  <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-all peer-checked:translate-x-5" />
+            <div className="mt-5 pt-5 border-t border-slate-100 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h5 className="text-sm font-semibold text-[#003527]">Scheduled Trigger Date</h5>
+                  <p className="text-xs text-slate-400 mt-0.5">Reset Time Off — the date and time it should fire.</p>
                 </div>
-              </label>
-            ))}
+                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${currentAlert ? "text-emerald-700 bg-emerald-50" : "text-slate-400 bg-slate-100"}`}>
+                  {currentAlert ? "Scheduled" : "Not scheduled"}
+                </span>
+              </div>
+              {isEditingAlert || !currentAlert ? (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="date"
+                    value={newAlertDate}
+                    onChange={(e) => setNewAlertDate(e.target.value)}
+                    className={`${INPUT} sm:w-48`}
+                  />
+                  <input
+                    type="time"
+                    value={newAlertTime}
+                    onChange={(e) => setNewAlertTime(e.target.value)}
+                    className={`${INPUT} sm:w-36`}
+                  />
+                  <button onClick={handleSaveAlert} disabled={busy || !newAlertDate}
+                    className="shrink-0 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+                    <LuSave size={15} strokeWidth={2.5} />Save
+                  </button>
+                  {currentAlert && (
+                    <button onClick={() => setIsEditingAlert(false)}
+                      className="shrink-0 px-4 py-2 text-sm font-semibold text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                      Cancel
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span className="text-sm text-slate-700">
+                    {currentAlert.name} — {fmtAlertDate(currentAlert.alertDate)}{currentAlert.alertTime ? ` ${fmtAlertTime(currentAlert.alertTime)}` : ""}
+                  </span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button onClick={startEditingAlert} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#003527] hover:underline">
+                      <LuPencil size={13} strokeWidth={2} />Edit
+                    </button>
+                    <button onClick={() => askConfirm(currentAlert.name, () => handleRemoveAlert(currentAlert.id))} className="text-slate-300 hover:text-red-500 transition-colors">
+                      <LuX size={14} strokeWidth={2.5} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </section>

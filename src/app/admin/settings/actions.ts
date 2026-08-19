@@ -340,3 +340,45 @@ export async function saveCutOffTime(monthName: string, monthNo: number): Promis
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+// ── Notification Alerts ─────────────────────────────────────────────────────
+// Custom admin-defined alerts (name + a one-time scheduled date) — replaces
+// the old static notification-toggle list on Settings.
+
+export type AdminAlert = { id: string; name: string; alertDate: string; alertTime: string };
+
+export async function fetchAlerts(): Promise<AdminAlert[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("admin_alerts")
+    .select("id, name, alert_date, alert_time")
+    .order("alert_date", { ascending: true });
+  if (error || !data) return [];
+  return data.map((r) => ({ id: String(r.id), name: String(r.name), alertDate: String(r.alert_date), alertTime: String(r.alert_time ?? "") }));
+}
+
+export async function addAlert(name: string, alertDate: string, alertTime: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("admin_alerts")
+    .insert({ id: crypto.randomUUID(), name: name.trim(), alert_date: alertDate, alert_time: alertTime });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function updateAlert(id: string, alertDate: string, alertTime: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("admin_alerts")
+    .update({ alert_date: alertDate, alert_time: alertTime })
+    .eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function removeAlert(id: string): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb.from("admin_alerts").delete().eq("id", id);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

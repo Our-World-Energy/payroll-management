@@ -4,7 +4,7 @@ import { fmtBalance } from "@/lib/timeOffBalances";
 export type TimeOffBalanceTone = "teal" | "orange" | "red" | "pink" | "blue" | "purple";
 
 const TONES: Record<TimeOffBalanceTone, {
-  cardBg: string; iconBg: string; title: string; label: string; value: string; bar: string; barTrack: string; pct: string;
+  cardBg: string; iconBg: string; title: string; label: string; value: string; bar: string; barTrack: string; pct: string; divider: string;
 }> = {
   red: {
     cardBg: "bg-red-50/70 border-red-200",
@@ -15,6 +15,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-red-500",
     barTrack: "bg-red-100",
     pct: "text-red-600",
+    divider: "border-red-200",
   },
   teal: {
     cardBg: "bg-teal-50/70 border-teal-100",
@@ -25,6 +26,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-teal-500",
     barTrack: "bg-teal-100",
     pct: "text-teal-600",
+    divider: "border-teal-200",
   },
   orange: {
     cardBg: "bg-orange-50/70 border-orange-100",
@@ -35,6 +37,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-orange-500",
     barTrack: "bg-orange-100",
     pct: "text-orange-600",
+    divider: "border-orange-200",
   },
   pink: {
     cardBg: "bg-pink-50/70 border-pink-200",
@@ -45,6 +48,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-pink-500",
     barTrack: "bg-pink-100",
     pct: "text-pink-600",
+    divider: "border-pink-200",
   },
   blue: {
     cardBg: "bg-blue-50/70 border-blue-200",
@@ -55,6 +59,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-blue-500",
     barTrack: "bg-blue-100",
     pct: "text-blue-600",
+    divider: "border-blue-200",
   },
   purple: {
     cardBg: "bg-purple-50/70 border-purple-200",
@@ -65,6 +70,7 @@ const TONES: Record<TimeOffBalanceTone, {
     bar: "bg-purple-500",
     barTrack: "bg-purple-100",
     pct: "text-purple-600",
+    divider: "border-purple-200",
   },
 };
 
@@ -73,7 +79,7 @@ const TONES: Record<TimeOffBalanceTone, {
 // Contractor Time Away Detail and Leave Override tabs (Time Away Management)
 // and the standalone Current/New Request Data page, so all three stay
 // visually identical.
-export function TimeOffBalanceCard({ icon, title, tone, accrued, used, available, accruedLabel = "Accrued" }: {
+export function TimeOffBalanceCard({ icon, title, tone, accrued, used, available, accruedLabel = "Accrued", outstandingBalance }: {
   icon: ReactNode;
   title: string;
   tone: TimeOffBalanceTone;
@@ -81,6 +87,7 @@ export function TimeOffBalanceCard({ icon, title, tone, accrued, used, available
   used: number;
   available: number;
   accruedLabel?: string;
+  outstandingBalance?: number;
 }) {
   const c = TONES[tone];
   const availPct = accrued > 0 ? Math.max(0, Math.min(100, Math.round((available / accrued) * 100))) : 0;
@@ -109,6 +116,12 @@ export function TimeOffBalanceCard({ icon, title, tone, accrued, used, available
           <div className={`h-full rounded-full ${c.bar}`} style={{ width: `${availPct}%` }} />
         </div>
         <span className={`text-xs font-bold tabular-nums shrink-0 ${c.pct}`}>{availPct}%</span>
+      </div>
+      <div className={`mt-4 flex items-center justify-between border-t pt-3 ${c.divider}`}>
+        <p className={`text-[10px] font-bold uppercase tracking-wider ${c.label}`}>Outstanding Balance</p>
+        <p className={`text-sm font-bold tabular-nums ${outstandingBalance ? "text-red-600" : c.value}`}>
+          {outstandingBalance == null ? "-" : `${fmtBalance(outstandingBalance)}h`}
+        </p>
       </div>
     </div>
   );

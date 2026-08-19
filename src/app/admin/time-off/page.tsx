@@ -7,19 +7,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
   LuShieldCheck, LuChevronLeft, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
-  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks,
+  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport,
+  fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
 } from "../contractors/actions";
-import { fetchCutOffTime } from "../settings/actions";
+import { fetchCutOffTime, fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetAdvancePtoIfCaughtUp, resetAdvanceSickLeaveIfCaughtUp, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
-import { arizonaTodayIso, addDaysIso } from "@/lib/weekUtils";
+import { arizonaTodayIso, addDaysIso, arizonaNowParts } from "@/lib/weekUtils";
 
 const HOURS_PER_DAY = 8;
 const TODAY = new Date();
@@ -324,16 +324,63 @@ type TimeOffRow = {
   specialLeaveUsed: number;
   specialLeaveAvailable: number;
   specialLeaveGrantedAt: string | null;
+  outstandingLeaveBalance: number;
+  outstandingMedicalBalance: number;
   unusedSickLeave: number;
   latestRequest: AdminLeaveRequest | null;
 };
 
-// Purely informational summary — counts contractors with any PTO/Sick Leave
-// usage on file this period. Doesn't save or change anything; just gives an
-// admin a quick snapshot before they go looking at individual rows.
-function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: () => void }) {
+// Summarizes current PTO/Sick Leave usage, and offers "Reset PTO Used / Sick
+// Leave Used" — see resetUsedHours for what that actually does.
+function ProcessTimeOffModal({
+  rows, onClose, onProcessed, dueAlert, onAlertResolved,
+}: {
+  rows: TimeOffRow[]; onClose: () => void; onProcessed: () => void;
+  dueAlert: AdminAlert | null; onAlertResolved: () => void;
+}) {
   const ptoCount = rows.filter((r) => r.ptoUsed > 0).length;
   const sickLeaveCount = rows.filter((r) => r.sickLeaveUsed > 0).length;
+  const negativeCount = rows.filter((r) => r.ptoAvailable < 0 || r.sickLeaveAvailable < 0).length;
+
+  // Auto-prompts the same confirmation below whenever this modal is opened
+  // with a due Scheduled Trigger Date already resolved by the page (Time Away
+  // Management checks for it as soon as it's opened, not just this modal —
+  // see the mount effect in TimeOffPage). Only an explicit Cancel (or
+  // Proceed) resolves the trigger, so simply closing this dialog leaves it
+  // due and it prompts again next time Time Away Management is opened.
+  const [showResetUsedConfirm, setShowResetUsedConfirm] = useState(!!dueAlert);
+  const [isResettingUsed, setIsResettingUsed] = useState(false);
+  const [resetUsedError, setResetUsedError] = useState("");
+  const [resetUsedCount, setResetUsedCount] = useState<number | null>(null);
+
+  // No precondition on the button itself — gated
+  // by an explicit confirmation step instead. Per-side (PTO vs Medical),
+  // resetUsedHours() leaves a contractor's fields untouched whenever their
+  // Outstanding Balance on that side is still negative, so a real
+  // unresolved deficit is never silently erased just because this ran.
+  async function handleResetUsed() {
+    setIsResettingUsed(true);
+    setResetUsedError("");
+    try {
+      const { updated } = await resetUsedHours();
+      if (dueAlert) { await removeAlert(dueAlert.id); onAlertResolved(); }
+      setResetUsedCount(updated);
+      setShowResetUsedConfirm(false);
+      onProcessed();
+    } catch (err) {
+      setResetUsedError(err instanceof Error ? err.message : "Failed to reset. Please try again.");
+    } finally {
+      setIsResettingUsed(false);
+    }
+  }
+
+  async function handleCancelResetUsed() {
+    if (dueAlert) {
+      await removeAlert(dueAlert.id);
+      onAlertResolved();
+    }
+    setShowResetUsedConfirm(false);
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -343,7 +390,7 @@ function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: (
           <h3 className="text-lg font-bold text-[#003527]">Process Time Away</h3>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <LuX size={18} strokeWidth={2} />
           </button>
@@ -359,17 +406,85 @@ function ProcessTimeOffModal({ rows, onClose }: { rows: TimeOffRow[]; onClose: (
             <span className="text-sm font-medium text-orange-700">Count of Medical Unavailability</span>
             <span className="text-sm font-bold text-orange-700">{sickLeaveCount}</span>
           </div>
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-red-50 border border-red-100">
+            <span className="text-sm font-medium text-red-700">Negative balances to save</span>
+            <span className="text-sm font-bold text-red-700">{negativeCount}</span>
+          </div>
         </div>
 
-        <div className="flex justify-end">
+        {resetUsedError && <p className="text-xs text-red-600 mb-3">{resetUsedError}</p>}
+        {resetUsedCount != null && !resetUsedError && (
+          <p className="text-xs text-emerald-600 mb-3">
+            Reset PTO Used / Sick Leave Used for {resetUsedCount} contractor{resetUsedCount !== 1 ? "s" : ""}.
+          </p>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Close
           </button>
+          <button
+            onClick={() => setShowResetUsedConfirm(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-red-700 border border-red-200 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
+          >
+            Reset PTO Used / Sick Leave Used
+          </button>
         </div>
       </div>
+
+      {/* Reset PTO Used / Sick Leave Used confirmation — a blunt, unconditional
+          bulk action, so it's gated by an explicit confirm step instead of a
+          balance precondition. */}
+      {showResetUsedConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isResettingUsed && handleCancelResetUsed()} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={handleCancelResetUsed}
+              disabled={isResettingUsed}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-red-50 text-red-500">
+                <LuTrash2 size={18} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Reset PTO Used / Sick Leave Used</h3>
+                {dueAlert && (
+                  <p className="text-xs font-semibold text-amber-600 mt-1">
+                    Scheduled to run {fmtDate(dueAlert.alertDate)}{dueAlert.alertTime ? ` ${dueAlert.alertTime}` : ""} — proceed or cancel this scheduled run.
+                  </p>
+                )}
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                  This will set PTO Used, Sick Leave Used, Advance PTO/Birthday Leave (Time and Used), and Advance Sick Leave (Time and Used) back to 0, and mark the matching Approved leave requests as Archived. Before resetting, any currently-negative Available is captured into Outstanding Balance first (same as Process) — otherwise Outstanding Balance is cleared to 0. It does not touch imported baselines, Pending requests, or Special Leave. This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={handleCancelResetUsed}
+                disabled={isResettingUsed}
+                className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleResetUsed}
+                disabled={isResettingUsed}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60"
+              >
+                {isResettingUsed && <LuLoader size={14} strokeWidth={2} className="animate-spin" />}
+                {isResettingUsed ? "Resetting…" : "Reset"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -403,6 +518,7 @@ export default function TimeOffPage() {
 
   const [specialHours, setSpecialHours] = useState("");
   const [specialReason, setSpecialReason] = useState("");
+  const [specialGrantDate, setSpecialGrantDate] = useState(arizonaTodayIso());
   const [isEditingSpecialBalance, setIsEditingSpecialBalance] = useState(false);
   const [editSpecialCredits, setEditSpecialCredits] = useState("");
   const [editSpecialUsed, setEditSpecialUsed] = useState("");
@@ -421,6 +537,28 @@ export default function TimeOffPage() {
 
   const [showUsedImportModal, setShowUsedImportModal] = useState(false);
   const [showProcessTimeOffModal, setShowProcessTimeOffModal] = useState(false);
+
+  // The Scheduled Trigger Date (Settings → Time Away Settings → Reset Time
+  // Off) is a one-time due date/time, not a recurring cron — checked as soon
+  // as an admin opens Time Away Management itself (not just Process Time
+  // Away), so a due trigger surfaces the moment they land here, however late.
+  const [dueAlert, setDueAlert] = useState<AdminAlert | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+    fetchAlerts().then((list) => {
+      if (isCancelled) return;
+      const alert = list[0];
+      if (!alert) return;
+      const now = arizonaNowParts();
+      const isDue = alert.alertDate < now.date || (alert.alertDate === now.date && alert.alertTime <= now.time);
+      if (isDue) {
+        setDueAlert(alert);
+        setShowProcessTimeOffModal(true);
+      }
+    });
+    return () => { isCancelled = true; };
+  }, []);
 
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
@@ -487,12 +625,18 @@ export default function TimeOffPage() {
     // PTO/Sick Leave used (birthdayLeaveUsed / advanceSickLeaveUsed) is always
     // added on top, so PTO Used / Sick Leave Used reflect total time taken
     // regardless of which pool (normal accrual or advance allotment) it drew from.
+    // outstandingLeaveBalance is intentionally not netted out of PTO Used
+    // here — it's shown separately as its own Outstanding Balance line
+    // instead. Sick Leave Used still nets outstandingMedicalBalance back out
+    // (floored at 0 so Used/Available/Accrued stay mutually consistent).
     const ptoUsed          = (c.ptoUsedImport > 0  ? c.ptoUsedImport  : c.ptoUsed) + c.birthdayLeaveUsed;
-    const sickLeaveUsed    = (c.sickUsedImport > 0 ? c.sickUsedImport : c.sickLeaveUsed) + c.advanceSickLeaveUsed;
+    const sickLeaveUsed    = Math.max(0, (c.sickUsedImport > 0 ? c.sickUsedImport : c.sickLeaveUsed) + c.advanceSickLeaveUsed - c.outstandingMedicalBalance);
     // Not floored at 0 — a negative Available (Used exceeds Accrual, e.g.
     // Accrual 0 with 8h Used) is shown as-is so it's visible instead of
-    // silently masked to 0.
-    const ptoAvailable       = roundBalance(ptoBalance - ptoUsed);
+    // silently masked to 0. outstandingLeaveBalance is deducted directly
+    // here instead of via ptoUsed (see above), so a still-outstanding
+    // deficit reduces PTO Available without inflating what's shown as Used.
+    const ptoAvailable       = roundBalance(ptoBalance - ptoUsed - c.outstandingLeaveBalance);
     const sickLeaveAvailable = roundBalance(sickLeaveBalance - sickLeaveUsed);
     // Fixed-Ind only — a Special Leave Credit grant expires 60 days after
     // it was added, live-resetting the credit pool to 0 (see
@@ -500,27 +644,22 @@ export default function TimeOffPage() {
     // resets above work — immediately, without waiting for a save.
     const specialLeaveReset = resetSpecialLeaveIfExpired(c.payCategory, c.specialLeaveGrantedAt, c.specialLeaveCredits, c.specialLeaveUsed);
     const specialLeaveAvailable = roundBalance(Math.max(specialLeaveReset.specialLeaveCredits - specialLeaveReset.specialLeaveUsed, 0));
-    // Live-computed the same way as ptoAvailable/sickLeaveAvailable above —
-    // once accrual alone covers a full day, the stale advance balance is
-    // masked to 0 here immediately rather than waiting for this contractor
-    // to be saved again (which is the only other place this actually resets
-    // in the stored data — see updateContractor/backfillLeaveBalances).
-    const ptoAdvanceReset  = resetAdvancePtoIfCaughtUp(ptoAvailable, c.birthdayLeave, c.birthdayLeaveUsed);
-    const sickAdvanceReset = resetAdvanceSickLeaveIfCaughtUp(sickLeaveAvailable, c.advanceSickLeave, c.advanceSickLeaveUsed);
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
       department: c.department, payCategory: c.payCategory, role: c.role, hireDate: c.hireDate,
       ptoBalance, ptoUsed, ptoUsedImport: c.ptoUsedImport, ptoAvailable,
       sickLeaveBalance, sickLeaveUsed, sickUsedImport: c.sickUsedImport, sickLeaveAvailable,
-      birthdayLeave:    ptoAdvanceReset.birthdayLeave,
-      birthdayLeaveUsed: ptoAdvanceReset.birthdayLeaveUsed,
-      advanceSickLeave: sickAdvanceReset.advanceSickLeave,
-      advanceSickLeaveUsed: sickAdvanceReset.advanceSickLeaveUsed,
+      birthdayLeave:    c.birthdayLeave,
+      birthdayLeaveUsed: c.birthdayLeaveUsed,
+      advanceSickLeave: c.advanceSickLeave,
+      advanceSickLeaveUsed: c.advanceSickLeaveUsed,
       specialLeaveCredits: specialLeaveReset.specialLeaveCredits,
       specialLeaveUsed:    specialLeaveReset.specialLeaveUsed,
       specialLeaveAvailable,
       specialLeaveGrantedAt: c.specialLeaveGrantedAt,
+      outstandingLeaveBalance: c.outstandingLeaveBalance,
+      outstandingMedicalBalance: c.outstandingMedicalBalance,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed, cutoff),
       latestRequest:    latestByEmail[c.email] ?? null,
     };
@@ -550,6 +689,21 @@ export default function TimeOffPage() {
     if (openId && rows.length > 0 && !selectedRowId) {
       setSelectedRowId(openId);
       setModalTab("info");
+      router.replace("/admin/time-off");
+    }
+  }, [searchParams, rows, selectedRowId, router]);
+
+  // Deep link from Attendance Review's "Open in Time Away Management"
+  // shortcut — resolves by email since Attendance only knows the contractor's
+  // email, not their contractor_profiles uid.
+  useEffect(() => {
+    const openEmail = searchParams.get("openEmail");
+    if (openEmail && rows.length > 0 && !selectedRowId) {
+      const match = rows.find((r) => r.email.toLowerCase() === openEmail.toLowerCase());
+      if (match) {
+        setSelectedRowId(match.id);
+        setModalTab("info");
+      }
       router.replace("/admin/time-off");
     }
   }, [searchParams, rows, selectedRowId, router]);
@@ -632,9 +786,31 @@ export default function TimeOffPage() {
                     <p className="text-xs text-white/50 mt-0.5">{selectedRow.email || "—"}</p>
                   </div>
                 </div>
-                <button onClick={() => setSelectedRowId(null)} className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
-                  <LuX size={18} strokeWidth={2} />
-                </button>
+                <div className="flex shrink-0 items-center gap-1">
+                  {selectedRow.email && (
+                    <>
+                      <button
+                        onClick={() => router.push(`/admin/attendance?openEmail=${encodeURIComponent(selectedRow.email)}`)}
+                        className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        aria-label="Open in Attendance"
+                        title="Open in Attendance"
+                      >
+                        <LuFingerprint size={18} strokeWidth={2} />
+                      </button>
+                      <button
+                        onClick={() => router.push(`/admin/payroll?openEmail=${encodeURIComponent(selectedRow.email)}`)}
+                        className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                        aria-label="Open in Payroll"
+                        title="Open in Payroll"
+                      >
+                        <LuBanknote size={18} strokeWidth={2} />
+                      </button>
+                    </>
+                  )}
+                  <button onClick={() => setSelectedRowId(null)} className="p-2 text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors">
+                    <LuX size={18} strokeWidth={2} />
+                  </button>
+                </div>
               </div>
 
               {/* Tabs */}
@@ -689,6 +865,7 @@ export default function TimeOffPage() {
                           accrued={selectedRow.ptoBalance}
                           used={selectedRow.ptoUsed}
                           available={selectedRow.ptoAvailable}
+                          outstandingBalance={selectedRow.outstandingLeaveBalance}
                         />
                       )}
                       <TimeOffBalanceCard
@@ -698,6 +875,7 @@ export default function TimeOffPage() {
                         accrued={selectedRow.sickLeaveBalance}
                         used={selectedRow.sickLeaveUsed}
                         available={selectedRow.sickLeaveAvailable}
+                        outstandingBalance={selectedRow.outstandingMedicalBalance}
                       />
                     </div>
 
@@ -728,7 +906,11 @@ export default function TimeOffPage() {
                   // Advance leave is available per-type, purely on current available
                   // balance — not on tenure. A brand-new hire and a long-tenured
                   // contractor who has simply run low both qualify the same way.
-                  const ptoAdvanceEligible  = !isRowIndia && selectedRow.ptoAvailable < 8;
+                  // Advance PTO/Birthday Leave is one-time-use only, though: once any
+                  // of it has actually been drawn on (birthdayLeaveUsed > 0), granting
+                  // it again is disabled until it's reset back to 0 (e.g. via Reset PTO
+                  // Used or the annual cutoff reset). Advance Medical has no such limit.
+                  const ptoAdvanceEligible  = !isRowIndia && selectedRow.ptoAvailable < 8 && selectedRow.birthdayLeaveUsed === 0;
                   const sickAdvanceEligible = selectedRow.sickLeaveAvailable < 8;
                   const advanceEligible = ptoAdvanceEligible || sickAdvanceEligible;
                   const eligibleLeaveTypes = [
@@ -1052,14 +1234,17 @@ export default function TimeOffPage() {
                     }
 
                     // Warn (rather than block outright) when this contractor already
-                    // has a non-rejected PTO/Sick Leave request overlapping these
-                    // dates — an admin override for the same days is very likely a
-                    // duplicate, but they may still need to apply it (e.g. correcting
-                    // a prior entry), so let them confirm instead of hard-blocking.
+                    // has a non-rejected, non-archived PTO/Sick Leave request
+                    // overlapping these dates — an admin override for the same days
+                    // is very likely a duplicate, but they may still need to apply
+                    // it (e.g. correcting a prior entry), so let them confirm
+                    // instead of hard-blocking. Rejected/Archived requests never
+                    // actually consumed these dates, so they don't count as a conflict.
                     if (!skipDuplicateCheck && (overrideBucket === "pto" || overrideBucket === "sickLeave")) {
                       const conflict = leaveRequests.find((r) =>
                         r.email === selectedRow.email &&
                         r.status !== "Rejected" &&
+                        r.status !== "Archived" &&
                         leaveBucketFor(r.type) === overrideBucket &&
                         r.startDate <= overrideEndDate &&
                         r.endDate >= overrideStartDate
@@ -1076,12 +1261,14 @@ export default function TimeOffPage() {
                     await submitOverride();
                   }
 
-                  // Every date already covered by an existing request for this
-                  // contractor — Current (Pending) or Historical (Approved/Rejected),
-                  // any status — so the Start/End Date calendars can red it out.
+                  // Every date already covered by an existing Pending or Approved
+                  // request for this contractor, so the Start/End Date calendars can
+                  // red it out. Rejected/Archived requests are excluded — they never
+                  // actually consumed these dates, so those dates stay selectable.
                   const requestedDates = new Set<string>();
                   for (const r of leaveRequests) {
                     if (r.email !== selectedRow.email) continue;
+                    if (r.status === "Rejected" || r.status === "Archived") continue;
                     const start = parseDate(r.startDate);
                     const end = parseDate(r.endDate);
                     if (!start || !end) continue;
@@ -1101,6 +1288,7 @@ export default function TimeOffPage() {
                             accrued={selectedRow.ptoBalance}
                             used={selectedRow.ptoUsed}
                             available={selectedRow.ptoAvailable}
+                            outstandingBalance={selectedRow.outstandingLeaveBalance}
                           />
                         )}
                         <TimeOffBalanceCard
@@ -1110,6 +1298,7 @@ export default function TimeOffPage() {
                           accrued={selectedRow.sickLeaveBalance}
                           used={selectedRow.sickLeaveUsed}
                           available={selectedRow.sickLeaveAvailable}
+                          outstandingBalance={selectedRow.outstandingMedicalBalance}
                         />
                       </div>
 
@@ -1168,15 +1357,16 @@ export default function TimeOffPage() {
                     const hoursToAdd = parseFloat(specialHours) || 0;
                     if (hoursToAdd <= 0) return;
                     const newCredits = selectedRow.specialLeaveCredits + hoursToAdd;
-                    // Stamps today as the grant date — for Fixed-Ind, this is
-                    // what the 60-day expiry (resetSpecialLeaveIfExpired) counts
-                    // from, so every new grant restarts the expiry clock.
-                    const grantedAt = arizonaTodayIso();
+                    const isFixedInd = selectedRow.payCategory.trim().toLowerCase() === "fixed-ind";
+                    // For Fixed-Ind, the admin-picked date is what the 60-day
+                    // expiry (resetSpecialLeaveIfExpired) counts from, so every
+                    // new grant restarts the expiry clock from that date.
+                    const grantedAt = isFixedInd ? (specialGrantDate || arizonaTodayIso()) : arizonaTodayIso();
                     await updateTimeOffUsage(selectedRow.id, { specialLeaveCredits: newCredits, specialLeaveGrantedAt: grantedAt });
                     setContractors((prev) => prev.map((c) =>
                       c.uid === selectedRow.id ? { ...c, specialLeaveCredits: newCredits, specialLeaveGrantedAt: grantedAt } : c
                     ));
-                    setSpecialHours(""); setSpecialReason("");
+                    setSpecialHours(""); setSpecialReason(""); setSpecialGrantDate(arizonaTodayIso());
                   }
 
                   function startEditSpecialBalance() {
@@ -1280,6 +1470,13 @@ export default function TimeOffPage() {
                           Grants an extra bonus leave balance for this contractor, on top of their regular PTO/Medical Unavailability — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
                         </p>
                         <div className="space-y-2">
+                          {selectedRow.payCategory.trim().toLowerCase() === "fixed-ind" && (
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Grant Date — 60-day expiry starts here <span className="text-red-400">*</span></p>
+                              <input type="date" value={specialGrantDate} onChange={(e) => setSpecialGrantDate(e.target.value)}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                          )}
                           <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                             <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours to Grant <span className="text-red-400">*</span></p>
                             <input type="number" min="1" value={specialHours} onChange={(e) => setSpecialHours(e.target.value)} placeholder="Enter hours e.g. 8"
@@ -1290,7 +1487,7 @@ export default function TimeOffPage() {
                             <textarea value={specialReason} onChange={(e) => setSpecialReason(e.target.value)} placeholder="Enter reason for this special leave grant..." rows={2}
                               className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
                           </div>
-                          <button onClick={applySpecialGrant} disabled={!specialHours || parseFloat(specialHours) <= 0}
+                          <button onClick={applySpecialGrant} disabled={!specialHours || parseFloat(specialHours) <= 0 || (selectedRow.payCategory.trim().toLowerCase() === "fixed-ind" && !specialGrantDate)}
                             className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
                             <LuCircleCheck size={15} strokeWidth={2} /> Apply Special Leave Credits
                           </button>
@@ -1440,6 +1637,9 @@ export default function TimeOffPage() {
         <ProcessTimeOffModal
           rows={rows}
           onClose={() => setShowProcessTimeOffModal(false)}
+          onProcessed={reloadData}
+          dueAlert={dueAlert}
+          onAlertResolved={() => setDueAlert(null)}
         />
       )}
 
@@ -1698,7 +1898,7 @@ export default function TimeOffPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
                       <button
-                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); }}
+                        onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); setSpecialGrantDate(arizonaTodayIso()); }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
                       >
                         <LuEye size={14} strokeWidth={1.75} /> View

@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2,
+  LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2, LuArchive,
   LuCalendarDays, LuShieldCheck, LuSearch, LuSlidersHorizontal, LuChevronDown,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin,
+  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin, archiveLeaveRequestAdmin,
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
@@ -64,7 +64,7 @@ function typeBadgeClass(type: string) {
     : "bg-amber-50 text-amber-700 border-amber-200";
 }
 
-const HISTORY_FILTERS = ["All", "Approved", "Rejected"] as const;
+const HISTORY_FILTERS = ["All", "Approved", "Rejected", "Archived"] as const;
 type HistoryFilter = typeof HISTORY_FILTERS[number];
 
 // Split into "current" (pending) and "historical" (decided) buckets
@@ -80,6 +80,8 @@ export default function ContractorTimeOffPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AdminLeaveRequest | null>(null);
   const [deleting,     setDeleting]     = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<AdminLeaveRequest | null>(null);
+  const [archiving,     setArchiving]     = useState(false);
   const [cutoff,       setCutoff]       = useState<CutoffDate>(DEFAULT_CUTOFF);
   const [pendingSearch, setPendingSearch] = useState("");
   const [historySearch, setHistorySearch] = useState("");
@@ -165,6 +167,20 @@ export default function ContractorTimeOffPage() {
     await loadData();
   }
 
+  async function confirmArchive() {
+    if (!archiveTarget) return;
+    setArchiving(true);
+    const result = await archiveLeaveRequestAdmin(archiveTarget.id);
+    setArchiving(false);
+    if (!result.ok) {
+      setErrorMessage(result.error ?? "Failed to archive request.");
+      setArchiveTarget(null);
+      return;
+    }
+    setArchiveTarget(null);
+    await loadData();
+  }
+
   // Live-computed from Engagement Start Date + the current Cut Off Time,
   // rather than trusting the stored snapshot — so a Cut Off Time change is
   // reflected immediately without waiting for this contractor to be saved again.
@@ -173,11 +189,18 @@ export default function ContractorTimeOffPage() {
   // baseline supersedes the computed value wherever it's set, and Advance
   // PTO/Sick Leave Used is always added on top so this matches what's shown
   // there instead of only reflecting the normal (non-advance) usage.
+  // outstandingLeaveBalance is intentionally not netted out of PTO Used here
+  // — it's shown separately as its own Outstanding Balance line instead.
+  // Sick Leave Used still nets outstandingMedicalBalance back out (floored
+  // at 0 so Used/Available/Accrued stay mutually consistent).
   const ptoUsed          = contractor ? (contractor.ptoUsedImport > 0 ? contractor.ptoUsedImport : contractor.ptoUsed) + contractor.birthdayLeaveUsed : 0;
-  // Not floored at 0 — a negative Available (Used exceeds Accrual) is shown as-is.
-  const ptoAvailable     = roundBalance(ptoBalance - ptoUsed);
+  // Not floored at 0 — a negative Available (Used exceeds Accrual) is shown
+  // as-is. outstandingLeaveBalance is deducted directly here instead of via
+  // ptoUsed (see above), so a still-outstanding deficit reduces PTO
+  // Available without inflating what's shown as Used.
+  const ptoAvailable     = contractor ? roundBalance(ptoBalance - ptoUsed - contractor.outstandingLeaveBalance) : 0;
   const sickBalance      = contractor ? calculateSickLeaveBalance(contractor.hireDate, cutoff) : 0;
-  const sickUsed         = contractor ? (contractor.sickUsedImport > 0 ? contractor.sickUsedImport : contractor.sickLeaveUsed) + contractor.advanceSickLeaveUsed : 0;
+  const sickUsed         = contractor ? Math.max(0, (contractor.sickUsedImport > 0 ? contractor.sickUsedImport : contractor.sickLeaveUsed) + contractor.advanceSickLeaveUsed - contractor.outstandingMedicalBalance) : 0;
   const sickAvailable    = roundBalance(sickBalance - sickUsed);
 
   if (!loading && !contractor) {
@@ -217,6 +240,7 @@ export default function ContractorTimeOffPage() {
             accrued={ptoBalance}
             used={ptoUsed}
             available={ptoAvailable}
+            outstandingBalance={contractor?.outstandingLeaveBalance}
           />
         )}
         <TimeOffBalanceCard
@@ -226,6 +250,7 @@ export default function ContractorTimeOffPage() {
           accrued={sickBalance}
           used={sickUsed}
           available={sickAvailable}
+          outstandingBalance={contractor?.outstandingMedicalBalance}
         />
       </div>
 
@@ -402,6 +427,7 @@ export default function ContractorTimeOffPage() {
                 <tbody className="divide-y divide-slate-100">
                   {filteredHistoricalRequests.map((req) => {
                     const isApproved = req.status === "Approved";
+                    const isArchived = req.status === "Archived";
                     return (
                       <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-5 py-4 whitespace-nowrap">
@@ -427,20 +453,31 @@ export default function ContractorTimeOffPage() {
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
                             isApproved
                               ? "bg-green-50 text-green-700 border border-green-200"
+                              : isArchived
+                              ? "bg-slate-100 text-slate-500 border border-slate-200"
                               : "bg-red-50 text-red-600 border border-red-200"
                           }`}>
-                            {isApproved ? <LuCircleCheck size={11} /> : <LuCircleX size={11} />}
+                            {isApproved ? <LuCircleCheck size={11} /> : isArchived ? <LuArchive size={11} /> : <LuCircleX size={11} />}
                             {req.status}
                           </span>
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">
-                          <button
-                            onClick={() => setDeleteTarget(req)}
-                            title="Delete request"
-                            className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          >
-                            <LuTrash2 size={15} strokeWidth={1.75} />
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setArchiveTarget(req)}
+                              title="Archive request"
+                              className="p-1.5 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                            >
+                              <LuArchive size={15} strokeWidth={1.75} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(req)}
+                              title="Delete request"
+                              className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                            >
+                              <LuTrash2 size={15} strokeWidth={1.75} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -521,6 +558,51 @@ export default function ContractorTimeOffPage() {
                 className="flex-1 py-2.5 bg-red-500 hover:bg-red-600 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60"
               >
                 {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archive confirmation */}
+      {archiveTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !archiving && setArchiveTarget(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <button
+              onClick={() => setArchiveTarget(null)}
+              disabled={archiving}
+              className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+            >
+              <LuX size={18} strokeWidth={2} />
+            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                <LuArchive size={18} strokeWidth={2} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#003527]">Archive Leave Request</h3>
+                <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
+                  This will mark the {leaveTypeDisplayLabel(archiveTarget.type)} request for {fmtDate(archiveTarget.startDate)} – {fmtDate(archiveTarget.endDate)} as Archived.
+                  {archiveTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
+                  {" "}The request itself stays on file — only its status changes.
+                </p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setArchiveTarget(null)}
+                disabled={archiving}
+                className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmArchive}
+                disabled={archiving}
+                className="flex-1 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60"
+              >
+                {archiving ? "Archiving…" : "Archive"}
               </button>
             </div>
           </div>

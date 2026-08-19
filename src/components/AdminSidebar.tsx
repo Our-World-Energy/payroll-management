@@ -3,28 +3,13 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  LuLayoutDashboard, LuHardHat, LuFingerprint, LuWallet,
-  LuCalendarX, LuChartBar, LuSettings, LuLogOut, LuUsers,
-  LuChevronLeft, LuChevronRight, LuSun, LuMoon,
+  LuLogOut, LuChevronLeft, LuChevronRight, LuSun, LuMoon,
 } from "react-icons/lu";
-import type { IconType } from "react-icons";
 import Image from "next/image";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { createClient } from "@/lib/supabase/client";
-
-type NavItem = { href: string; label: string; Icon: IconType };
-
-const NAV_ITEMS: NavItem[] = [
-  { href: "/admin",              label: "Dashboard",          Icon: LuLayoutDashboard },
-  { href: "/admin/contractors",  label: "Contractor Details", Icon: LuHardHat         },
-  { href: "/admin/time-off",     label: "Time Away Management",Icon: LuCalendarX       },
-  { href: "/admin/attendance",   label: "Attendance",         Icon: LuFingerprint     },
-  { href: "/admin/payroll",      label: "Payroll",            Icon: LuWallet          },
-  { href: "/admin/reports",      label: "Reports",            Icon: LuChartBar        },
-  { href: "/admin/users",        label: "User Management",    Icon: LuUsers           },
-  { href: "/admin/settings",     label: "Settings",           Icon: LuSettings        },
-];
+import { NAV_ITEMS } from "@/lib/adminNav";
 
 export function AdminSidebar() {
   const pathname = usePathname();
