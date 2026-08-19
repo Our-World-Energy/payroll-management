@@ -2,9 +2,12 @@
 // conversion used for the Holidays table's arizonaDate/timeZone columns and
 // the Holiday Calendar's regional mini-calendars.
 
+// India is deliberately mapped to Arizona's own zone rather than its true
+// local zone (Asia/Kolkata) — holidays/attendance for India are tracked on
+// US (Arizona) time, not India local time, unlike every other country here.
 export const COUNTRY_TIME_ZONES: Record<string, string> = {
   "United States": "America/Phoenix",
-  "India": "Asia/Kolkata",
+  "India": "America/Phoenix",
   "Mexico": "America/Mexico_City",
   "Philippines": "Asia/Manila",
   "Guatemala": "America/Guatemala",
