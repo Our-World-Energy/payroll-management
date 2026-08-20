@@ -402,11 +402,31 @@ model ContractorLeaveRequest {
   ptoUsedHours       Float    @default(0) // hours this request deducts from PTO Used if approved
   sickLeaveUsedHours Float    @default(0) // hours this request deducts from Sick Leave Used if approved
   specialLeaveUsedHours Float @default(0) // hours this request deducts from Special Leave Used if approved
+  specialLeaveGrantDeductions Json? // Hourly only — exact [{ grantId, hours }, …] breakdown of which SpecialLeaveGrant row(s) this request drew from, so delete/archive can reverse precisely. Null for every non-Hourly/legacy row.
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@index([email, createdAt])
   @@map("contractor_leave_requests")
+}
+
+/// Individually-tracked Special Leave grants — Hourly contractors only (every
+/// other pay category keeps using contractor_profiles.specialLeaveCredits/
+/// specialLeaveUsed/specialLeaveGrantedAt untouched). Drawn down oldest-
+/// grantDate-first via a Leave Override with type "Special Leave" — see
+/// planSpecialLeaveGrantDeduction in src/lib/timeOffBalances.ts.
+model SpecialLeaveGrant {
+  id             String   @id @default(uuid()) @db.Uuid
+  email          String
+  hours          Float
+  hoursUsed      Float    @default(0)
+  grantDate      String   // "YYYY-MM-DD"
+  note           String?
+  expirationDays Int?     // null = never expires
+  createdAt      DateTime @default(now())
+
+  @@index([email])
+  @@map("special_leave_grants")
 }
 
 /// Append-only historical log of every decided (Approved/Rejected) time-off

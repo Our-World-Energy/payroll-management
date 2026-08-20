@@ -324,7 +324,7 @@ export default function AdminPage() {
       {showAbsentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowAbsentModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 bg-[#003527]">
               <div>
                 <h3 className="text-lg font-bold text-white">Absent Today</h3>
@@ -337,12 +337,18 @@ export default function AdminPage() {
                 <LuX size={18} strokeWidth={2} />
               </button>
             </div>
-            <div className="overflow-auto">
-              <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
+            <div className="overflow-y-auto overflow-x-hidden">
+              <table className="w-full table-fixed text-left text-sm">
+                <colgroup>
+                  <col className="w-[30%]" />
+                  <col className="w-[35%]" />
+                  <col className="w-[20%]" />
+                  <col className="w-[15%]" />
+                </colgroup>
                 <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
                   <tr>
                     {["Name", "Assigned Team", "Date", "Status"].map((h) => (
-                      <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
+                      <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -353,8 +359,8 @@ export default function AdminPage() {
                     </tr>
                   ) : absentRows.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">{row.name}</td>
-                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.department}</td>
+                      <td className="px-5 py-3 font-semibold text-slate-900 break-words">{row.name}</td>
+                      <td className="px-5 py-3 text-slate-600 break-words">{row.department}</td>
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${

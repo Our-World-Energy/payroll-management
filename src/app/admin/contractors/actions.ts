@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved, planSpecialLeaveGrantDeduction, roundBalance, type SpecialLeaveGrantDeduction } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 
 const TABLE = "contractor_profiles";
@@ -640,6 +640,67 @@ export async function fetchAllLeaveRequestsAdmin(): Promise<AdminLeaveRequest[]>
   }));
 }
 
+const GRANTS_TABLE = "special_leave_grants";
+
+export type SpecialLeaveGrant = {
+  id: string;
+  email: string;
+  hours: number;
+  hoursUsed: number;
+  grantDate: string;
+  note: string | null;
+  expirationDays: number | null;
+  createdAt: string;
+};
+
+// Bulk-fetch-then-client-filter, same pattern as fetchAllLeaveRequestsAdmin —
+// Hourly-only (see time-off/page.tsx), but fetched for every contractor at
+// once rather than per-row.
+export async function fetchAllSpecialLeaveGrantsAdmin(): Promise<SpecialLeaveGrant[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from(GRANTS_TABLE)
+    .select("id, email, hours, hoursUsed, grantDate, note, expirationDays, createdAt")
+    .order("createdAt", { ascending: false });
+  if (error || !data) return [];
+  return data.map((r) => ({
+    id: String(r.id),
+    email: String(r.email),
+    hours: Number(r.hours ?? 0),
+    hoursUsed: Number(r.hoursUsed ?? 0),
+    grantDate: String(r.grantDate ?? ""),
+    note: r.note != null ? String(r.note) : null,
+    expirationDays: r.expirationDays != null ? Number(r.expirationDays) : null,
+    createdAt: String(r.createdAt),
+  }));
+}
+
+export async function addSpecialLeaveGrant(params: {
+  email: string;
+  hours: number;
+  grantDate: string;
+  note: string;
+  expirationDays: number | null;
+}): Promise<{ ok: boolean; error?: string; grant?: SpecialLeaveGrant }> {
+  if (params.hours <= 0) return { ok: false, error: "Hours must be greater than 0." };
+  const sb = getSupabase();
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const grant: SpecialLeaveGrant = {
+    id,
+    email: params.email,
+    hours: params.hours,
+    hoursUsed: 0,
+    grantDate: params.grantDate,
+    note: params.note.trim() || null,
+    expirationDays: params.expirationDays,
+    createdAt: now,
+  };
+  const { error } = await sb.from(GRANTS_TABLE).insert(grant);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, grant };
+}
+
 export async function updateLeaveRequestStatus(
   id: string,
   status: "Approved" | "Rejected"
@@ -723,6 +784,45 @@ export async function updateLeaveRequestStatus(
   return { ok: true };
 }
 
+// Hourly-only Special Leave drawdown — spends the oldest non-expired
+// grant(s) first (see planSpecialLeaveGrantDeduction), spanning into the
+// next-oldest grant if one alone doesn't cover hoursNeeded. Returns the
+// exact per-grant breakdown so the caller can stamp it on the leave request
+// for precise reversal later.
+async function deductSpecialLeaveGrantHours(
+  sb: ReturnType<typeof getSupabase>,
+  email: string,
+  hoursNeeded: number
+): Promise<{ ok: true; deductions: SpecialLeaveGrantDeduction[] } | { ok: false; error: string }> {
+  const { data: grants, error } = await sb
+    .from(GRANTS_TABLE)
+    .select("id, hours, hoursUsed, grantDate, expirationDays")
+    .eq("email", email);
+  if (error) return { ok: false, error: error.message };
+
+  const plan = planSpecialLeaveGrantDeduction(
+    (grants ?? []).map((g) => ({
+      id: String(g.id),
+      hours: Number(g.hours ?? 0),
+      hoursUsed: Number(g.hoursUsed ?? 0),
+      grantDate: String(g.grantDate ?? ""),
+      expirationDays: g.expirationDays != null ? Number(g.expirationDays) : null,
+    })),
+    hoursNeeded
+  );
+  if (!plan.ok) return plan;
+
+  for (const d of plan.deductions) {
+    const grant = grants!.find((g) => String(g.id) === d.grantId)!;
+    const { error: updErr } = await sb
+      .from(GRANTS_TABLE)
+      .update({ hoursUsed: roundBalance(Number(grant.hoursUsed ?? 0) + d.hours) })
+      .eq("id", d.grantId);
+    if (updErr) return { ok: false, error: updErr.message };
+  }
+  return { ok: true, deductions: plan.deductions };
+}
+
 // Admin-driven override — creates a leave request already Approved and
 // applies its balance deduction immediately, bypassing the normal
 // Pending -> Approve/Decline flow and the insufficient-balance check
@@ -771,19 +871,49 @@ export async function createLeaveOverride(params: {
 
   const hoursToAdd = hours;
   if (hoursToAdd > 0) {
-    const { data: profile, error: profileErr } = await sb
-      .from(TABLE)
-      .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
-      .eq("email", params.email)
-      .single();
-    if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+    if (bucket === "specialLeave") {
+      const { data: profile, error: profileErr } = await sb
+        .from(TABLE)
+        .select("payCategory, specialLeaveUsed")
+        .eq("email", params.email)
+        .single();
+      if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
 
-    const currentUsed = Number(profile[usedField] ?? 0);
-    const { error: profileUpdateErr } = await sb
-      .from(TABLE)
-      .update({ [usedField]: currentUsed + hoursToAdd })
-      .eq("email", params.email);
-    if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+      // Hourly and Fixed-Ind both use the multi-grant system; every other pay
+      // category (currently just Fixed-Mex) keeps the single scalar balance.
+      const payCategoryLower = String(profile.payCategory ?? "").trim().toLowerCase();
+      const usesGrants = payCategoryLower === "hourly" || payCategoryLower === "fixed-ind";
+      if (usesGrants) {
+        const result = await deductSpecialLeaveGrantHours(sb, params.email, hoursToAdd);
+        if (!result.ok) return { ok: false, error: result.error };
+        const { error: attachErr } = await sb
+          .from(LEAVE_TABLE)
+          .update({ specialLeaveGrantDeductions: result.deductions })
+          .eq("id", id);
+        if (attachErr) return { ok: false, error: attachErr.message };
+      } else {
+        const currentUsed = Number(profile.specialLeaveUsed ?? 0);
+        const { error: profileUpdateErr } = await sb
+          .from(TABLE)
+          .update({ specialLeaveUsed: currentUsed + hoursToAdd })
+          .eq("email", params.email);
+        if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+      }
+    } else {
+      const { data: profile, error: profileErr } = await sb
+        .from(TABLE)
+        .select("ptoUsed, sickLeaveUsed, specialLeaveUsed")
+        .eq("email", params.email)
+        .single();
+      if (profileErr || !profile) return { ok: false, error: profileErr?.message ?? "Contractor not found" };
+
+      const currentUsed = Number(profile[usedField] ?? 0);
+      const { error: profileUpdateErr } = await sb
+        .from(TABLE)
+        .update({ [usedField]: currentUsed + hoursToAdd })
+        .eq("email", params.email);
+      if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+    }
   }
 
   await logTimeOffRequestHistory(sb, {
@@ -935,7 +1065,7 @@ export async function createAdvanceLeaveOverride(params: {
 // regardless of which of the two actually happens to the row afterward.
 async function reverseApprovedBalanceIfNeeded(
   sb: ReturnType<typeof getSupabase>,
-  req: { email: unknown; type: unknown; status: unknown; ptoUsedHours: unknown; sickLeaveUsedHours: unknown; specialLeaveUsedHours: unknown }
+  req: { email: unknown; type: unknown; status: unknown; ptoUsedHours: unknown; sickLeaveUsedHours: unknown; specialLeaveUsedHours: unknown; specialLeaveGrantDeductions: unknown }
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (String(req.status) !== "Approved") return { ok: true };
   const type = String(req.type);
@@ -962,6 +1092,22 @@ async function reverseApprovedBalanceIfNeeded(
         ? await sb.from(TABLE).update({ birthdayLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email))
         : await sb.from(TABLE).update({ advanceSickLeaveUsed: Math.max(currentUsed - hours, 0) }).eq("email", String(req.email));
       if (profileUpdateErr) return { ok: false, error: profileUpdateErr.message };
+    }
+  } else if (type.startsWith("Special Leave") && Array.isArray(req.specialLeaveGrantDeductions) && req.specialLeaveGrantDeductions.length > 0) {
+    // Hourly grant-based reversal — the presence of a non-empty
+    // specialLeaveGrantDeductions array is itself the Hourly discriminator
+    // (only createLeaveOverride's Hourly branch ever populates it), so no
+    // separate payCategory lookup is needed. Reverses the EXACT amount taken
+    // from each grant at deduction time, which stays correct even if grants
+    // have since been edited/added, unlike guessing a reversal order.
+    for (const d of req.specialLeaveGrantDeductions as { grantId: string; hours: number }[]) {
+      const { data: grant, error: grantErr } = await sb.from(GRANTS_TABLE).select("hoursUsed").eq("id", d.grantId).single();
+      if (grantErr || !grant) continue; // grant row no longer exists — skip rather than fail the whole reversal
+      const { error: updErr } = await sb
+        .from(GRANTS_TABLE)
+        .update({ hoursUsed: Math.max(0, Number(grant.hoursUsed ?? 0) - d.hours) })
+        .eq("id", d.grantId);
+      if (updErr) return { ok: false, error: updErr.message };
     }
   } else {
     const bucket = leaveBucketFor(type);
@@ -993,7 +1139,7 @@ export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean
 
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours, specialLeaveGrantDeductions")
     .eq("id", id)
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };
@@ -1016,7 +1162,7 @@ export async function archiveLeaveRequestAdmin(id: string): Promise<{ ok: boolea
 
   const { data: req, error: fetchErr } = await sb
     .from(LEAVE_TABLE)
-    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours")
+    .select("email, type, status, ptoUsedHours, sickLeaveUsedHours, specialLeaveUsedHours, specialLeaveGrantDeductions")
     .eq("id", id)
     .single();
   if (fetchErr || !req) return { ok: false, error: fetchErr?.message ?? "Request not found" };

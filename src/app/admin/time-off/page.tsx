@@ -6,16 +6,17 @@ import { toast } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronLeft, LuChevronRight, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
+  LuShieldCheck, LuChevronLeft, LuChevronRight, LuChevronDown, LuChevronUp, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote,
 } from "react-icons/lu";
 import {
   fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
+  fetchAllSpecialLeaveGrantsAdmin, addSpecialLeaveGrant, type SpecialLeaveGrant,
 } from "../contractors/actions";
 import { fetchCutOffTime, fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -324,6 +325,7 @@ type TimeOffRow = {
   specialLeaveUsed: number;
   specialLeaveAvailable: number;
   specialLeaveGrantedAt: string | null;
+  specialLeaveGrants: SpecialLeaveGrant[]; // Hourly/Fixed-Ind only — see specialLeaveAvailableForGrants
   outstandingLeaveBalance: number;
   outstandingMedicalBalance: number;
   unusedSickLeave: number;
@@ -523,6 +525,18 @@ export default function TimeOffPage() {
   const [editSpecialCredits, setEditSpecialCredits] = useState("");
   const [editSpecialUsed, setEditSpecialUsed] = useState("");
 
+  // Hourly/Fixed-Ind multi-grant Special Leave (every other pay category,
+  // currently just Fixed-Mex, keeps using the single specialHours/
+  // specialReason/specialGrantDate flow above).
+  const [specialLeaveGrants, setSpecialLeaveGrants] = useState<SpecialLeaveGrant[]>([]);
+  const [grantHours, setGrantHours] = useState("");
+  const [grantDate, setGrantDate] = useState(arizonaTodayIso());
+  const [grantNote, setGrantNote] = useState("");
+  const [grantExpirationDays, setGrantExpirationDays] = useState("");
+  const [grantSubmitting, setGrantSubmitting] = useState(false);
+  const [grantError, setGrantError] = useState("");
+  const [showGrantsList, setShowGrantsList] = useState(false);
+
   const OVERRIDE_TYPES = [
     "PTO", "PTO Half Day", "Sick Leave", "Sick Leave Half Day", "Unpaid Leave", "Special Leave",
     "Advance PTO/Birthday Leave", "Advance PTO/Birthday Leave Half Day", "Advance Sick Leave", "Advance Sick Leave Half Day",
@@ -566,12 +580,13 @@ export default function TimeOffPage() {
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
     try {
-      const [all, requests, savedCutoff] = await Promise.all([
+      const [all, requests, grants, savedCutoff] = await Promise.all([
         fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
         fetchAllLeaveRequestsAdmin(),
+        fetchAllSpecialLeaveGrantsAdmin(),
         fetchCutOffTime(),
       ]);
-      setContractors(all); setLeaveRequests(requests); setCutoff(cutoffFromSaved(savedCutoff));
+      setContractors(all); setLeaveRequests(requests); setSpecialLeaveGrants(grants); setCutoff(cutoffFromSaved(savedCutoff));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
     } finally {
@@ -614,6 +629,13 @@ export default function TimeOffPage() {
     return map;
   }, [leaveRequests]);
 
+  // Map email → every Special Leave grant (Hourly/Fixed-Ind only — see specialLeaveAvailableForGrants).
+  const grantsByEmail = useMemo<Record<string, SpecialLeaveGrant[]>>(() => {
+    const map: Record<string, SpecialLeaveGrant[]> = {};
+    for (const g of specialLeaveGrants) (map[g.email] ??= []).push(g);
+    return map;
+  }, [specialLeaveGrants]);
+
   const rows = useMemo<TimeOffRow[]>(() => contractors.map((c) => {
     const fullName = c.fullName || [c.firstName, c.surname].filter(Boolean).join(" ");
     // Live-computed from Engagement Start Date + the current Cut Off Time,
@@ -645,8 +667,20 @@ export default function TimeOffPage() {
     // it was added, live-resetting the credit pool to 0 (see
     // resetSpecialLeaveIfExpired) the same way the Advance PTO/Sick Leave
     // resets above work — immediately, without waiting for a save.
+    // Hourly and Fixed-Ind both use the multi-grant model: multiple
+    // independent grants, each with its own free-form expiration, instead of
+    // one shared balance — see specialLeaveAvailableForGrants. Every other
+    // pay category (currently just Fixed-Mex) is untouched, still driven by
+    // resetSpecialLeaveIfExpired above.
+    const payCategoryLower = c.payCategory.trim().toLowerCase();
+    const usesGrants = payCategoryLower === "hourly" || payCategoryLower === "fixed-ind";
+    const rowGrants = grantsByEmail[c.email] ?? [];
     const specialLeaveReset = resetSpecialLeaveIfExpired(c.payCategory, c.specialLeaveGrantedAt, c.specialLeaveCredits, c.specialLeaveUsed);
-    const specialLeaveAvailable = roundBalance(Math.max(specialLeaveReset.specialLeaveCredits - specialLeaveReset.specialLeaveUsed, 0));
+    const specialLeaveCredits = usesGrants ? roundBalance(rowGrants.reduce((s, g) => s + g.hours, 0)) : specialLeaveReset.specialLeaveCredits;
+    const specialLeaveUsed = usesGrants ? roundBalance(rowGrants.reduce((s, g) => s + g.hoursUsed, 0)) : specialLeaveReset.specialLeaveUsed;
+    const specialLeaveAvailable = usesGrants
+      ? specialLeaveAvailableForGrants(rowGrants, TODAY)
+      : roundBalance(Math.max(specialLeaveReset.specialLeaveCredits - specialLeaveReset.specialLeaveUsed, 0));
     return {
       id: c.uid, fullName, email: c.email,
       country: countryFromLocation(c.location),
@@ -657,16 +691,17 @@ export default function TimeOffPage() {
       birthdayLeaveUsed: c.birthdayLeaveUsed,
       advanceSickLeave: c.advanceSickLeave,
       advanceSickLeaveUsed: c.advanceSickLeaveUsed,
-      specialLeaveCredits: specialLeaveReset.specialLeaveCredits,
-      specialLeaveUsed:    specialLeaveReset.specialLeaveUsed,
+      specialLeaveCredits,
+      specialLeaveUsed,
       specialLeaveAvailable,
       specialLeaveGrantedAt: c.specialLeaveGrantedAt,
+      specialLeaveGrants: rowGrants,
       outstandingLeaveBalance: c.outstandingLeaveBalance,
       outstandingMedicalBalance: c.outstandingMedicalBalance,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed, cutoff),
       latestRequest:    latestByEmail[c.email] ?? null,
     };
-  }), [contractors, latestByEmail, cutoff]);
+  }), [contractors, latestByEmail, grantsByEmail, cutoff]);
 
   const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
@@ -1150,6 +1185,13 @@ export default function TimeOffPage() {
                         : c
                     ));
                     setLeaveRequests((prev) => [req, ...prev]);
+                    // Hourly/Fixed-Ind Special Leave can span multiple grants —
+                    // cheaper and more reliable to refetch than to reconstruct
+                    // the server's FIFO deduction client-side.
+                    const overridePayCategory = selectedRow.payCategory.trim().toLowerCase();
+                    if (leaveBucketFor(overrideType) === "specialLeave" && (overridePayCategory === "hourly" || overridePayCategory === "fixed-ind")) {
+                      fetchAllSpecialLeaveGrantsAdmin().then(setSpecialLeaveGrants);
+                    }
                     toast.success("Leave override created and applied.");
                     setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason("");
                   }
@@ -1355,6 +1397,130 @@ export default function TimeOffPage() {
                     </div>
                   );
                 })() : modalTab === "special" ? (() => {
+                  if (["hourly", "fixed-ind"].includes(selectedRow.payCategory.trim().toLowerCase())) {
+                    async function submitAddGrant() {
+                      if (!selectedRow) return;
+                      const hoursVal = parseFloat(grantHours) || 0;
+                      if (hoursVal <= 0) return;
+                      setGrantSubmitting(true); setGrantError("");
+                      const expirationDays = grantExpirationDays.trim() ? parseInt(grantExpirationDays, 10) : null;
+                      const result = await addSpecialLeaveGrant({
+                        email: selectedRow.email,
+                        hours: hoursVal,
+                        grantDate: grantDate || arizonaTodayIso(),
+                        note: grantNote,
+                        expirationDays,
+                      });
+                      setGrantSubmitting(false);
+                      if (!result.ok || !result.grant) {
+                        setGrantError(result.error ?? "Failed to add grant.");
+                        return;
+                      }
+                      setSpecialLeaveGrants((prev) => [result.grant!, ...prev]);
+                      setGrantHours(""); setGrantNote(""); setGrantExpirationDays(""); setGrantDate(arizonaTodayIso());
+                    }
+
+                    const sortedGrants = [...selectedRow.specialLeaveGrants].sort((a, b) => a.grantDate.localeCompare(b.grantDate));
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-3 gap-2 rounded-xl border border-purple-100 bg-purple-50/70 px-3 py-2.5">
+                          <div className="col-span-3 flex items-center gap-1.5 mb-0.5">
+                            <LuGift size={13} strokeWidth={2} className="text-purple-600" />
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-purple-700">Special Leave Credits</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-purple-700/70">Credits</p>
+                            <p className="text-sm font-bold tabular-nums text-purple-900">{fmtBalance(selectedRow.specialLeaveCredits)}h</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-purple-700/70">Used</p>
+                            <p className="text-sm font-bold tabular-nums text-purple-900">{fmtBalance(selectedRow.specialLeaveUsed)}h</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-purple-700/70">Available</p>
+                            <p className="text-sm font-bold tabular-nums text-purple-900">{fmtBalance(selectedRow.specialLeaveAvailable)}h</p>
+                          </div>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 flex items-center gap-1.5">
+                            <LuGift size={13} /> Add Special Leave Grant
+                          </p>
+                          <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                            Adds a new, independently-tracked grant for this contractor. Oldest grants are drawn from first when a Leave Override of type &ldquo;Special Leave&rdquo; is applied.
+                          </p>
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Hours <span className="text-red-400">*</span></p>
+                                <input type="number" min="1" value={grantHours} onChange={(e) => setGrantHours(e.target.value)} placeholder="Enter hours e.g. 8"
+                                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                              </div>
+                              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Grant Date</p>
+                                <input type="date" value={grantDate} onChange={(e) => setGrantDate(e.target.value)}
+                                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                              </div>
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Note</p>
+                              <textarea value={grantNote} onChange={(e) => setGrantNote(e.target.value)} placeholder="Enter a note for this grant..." rows={2}
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none" />
+                            </div>
+                            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Expiration (days)</p>
+                              <input type="number" min="1" value={grantExpirationDays} onChange={(e) => setGrantExpirationDays(e.target.value)} placeholder="e.g. 45 — leave blank for never expires"
+                                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500" />
+                            </div>
+                            {grantError && <p className="text-xs font-medium text-red-600">{grantError}</p>}
+                            <button onClick={submitAddGrant} disabled={grantSubmitting || !grantHours || parseFloat(grantHours) <= 0}
+                              className="w-full py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-40 flex items-center justify-center gap-2">
+                              {grantSubmitting && <LuLoader size={14} strokeWidth={2} className="animate-spin" />}
+                              <LuCircleCheck size={15} strokeWidth={2} /> Add Grant
+                            </button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <button
+                            onClick={() => setShowGrantsList((v) => !v)}
+                            className="w-full flex items-center justify-between text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 hover:text-slate-600 transition-colors"
+                          >
+                            <span>Grants ({sortedGrants.length})</span>
+                            {showGrantsList ? <LuChevronUp size={14} /> : <LuChevronDown size={14} />}
+                          </button>
+                          {showGrantsList && (
+                            sortedGrants.length === 0 ? (
+                              <p className="text-xs text-slate-400">No grants added yet.</p>
+                            ) : (
+                              <div className="space-y-2 max-h-56 overflow-y-auto">
+                                {sortedGrants.map((g) => {
+                                  const expired = isSpecialLeaveGrantExpired(g, TODAY);
+                                  const remaining = Math.max(0, g.hours - g.hoursUsed);
+                                  return (
+                                    <div key={g.id} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-semibold text-slate-700">{fmtDate(g.grantDate)} — {fmtBalance(g.hours)}h</span>
+                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${expired ? "bg-slate-200 text-slate-500" : "bg-emerald-100 text-emerald-700"}`}>
+                                          {expired ? "Expired" : "Active"}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-slate-500 mt-1">
+                                        Used {fmtBalance(g.hoursUsed)}h · Remaining {fmtBalance(remaining)}h · Expires {g.expirationDays == null ? "Never" : fmtDate(addDaysIso(g.grantDate, g.expirationDays))}
+                                      </p>
+                                      {g.note && <p className="text-xs text-slate-400 mt-1 italic" title={g.note}>{g.note}</p>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
+
                   async function applySpecialGrant() {
                     if (!selectedRow) return;
                     const hoursToAdd = parseFloat(specialHours) || 0;

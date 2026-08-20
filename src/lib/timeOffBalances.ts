@@ -241,6 +241,81 @@ export function resetSpecialLeaveIfExpired(
   return { specialLeaveCredits: currentSpecialLeaveCredits, specialLeaveUsed: currentSpecialLeaveUsed };
 }
 
+// ── Special Leave, multi-grant (Hourly only) ────────────────────────────────
+// Hourly contractors track Special Leave as a list of individual grants
+// (SpecialLeaveGrant, one row per grant) instead of the single running
+// balance above — each grant has its own hours, grant date, and an optional
+// free-form expiration (in days from the grant date). Every other pay
+// category keeps using resetSpecialLeaveIfExpired/the scalar fields above,
+// completely untouched by anything below.
+export type SpecialLeaveGrantLike = {
+  id: string;
+  hours: number;
+  hoursUsed: number;
+  grantDate: string; // "YYYY-MM-DD"
+  expirationDays: number | null;
+};
+
+// A grant with no expirationDays never expires. Otherwise it's active
+// through grantDate + expirationDays inclusive, expired the day after.
+export function isSpecialLeaveGrantExpired(
+  grant: Pick<SpecialLeaveGrantLike, "grantDate" | "expirationDays">,
+  today: Date = new Date()
+): boolean {
+  if (grant.expirationDays == null) return false;
+  const grantedDate = parseDate(grant.grantDate);
+  if (!grantedDate) return false;
+  const daysSinceGrant = Math.floor((today.getTime() - grantedDate.getTime()) / 86400000);
+  return daysSinceGrant > grant.expirationDays;
+}
+
+// Sum of (hours - hoursUsed) across every non-expired grant. An expired
+// grant contributes 0 even if it still has unused hours — those hours are
+// simply forfeited, never available.
+export function specialLeaveAvailableForGrants(grants: SpecialLeaveGrantLike[], today: Date = new Date()): number {
+  return roundBalance(
+    grants.reduce((total, g) => (isSpecialLeaveGrantExpired(g, today) ? total : total + Math.max(g.hours - g.hoursUsed, 0)), 0)
+  );
+}
+
+export type SpecialLeaveGrantDeduction = { grantId: string; hours: number };
+
+// Oldest-grantDate-first, multi-grant-spanning deduction — the amount drawn
+// down by a Special Leave Leave Override. All-or-nothing: if the non-expired
+// grants can't fully cover hoursNeeded between them, nothing is deducted at
+// all (mirrors the existing "block outright if balance is short" behavior
+// used for every other leave bucket).
+export function planSpecialLeaveGrantDeduction(
+  grants: SpecialLeaveGrantLike[],
+  hoursNeeded: number,
+  today: Date = new Date()
+): { ok: true; deductions: SpecialLeaveGrantDeduction[] } | { ok: false; error: string } {
+  const eligible = grants
+    .filter((g) => !isSpecialLeaveGrantExpired(g, today) && g.hours - g.hoursUsed > 0)
+    .slice()
+    .sort((a, b) => a.grantDate.localeCompare(b.grantDate) || a.id.localeCompare(b.id));
+
+  const totalAvailable = eligible.reduce((sum, g) => sum + (g.hours - g.hoursUsed), 0);
+  if (roundBalance(totalAvailable) < roundBalance(hoursNeeded)) {
+    return {
+      ok: false,
+      error: `Special Leave Available is not enough for this override. Available: ${roundBalance(totalAvailable)}h, Required: ${hoursNeeded}h.`,
+    };
+  }
+
+  const deductions: SpecialLeaveGrantDeduction[] = [];
+  let remaining = hoursNeeded;
+  for (const grant of eligible) {
+    if (remaining <= 0) break;
+    const take = Math.min(grant.hours - grant.hoursUsed, remaining);
+    if (take > 0) {
+      deductions.push({ grantId: grant.id, hours: roundBalance(take) });
+      remaining = roundBalance(remaining - take);
+    }
+  }
+  return { ok: true, deductions };
+}
+
 export function calculateUnusedSickLeaveBalance(
   name: string,
   hireDate: string,
