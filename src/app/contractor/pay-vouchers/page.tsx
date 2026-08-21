@@ -8,9 +8,7 @@ import {
   fetchContractorVouchers,
   type ContractorVoucher, type ContractorVoucherProfile,
 } from "./actions";
-import {
-  computePayComponents, DAY_LABELS, REST_DAY_TO_LABEL, fmtVoucherDate,
-} from "@/lib/payrollVoucher";
+import { DAY_LABELS, REST_DAY_TO_LABEL, fmtVoucherDate } from "@/lib/payrollVoucher";
 import { datesBetween, addDaysIso } from "@/lib/weekUtils";
 import { PageHeader } from "../_components/portal";
 import { Logo } from "@/components/Logo";
@@ -36,14 +34,18 @@ function fmtDate(iso: string) {
   return new Date(Date.UTC(y, m - 1, dd)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "2-digit", year: "numeric" });
 }
 
-// Voucher figures. Gross / total deductions / net are authoritative straight
-// from the processed payroll run (v.gross / v.deductions / v.net). The per-
-// component hours & pay lines are derived from the attendance split (shared
-// computePayComponents) to explain how that gross was reached.
+// Every figure here is read straight off the frozen process_weekly_payroll
+// row (v) — nothing is recomputed, so this always matches exactly what was
+// finalized when the voucher was Processed.
 function voucherTotals(v: ContractorVoucher) {
-  const c = computePayComponents(v.hourlyRate, v.totals);
-  const ptoPay = v.ptoHours * v.hourlyRate;
-  return { ...c, ptoPay, grossPay: v.gross, totalDeductions: v.deductions, netPay: v.net };
+  return {
+    regHours: v.regHours, regOtHours: v.regOtHours, rdOtHours: v.rdOtHours,
+    usHolidayHours: v.usHolidayHours, hoOtHours: v.hoOtHours, localHolidayHours: v.localHolidayHours,
+    regPay: v.regPay, regOtPay: v.regOtPay, rdOtPay: v.rdOtPay,
+    usHolidayPay: v.usHolidayPay, hoOtPay: v.hoOtPay, localHolidayPay: v.localHolidayPay,
+    ptoPay: v.ptoPay,
+    grossPay: v.gross, totalDeductions: v.deductions, netPay: v.net,
+  };
 }
 
 export default function ContractorPayVouchersPage() {
@@ -403,19 +405,16 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
     profile.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
   );
 
-  // Identical math to the admin Payroll Voucher: each component from its own
-  // time total, plus PTO pay and the manual earnings; deductions include tax.
-  const ptoHours = v.ptoHours;
+  // Every figure is read straight off the frozen process_weekly_payroll row —
+  // gross/deductions/net included, rather than re-summed from the components.
   const {
-    regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
-    regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    grossPay: componentGrossPay,
-  } = computePayComponents(v.hourlyRate, v.totals);
-  const ptoPay = ptoHours * v.hourlyRate;
-  const { bonus, misc, retroPay, reim, cashAdvance, hmo, tax } = v.adjustment;
-  const grossPay = componentGrossPay + ptoPay + bonus + misc + retroPay + reim;
-  const totalDeductions = cashAdvance + hmo + tax;
-  const netPay = grossPay - totalDeductions;
+    ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
+    ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
+  } = v;
+  const { bonus, misc, retroPay, reim, cashAdvance, hmo } = v.adjustment;
+  const grossPay = v.gross;
+  const totalDeductions = v.deductions;
+  const netPay = v.net;
 
   return (
     <div className="p-6 md:p-8 text-sm text-slate-800 bg-white">

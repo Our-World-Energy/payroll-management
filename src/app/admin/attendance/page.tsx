@@ -574,7 +574,8 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 
 // OT is never redistributed between days, with one exception, drawing from
 // the same WEEK's Regular OT pool first, then — if that pool alone isn't
-// enough — the week's HO OT pool as a fallback (RD OT is never touched):
+// enough — the week's RD OT pool, then the week's HO OT pool as a final
+// fallback:
 //   A day that is itself Approved (approvedByDate — Attendance Review's own
 //   daily decision, not the leave request's approval), has no leave request
 //   of any kind covering it (halfDayOffByDate <= 0), and isn't a rest day,
@@ -587,9 +588,10 @@ function boostedUsHoMinutes(holidayTime: string, isRestDay: boolean, isUsHoliday
 // Status already accounts for the other half of the day (credited
 // separately as Time Off Time). If less than 240 min was actually worked,
 // the shortfall (240 − worked) is borrowed from the week's Regular OT pool
-// only — never the HO OT pool, and never more than what's needed to reach
-// 240 — so any Regular OT beyond that stays Regular OT rather than being
-// pulled in to "complete" a full 480-min day that was never required here.
+// only — never RD OT, never the HO OT pool, and never more than what's
+// needed to reach 240 — so any Regular OT beyond that stays Regular OT
+// rather than being pulled in to "complete" a full 480-min day that was
+// never required here.
 // If the day itself isn't Approved yet, nothing is borrowed and it stays
 // blank/unfilled, same as any other not-yet-approved day. Any OT a lending
 // day doesn't actually give up stays credited to that same day. This
@@ -608,9 +610,11 @@ function weeklyEvaluatedRegularAllocation(
 ): Record<string, { evaluatedRegularTime: number; regularOtMinutes: number; rdOtMinutes: number; hoOtMinutes: number }> {
   const remainingRegularOt: Record<string, number> = {};
   const remainingHoOt: Record<string, number> = {};
+  const remainingRdOt: Record<string, number> = {};
   weekDates.forEach((d) => {
     remainingRegularOt[d] = regularOtByDate[d] ?? 0;
     remainingHoOt[d] = hoOtByDate[d] ?? 0;
+    remainingRdOt[d] = rdOtByDate[d] ?? 0;
   });
 
   const borrowedByDate: Record<string, number> = {};
@@ -651,8 +655,18 @@ function weeklyEvaluatedRegularAllocation(
       borrowedByDate[date] += take;
     }
 
-    // Regular OT alone wasn't enough — fall back to the week's HO OT pool
-    // for whatever's still missing.
+    // Regular OT alone wasn't enough — fall back to the week's RD OT pool,
+    // then the week's HO OT pool, for whatever's still missing.
+    for (const otDate of weekDates) {
+      if (missing <= 0) break;
+      const available = remainingRdOt[otDate];
+      if (available <= 0) continue;
+      const take = Math.min(missing, available);
+      remainingRdOt[otDate] -= take;
+      missing -= take;
+      borrowedByDate[date] += take;
+    }
+
     for (const otDate of weekDates) {
       if (missing <= 0) break;
       const available = remainingHoOt[otDate];
@@ -680,7 +694,7 @@ function weeklyEvaluatedRegularAllocation(
     result[date] = {
       evaluatedRegularTime,
       regularOtMinutes: remainingRegularOt[date] + halfDayExcess,
-      rdOtMinutes: rdOtByDate[date] ?? 0,
+      rdOtMinutes: remainingRdOt[date],
       hoOtMinutes: remainingHoOt[date],
     };
   });

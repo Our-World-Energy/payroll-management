@@ -21,12 +21,12 @@ export function PageHeader({
       <div>
         <div className="flex items-center gap-2.5 mb-3">
           <span className="h-px w-8 bg-emerald-600/50" />
-          <span className="text-[11px] font-bold uppercase tracking-[0.22em] text-emerald-700">{eyebrow}</span>
+          <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">{eyebrow}</span>
         </div>
-        <h2 className="text-4xl md:text-[2.7rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
+        <h2 className="text-[1.8rem] md:text-[2.16rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
           {title}
         </h2>
-        {subtitle && <p className="text-slate-500 mt-3">{subtitle}</p>}
+        {subtitle && <p className="text-slate-500 mt-3 text-[0.8rem]">{subtitle}</p>}
       </div>
       {right && <div className="self-start md:self-auto shrink-0">{right}</div>}
     </header>

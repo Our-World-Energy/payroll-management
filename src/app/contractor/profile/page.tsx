@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { fetchContractorProfileByEmail, type ContractorProfile } from "./actions";
 import { LuLoader, LuBadge, LuMapPin, LuBriefcase, LuClock, LuUser, LuBanknote } from "react-icons/lu";
-import { PageHeader } from "../_components/portal";
 
 type Profile = ContractorProfile;
 
@@ -71,53 +70,69 @@ export default function ContractorProfilePage() {
 
   const monthlyNum = parseFloat(profile.monthlyRate?.replace(/[^0-9.]/g, "") || "0");
   const weeklyNum  = parseFloat(profile.weeklyRate?.replace(/[^0-9.]/g, "")  || "0");
+  const hourlyNum  = parseFloat(profile.hourlyRate?.replace(/[^0-9.]/g, "")  || "0");
 
   const currency = profile.currency || "USD";
   function fmtMoney(val: number) {
     if (!val) return "—";
     return val.toLocaleString("en-US", { style: "currency", currency, maximumFractionDigits: 0 });
   }
+  function fmtMoney2(val: number) {
+    if (!val) return "—";
+    return val.toLocaleString("en-US", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
 
   const isActive = (profile.status ?? "Active") === "Active";
 
   return (
     <div className="max-w-7xl mx-auto space-y-8">
-      <PageHeader
-        title="My Profile"
-        subtitle="Your engagement details, contract information, and personal information."
-      />
+      {/* Page header — sized 20% smaller than the shared PageHeader (this
+          page only; PageHeader itself is shared across the whole Contractor
+          Portal, so its sizing isn't touched). */}
+      <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2.5 mb-3">
+            <span className="h-px w-8 bg-emerald-600/50" />
+            <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">Contractor Portal</span>
+          </div>
+          <h2 className="text-[1.8rem] md:text-[2.16rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
+            My Profile
+          </h2>
+          <p className="text-slate-500 mt-3 text-[0.8rem]">Your engagement details, contract information, and personal information.</p>
+        </div>
+      </header>
 
       {/* ── Identity hero — deep brand gradient ── */}
-      <div className="relative overflow-hidden rounded-2xl p-8 text-white shadow-sm bg-brand-gradient">
+      <div className="relative overflow-hidden rounded-2xl p-4 text-white shadow-sm bg-brand-gradient">
         <div className="absolute inset-0 bg-grid-soft opacity-60 pointer-events-none" />
-        <div className="relative flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-8">
+        <div className="relative flex flex-col md:flex-row items-center md:items-start gap-3 md:gap-4">
           {/* Avatar */}
-          <div className="w-28 h-28 rounded-2xl bg-white/10 ring-1 ring-white/15 shrink-0 grid place-items-center backdrop-blur-sm">
-            <span className="text-4xl font-black text-white">{avatarLetters}</span>
+          <div className="w-14 h-14 rounded-2xl bg-white/10 ring-1 ring-white/15 shrink-0 grid place-items-center backdrop-blur-sm">
+            <span className="text-xl font-black text-white">{avatarLetters}</span>
           </div>
 
           {/* Info */}
           <div className="flex-1 w-full text-center md:text-left">
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-start justify-between gap-2">
               <div>
-                <h1 className="text-4xl font-bold text-white leading-none" style={{ letterSpacing: "-0.02em" }}>
+                <h1 className="text-xl font-bold text-white leading-none" style={{ letterSpacing: "-0.02em" }}>
                   {profile.fullName || "—"}
                 </h1>
-                <p className="text-lg font-semibold text-emerald-300 mt-1.5">{profile.role || "Contractor"}</p>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-4 gap-y-1.5 mt-3 text-emerald-100/80">
+                <p className="text-sm font-semibold text-emerald-300 mt-1">{profile.role || "Contractor"}</p>
+                <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-2.5 gap-y-1 mt-1.5 text-emerald-100/80">
                   {profile.contractorId && (
-                    <span className="flex items-center text-sm gap-1.5">
-                      <LuBadge size={14} strokeWidth={1.75} /> {profile.contractorId}
+                    <span className="flex items-center text-xs gap-1">
+                      <LuBadge size={12} strokeWidth={1.75} /> {profile.contractorId}
                     </span>
                   )}
                   {profile.location && (
-                    <span className="flex items-center text-sm gap-1.5">
-                      <LuMapPin size={14} strokeWidth={1.75} /> {profile.location}
+                    <span className="flex items-center text-xs gap-1">
+                      <LuMapPin size={12} strokeWidth={1.75} /> {profile.location}
                     </span>
                   )}
                 </div>
               </div>
-              <span className={`self-center md:self-start px-4 py-1.5 rounded-full text-sm font-bold whitespace-nowrap ${
+              <span className={`self-center md:self-start px-2.5 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
                 isActive
                   ? "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-300/30"
                   : "bg-red-400/15 text-red-200 ring-1 ring-red-300/30"
@@ -149,7 +164,6 @@ export default function ContractorProfilePage() {
               <Field label="Work Location"      value={profile.officeLocation} />
               <Field label="Agreed Schedule"    value={profile.shiftHours} />
               <Field label="Typical Non-Working Days" value={profile.restDay} />
-              <Field label="Equipment Provided" value={profile.equipmentProvided ? "Yes" : "No"} />
             </div>
           </div>
         </div>
@@ -175,6 +189,10 @@ export default function ContractorProfilePage() {
               <div className="flex justify-between items-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Weekly Contract Rate</p>
                 <p className="text-base font-semibold text-slate-800 tabular-nums">{fmtMoney(weeklyNum)}</p>
+              </div>
+              <div className="flex justify-between items-center">
+                <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Hourly Rate</p>
+                <p className="text-base font-semibold text-slate-800 tabular-nums">{fmtMoney2(hourlyNum)}</p>
               </div>
               <div className="pt-4 border-t border-emerald-100">
                 <p className="text-xs text-emerald-700 font-medium">

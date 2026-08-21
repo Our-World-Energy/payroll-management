@@ -11,7 +11,8 @@ import {
 import { HOURS_PER_DAY, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
-  LuChevronRight, LuInfo, LuX, LuCircleAlert,
+  LuChevronRight, LuChevronDown, LuInfo, LuX, LuCircleAlert,
+  LuClipboardList, LuSend, LuCalendarDays,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
 
@@ -200,6 +201,11 @@ export default function ContractorTimeOffPage() {
     });
   }
 
+  function handleClear() {
+    setStartDate(""); setEndDate(""); setReason("");
+    setFormError(""); setSuccess("");
+  }
+
   async function handleOpenHistory() {
     setShowHistory(true);
     setHistoryLoading(true);
@@ -286,15 +292,21 @@ export default function ContractorTimeOffPage() {
       </section>
 
       {/* Request form + policy */}
-      <section className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+      <section className="grid grid-cols-1 gap-8">
         {/* Form */}
-        <div className="xl:col-span-2 bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="border-b border-slate-100 px-6 py-4">
-            <h3 className="text-sm font-semibold text-slate-700">Apply for Leave</h3>
+          <div className="border-b border-slate-100 px-6 py-5 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center shrink-0">
+              <LuClipboardList size={19} strokeWidth={1.75} />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-[#003527]">Apply for Leave</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Submit a request for time away. All fields are required.</p>
+            </div>
           </div>
 
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-5">
             {/* Success banner */}
             {success && (
               <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700 font-medium">
@@ -312,97 +324,90 @@ export default function ContractorTimeOffPage() {
             )}
 
             {/* Leave Type */}
-            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Leave Type</p>
-              <select
-                value={leaveType}
-                onChange={(e) => { setLeaveType(e.target.value as typeof ALL_LEAVE_TYPES[number]); setFormError(""); setSuccess(""); }}
-                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              >
-                {(isPtoHidden ? INDIA_LEAVE_TYPES : ALL_LEAVE_TYPES).map((t) => (
-                  <option key={t} value={t}>{leaveTypeDisplayLabel(t)}</option>
-                ))}
-              </select>
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">1. Leave Type</label>
+              <div className="relative">
+                <LuCalendarDays size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                <select
+                  value={leaveType}
+                  onChange={(e) => { setLeaveType(e.target.value as typeof ALL_LEAVE_TYPES[number]); setFormError(""); setSuccess(""); }}
+                  className="w-full appearance-none text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg pl-9 pr-9 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                >
+                  {(isPtoHidden ? INDIA_LEAVE_TYPES : ALL_LEAVE_TYPES).map((t) => (
+                    <option key={t} value={t}>{leaveTypeDisplayLabel(t)}</option>
+                  ))}
+                </select>
+                <LuChevronDown size={16} strokeWidth={2} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={e => setStartDate(e.target.value)}
-                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
+              <div>
+                <label className="block text-sm font-bold text-slate-800 mb-2">2. Start Date</label>
+                <div className="relative">
+                  <LuCalendarDays size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
               </div>
-              <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">End Date</p>
-                <input
-                  type="date"
-                  value={isHalfDay ? startDate : endDate}
-                  onChange={e => setEndDate(e.target.value)}
-                  disabled={isHalfDay}
-                  className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:bg-slate-100 disabled:text-slate-400"
-                />
+              <div>
+                <label className="block text-sm font-bold text-slate-800 mb-2">3. End Date</label>
+                <div className="relative">
+                  <LuCalendarDays size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                  <input
+                    type="date"
+                    value={isHalfDay ? startDate : endDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    disabled={isHalfDay}
+                    className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
-              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Reason for Request</p>
+            <div>
+              <label className="block text-sm font-bold text-slate-800 mb-2">4. Reason for Request</label>
               <textarea
                 rows={3}
+                maxLength={500}
                 value={reason}
                 onChange={e => setReason(e.target.value)}
                 placeholder="Briefly describe the reason for your time off..."
-                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 resize-none"
               />
+              <p className="text-right text-xs text-slate-400 mt-1">{reason.length} / 500</p>
             </div>
 
-            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-              <div className="flex items-center gap-2 text-xs text-slate-400">
-                <LuInfo size={14} strokeWidth={1.75} />
-                Estimated duration:{" "}
-                <span className="font-bold text-slate-700">
-                  {estimatedDays === null ? "-- h" : isHalfDay ? "4h" : `${estimatedDays * HOURS_PER_DAY}h`}
-                </span>
+            {/* Note */}
+            <div className="flex items-start gap-3 bg-emerald-50/70 border border-emerald-100 rounded-xl px-4 py-3.5">
+              <LuInfo size={16} strokeWidth={1.75} className="text-emerald-600 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-bold text-emerald-800">Note</p>
+                <p className="text-xs text-emerald-700/80 mt-0.5">Ensure your balance is sufficient before submitting your request.</p>
               </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-1">
+              <button
+                onClick={handleClear}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-semibold hover:bg-slate-50 transition-colors"
+              >
+                <LuX size={15} strokeWidth={2} /> Clear
+              </button>
               <button
                 onClick={handleSubmit}
                 disabled={isPending}
-                className="bg-[#003527] hover:opacity-90 active:scale-95 text-white font-bold px-8 py-3 rounded-lg transition-all shadow-md text-sm flex items-center gap-2 disabled:opacity-60"
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-6 py-2.5 rounded-lg transition-all shadow-sm text-sm flex items-center gap-2 disabled:opacity-60"
               >
-                {isPending && <LuLoader size={14} className="animate-spin" />}
+                {isPending ? <LuLoader size={15} className="animate-spin" /> : <LuSend size={15} strokeWidth={2} />}
                 {isPending ? "Submitting…" : "Submit Request"}
               </button>
             </div>
           </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-6">
-          {/* Policy */}
-          <div className="relative overflow-hidden rounded-2xl p-6 text-white shadow-sm bg-brand-gradient">
-            <div className="absolute inset-0 bg-grid-soft opacity-70 pointer-events-none" />
-            <div className="relative">
-              <h4 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <LuCircleCheck size={20} strokeWidth={1.75} className="text-emerald-300" />
-                Policy Reminder
-              </h4>
-              <ul className="space-y-3 text-sm text-emerald-50/90">
-                {[
-                  "PTO requests must be submitted at least 2 weeks in advance.",
-                  "Medical Unavailability requires a medical certificate if longer than 3 days.",
-                  "A maximum of 5 days can carry over to the next year.",
-                ].map((item) => (
-                  <li key={item} className="flex gap-3">
-                    <LuCircleCheck size={13} className="shrink-0 mt-0.5 text-emerald-300/80" strokeWidth={2} />
-                    {item}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
         </div>
       </section>
 

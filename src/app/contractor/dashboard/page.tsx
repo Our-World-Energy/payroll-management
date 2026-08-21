@@ -7,9 +7,9 @@ import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type Contrac
 import { sendBirthdayWish, fetchWishState, type ReceivedWish } from "./wishes";
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
 import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
+import { ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { PageHeader } from "../_components/portal";
 import { Confetti } from "../_components/Confetti";
-import { EmojiPicker } from "../_components/EmojiPicker";
 import {
   LuCalendarDays, LuCake,
   LuChevronRight, LuLoader, LuShieldCheck,
@@ -390,7 +390,10 @@ export default function ContractorDashboardPage() {
   const myName    = profile?.fullName || firstName;
 
   const now = new Date();
-  const greeting = now.getHours() < 12 ? "Good morning" : now.getHours() < 17 ? "Good afternoon" : "Good evening";
+  // Arizona (HO) time, not the viewer's own browser/local time — the whole
+  // Contractor Portal shows times on Arizona time for consistency.
+  const azHour = Number(new Intl.DateTimeFormat("en-US", { timeZone: ARIZONA_TIME_ZONE, hour: "numeric", hour12: false }).format(now));
+  const greeting = azHour < 12 ? "Good morning" : azHour < 17 ? "Good afternoon" : "Good evening";
 
   // One-click birthday wish (with an optional note) → record it and
   // optimistically mark as wished.
@@ -630,7 +633,7 @@ function BirthdaySection({
   );
 }
 
-// ── One birthday card, with an optional note composer ──────────────────────────
+// ── One birthday card ────────────────────────────────────────────────────────
 function BirthdayCard({
   name, email, dateLabel, isMe, wished, onSendWish,
 }: {
@@ -641,7 +644,6 @@ function BirthdayCard({
   wished: boolean;
   onSendWish: (toEmail: string, message?: string) => void;
 }) {
-  const [msg, setMsg] = useState("");
   const hasEmail = !!email.trim();
 
   return (
@@ -664,20 +666,9 @@ function BirthdayCard({
       ) : wished ? (
         <span className="mt-auto text-center text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg py-2">Wished ✓</span>
       ) : (
-        <div className="mt-auto space-y-2">
-          {/* note + chat-style emoji picker */}
-          <div className="flex items-center gap-1.5">
-            <input
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              maxLength={140}
-              placeholder="Add a note (optional)"
-              className="flex-1 min-w-0 text-xs rounded-lg border border-emerald-200 bg-white px-2.5 py-2 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-300"
-            />
-            <EmojiPicker onPick={(e) => setMsg((m) => (m + e).slice(0, 140))} />
-          </div>
+        <div className="mt-auto">
           <button
-            onClick={() => onSendWish(email, msg.trim() || undefined)}
+            onClick={() => onSendWish(email)}
             disabled={!hasEmail}
             className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-white bg-[#003527] hover:opacity-90 active:scale-[0.98] rounded-lg py-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >

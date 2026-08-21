@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2, LuArchive,
+  LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2, LuBan, LuArchive,
   LuCalendarDays, LuShieldCheck, LuSearch, LuSlidersHorizontal, LuChevronDown,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin, archiveLeaveRequestAdmin,
+  fetchAllContractors, fetchAllLeaveRequestsAdmin, updateLeaveRequestStatus, deleteLeaveRequestAdmin, cancelLeaveRequestAdmin,
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
@@ -64,7 +64,7 @@ function typeBadgeClass(type: string) {
     : "bg-amber-50 text-amber-700 border-amber-200";
 }
 
-const HISTORY_FILTERS = ["All", "Approved", "Rejected", "Archived"] as const;
+const HISTORY_FILTERS = ["All", "Approved", "Rejected", "Archived", "Cancelled"] as const;
 type HistoryFilter = typeof HISTORY_FILTERS[number];
 
 // Split into "current" (pending) and "historical" (decided) buckets
@@ -80,8 +80,8 @@ export default function ContractorTimeOffPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<AdminLeaveRequest | null>(null);
   const [deleting,     setDeleting]     = useState(false);
-  const [archiveTarget, setArchiveTarget] = useState<AdminLeaveRequest | null>(null);
-  const [archiving,     setArchiving]     = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<AdminLeaveRequest | null>(null);
+  const [cancelling,   setCancelling]   = useState(false);
   const [cutoff,       setCutoff]       = useState<CutoffDate>(DEFAULT_CUTOFF);
   const [pendingSearch, setPendingSearch] = useState("");
   const [historySearch, setHistorySearch] = useState("");
@@ -167,17 +167,17 @@ export default function ContractorTimeOffPage() {
     await loadData();
   }
 
-  async function confirmArchive() {
-    if (!archiveTarget) return;
-    setArchiving(true);
-    const result = await archiveLeaveRequestAdmin(archiveTarget.id);
-    setArchiving(false);
+  async function confirmCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    const result = await cancelLeaveRequestAdmin(cancelTarget.id);
+    setCancelling(false);
     if (!result.ok) {
-      setErrorMessage(result.error ?? "Failed to archive request.");
-      setArchiveTarget(null);
+      setErrorMessage(result.error ?? "Failed to cancel request.");
+      setCancelTarget(null);
       return;
     }
-    setArchiveTarget(null);
+    setCancelTarget(null);
     await loadData();
   }
 
@@ -428,6 +428,7 @@ export default function ContractorTimeOffPage() {
                   {filteredHistoricalRequests.map((req) => {
                     const isApproved = req.status === "Approved";
                     const isArchived = req.status === "Archived";
+                    const isCancelled = req.status === "Cancelled";
                     return (
                       <tr key={req.id} className="hover:bg-slate-50 transition-colors">
                         <td className="px-5 py-4 whitespace-nowrap">
@@ -453,22 +454,22 @@ export default function ContractorTimeOffPage() {
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${
                             isApproved
                               ? "bg-green-50 text-green-700 border border-green-200"
-                              : isArchived
+                              : isArchived || isCancelled
                               ? "bg-slate-100 text-slate-500 border border-slate-200"
                               : "bg-red-50 text-red-600 border border-red-200"
                           }`}>
-                            {isApproved ? <LuCircleCheck size={11} /> : isArchived ? <LuArchive size={11} /> : <LuCircleX size={11} />}
+                            {isApproved ? <LuCircleCheck size={11} /> : isCancelled ? <LuBan size={11} /> : isArchived ? <LuArchive size={11} /> : <LuCircleX size={11} />}
                             {req.status}
                           </span>
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-1">
                             <button
-                              onClick={() => setArchiveTarget(req)}
-                              title="Archive request"
+                              onClick={() => setCancelTarget(req)}
+                              title="Cancel request"
                               className="p-1.5 text-slate-300 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
                             >
-                              <LuArchive size={15} strokeWidth={1.75} />
+                              <LuBan size={15} strokeWidth={1.75} />
                             </button>
                             <button
                               onClick={() => setDeleteTarget(req)}
@@ -564,45 +565,45 @@ export default function ContractorTimeOffPage() {
         </div>
       )}
 
-      {/* Archive confirmation */}
-      {archiveTarget && (
+      {/* Cancel confirmation */}
+      {cancelTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !archiving && setArchiveTarget(null)} />
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !cancelling && setCancelTarget(null)} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
             <button
-              onClick={() => setArchiveTarget(null)}
-              disabled={archiving}
+              onClick={() => setCancelTarget(null)}
+              disabled={cancelling}
               className="absolute top-4 right-4 p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
             >
               <LuX size={18} strokeWidth={2} />
             </button>
             <div className="flex items-start gap-3">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500">
-                <LuArchive size={18} strokeWidth={2} />
+                <LuBan size={18} strokeWidth={2} />
               </div>
               <div>
-                <h3 className="text-base font-bold text-[#003527]">Archive Leave Request</h3>
+                <h3 className="text-base font-bold text-[#003527]">Cancel Leave Request</h3>
                 <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-                  This will mark the {leaveTypeDisplayLabel(archiveTarget.type)} request for {fmtDate(archiveTarget.startDate)} – {fmtDate(archiveTarget.endDate)} as Archived.
-                  {archiveTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
-                  {" "}The request itself stays on file — only its status changes.
+                  This will mark the {leaveTypeDisplayLabel(cancelTarget.type)} request for {fmtDate(cancelTarget.startDate)} – {fmtDate(cancelTarget.endDate)} as Cancelled.
+                  {cancelTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
+                  {" "}The request itself stays on file and is still visible here — it just won't appear in the contractor's own Recent Requests anymore.
                 </p>
               </div>
             </div>
             <div className="mt-6 flex gap-3">
               <button
-                onClick={() => setArchiveTarget(null)}
-                disabled={archiving}
+                onClick={() => setCancelTarget(null)}
+                disabled={cancelling}
                 className="flex-1 py-2.5 text-sm font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-40"
               >
-                Cancel
+                Go Back
               </button>
               <button
-                onClick={confirmArchive}
-                disabled={archiving}
+                onClick={confirmCancel}
+                disabled={cancelling}
                 className="flex-1 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60"
               >
-                {archiving ? "Archiving…" : "Archive"}
+                {cancelling ? "Cancelling…" : "Cancel Request"}
               </button>
             </div>
           </div>

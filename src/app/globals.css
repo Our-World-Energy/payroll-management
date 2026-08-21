@@ -291,6 +291,26 @@
 }
 .animate-bday-wiggle { animation: bday-wiggle 1.8s ease-in-out infinite; transform-origin: 70% 90%; }
 
+/* ── Attendance calendar day badges — small animated emoji for PTO/Medical
+   Leave/Holiday, same "delight" treatment as the birthday cake above. */
+@keyframes vacation-float {
+  0%, 100% { transform: translateY(0) rotate(-4deg); }
+  50%      { transform: translateY(-2px) rotate(4deg); }
+}
+.animate-vacation-float { animation: vacation-float 2s ease-in-out infinite; }
+
+@keyframes sick-wobble {
+  0%, 100% { transform: rotate(-6deg); }
+  50%      { transform: rotate(6deg); }
+}
+.animate-sick-wobble { animation: sick-wobble 1.4s ease-in-out infinite; }
+
+@keyframes holiday-bounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%      { transform: translateY(-2px) scale(1.15); }
+}
+.animate-holiday-bounce { animation: holiday-bounce 1.6s ease-in-out infinite; }
+
 .bday-card {
   border: 1.5px solid transparent;
   border-radius: 0.75rem; /* rounded-xl */

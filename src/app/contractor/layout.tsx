@@ -17,9 +17,9 @@ type NavItem = { href: string; label: string; Icon: React.ElementType };
 const NAV_ITEMS: NavItem[] = [
   { href: "/contractor/dashboard",    label: "Dashboard",    Icon: LuLayoutDashboard },
   { href: "/contractor/profile",      label: "Profile",      Icon: LuUser },
+  { href: "/contractor/time-off",     label: "Time Away",     Icon: LuUmbrella },
   { href: "/contractor/attendance",   label: "Attendance",   Icon: LuClipboardCheck },
   { href: "/contractor/pay-vouchers", label: "Pay Vouchers", Icon: LuWallet },
-  { href: "/contractor/time-off",     label: "Time Away",     Icon: LuUmbrella },
 ];
 
 export default function ContractorLayout({ children }: { children: React.ReactNode }) {

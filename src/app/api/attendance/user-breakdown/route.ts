@@ -111,6 +111,7 @@ export async function GET(request: Request) {
     d.toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
+      second: "2-digit",
       hour12: true,
       timeZone: "America/Phoenix",
     });

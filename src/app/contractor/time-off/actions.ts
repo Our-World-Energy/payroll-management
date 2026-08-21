@@ -74,6 +74,10 @@ export async function fetchLeaveRequests(email: string): Promise<LeaveRequest[]>
     .from(LEAVE_TABLE)
     .select("id, email, type, startDate, endDate, durationDays, reason, status, createdAt")
     .eq("email", email)
+    // Cancelled requests (admin-only, from Request History) never appear in
+    // Recent Requests — everything else the contractor filed still does.
+    .neq("status", "Cancelled")
+    .order("startDate", { ascending: false })
     .order("createdAt", { ascending: false })
     .limit(20);
 

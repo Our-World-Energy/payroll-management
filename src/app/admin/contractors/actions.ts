@@ -1153,11 +1153,13 @@ export async function deleteLeaveRequestAdmin(id: string): Promise<{ ok: boolean
   return { ok: true };
 }
 
-// Same balance reversal as delete above — an archived request is treated
+// Same balance reversal as delete above — a cancelled request is treated
 // exactly like a deleted one for balance purposes, clearing whatever it had
 // deducted — but the row itself is kept and just re-stamped with status
-// "Archived" instead of being removed from contractor_leave_requests.
-export async function archiveLeaveRequestAdmin(id: string): Promise<{ ok: boolean; error?: string }> {
+// "Cancelled" instead of being removed from contractor_leave_requests.
+// Cancelled requests are excluded from the Contractor Portal's Recent
+// Requests (see fetchLeaveRequests) but still show up in every admin view.
+export async function cancelLeaveRequestAdmin(id: string): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
 
   const { data: req, error: fetchErr } = await sb
@@ -1170,7 +1172,7 @@ export async function archiveLeaveRequestAdmin(id: string): Promise<{ ok: boolea
   const reversal = await reverseApprovedBalanceIfNeeded(sb, req);
   if (!reversal.ok) return reversal;
 
-  const { error: updateErr } = await sb.from(LEAVE_TABLE).update({ status: "Archived", updatedAt: new Date().toISOString() }).eq("id", id);
+  const { error: updateErr } = await sb.from(LEAVE_TABLE).update({ status: "Cancelled", updatedAt: new Date().toISOString() }).eq("id", id);
   if (updateErr) return { ok: false, error: updateErr.message };
 
   return { ok: true };
