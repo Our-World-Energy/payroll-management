@@ -676,7 +676,13 @@ export default function TimeOffPage() {
     const usesGrants = payCategoryLower === "hourly" || payCategoryLower === "fixed-ind";
     const rowGrants = grantsByEmail[c.email] ?? [];
     const specialLeaveReset = resetSpecialLeaveIfExpired(c.payCategory, c.specialLeaveGrantedAt, c.specialLeaveCredits, c.specialLeaveUsed);
-    const specialLeaveCredits = usesGrants ? roundBalance(rowGrants.reduce((s, g) => s + g.hours, 0)) : specialLeaveReset.specialLeaveCredits;
+    // An expired grant's hours are dropped from Credits entirely, not just
+    // excluded from Available — so a grant added for 8h that later expires
+    // unused takes its 8h back out of the Credits total too, keeping
+    // Credits/Used/Available consistent with each other.
+    const specialLeaveCredits = usesGrants
+      ? roundBalance(rowGrants.reduce((s, g) => isSpecialLeaveGrantExpired(g, TODAY) ? s : s + g.hours, 0))
+      : specialLeaveReset.specialLeaveCredits;
     const specialLeaveUsed = usesGrants ? roundBalance(rowGrants.reduce((s, g) => s + g.hoursUsed, 0)) : specialLeaveReset.specialLeaveUsed;
     const specialLeaveAvailable = usesGrants
       ? specialLeaveAvailableForGrants(rowGrants, TODAY)
@@ -1498,12 +1504,17 @@ export default function TimeOffPage() {
                                 {sortedGrants.map((g) => {
                                   const expired = isSpecialLeaveGrantExpired(g, TODAY);
                                   const remaining = Math.max(0, g.hours - g.hoursUsed);
+                                  // A grant fully drawn down (via oldest-first Leave
+                                  // Override consumption) but not yet past its own
+                                  // expiration date shows as "Used" rather than "Active"
+                                  // — it has nothing left, but isn't forfeited/expired either.
+                                  const usedUp = !expired && remaining <= 0;
                                   return (
                                     <div key={g.id} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                                       <div className="flex items-center justify-between gap-2">
                                         <span className="text-sm font-semibold text-slate-700">{fmtDate(g.grantDate)} — {fmtBalance(g.hours)}h</span>
-                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${expired ? "bg-slate-200 text-slate-500" : "bg-emerald-100 text-emerald-700"}`}>
-                                          {expired ? "Expired" : "Active"}
+                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase ${expired ? "bg-slate-200 text-slate-500" : usedUp ? "bg-blue-100 text-blue-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                          {expired ? "Expired" : usedUp ? "Used" : "Active"}
                                         </span>
                                       </div>
                                       <p className="text-xs text-slate-500 mt-1">
