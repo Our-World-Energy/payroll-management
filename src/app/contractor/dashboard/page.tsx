@@ -14,7 +14,7 @@ import {
   LuCalendarDays, LuCake,
   LuChevronRight, LuLoader, LuShieldCheck,
   LuArrowRight,
-  LuX, LuChevronLeft,
+  LuX, LuChevronLeft, LuMegaphone,
 } from "react-icons/lu";
 
 // ── Calendar helpers ──────────────────────────────────────────────────────────
@@ -279,6 +279,12 @@ export default function ContractorDashboardPage() {
   const [allHolidays,   setAllHolidays]   = useState<Holiday[]>([]);
   const [upcomingHols,  setUpcomingHols]  = useState<Holiday[]>([]);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  // "Global" location announcements whose announce-date has arrived — shown
+  // as their own animated banner at the top of the page, separately from the
+  // plain Offshore Announcements list below (which only ever holds "All"/
+  // country-scoped announcements, never gated by date).
+  const [globalBanners, setGlobalBanners] = useState<Announcement[]>([]);
+  const [dismissedBannerIds, setDismissedBannerIds] = useState<Set<string>>(new Set());
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
@@ -336,11 +342,19 @@ export default function ContractorDashboardPage() {
         .sort((a, b) => a.date.localeCompare(b.date));
       setUpcomingHols(upcoming);
 
-      // Announcements: contractor's country + "All" + "Global"
+      // Announcements: contractor's country + "All" (never date-gated, same
+      // as before). "Global" announcements are handled separately below —
+      // they're the only ones with a scheduled announce-date, so they're
+      // pulled out into their own animated banner instead of this list.
       const filtered = allAnnouncements
-        .filter(a => a.location === "All" || a.location === "Global" || a.location === country)
+        .filter(a => a.location === "All" || a.location === country)
         .slice(0, 3);
       setAnnouncements(filtered);
+
+      // Global Announcement (Settings → Global Announcement): only shown once
+      // its scheduled date has arrived.
+      const dueGlobal = allAnnouncements.filter(a => a.location === "Global" && a.date <= today);
+      setGlobalBanners(dueGlobal);
 
       setLoading(false);
     })();
@@ -424,6 +438,33 @@ export default function ContractorDashboardPage() {
           onClose={() => setCalOpen(false)}
         />
       )}
+
+      {/* ── Global Announcement banner(s) ── */}
+      {globalBanners.filter((a) => !dismissedBannerIds.has(a.id)).map((a) => (
+        <div
+          key={a.id}
+          className="relative overflow-hidden rounded-2xl p-5 md:p-6 text-white shadow-sm bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-800 animate-announcement-slide-in"
+        >
+          <div className="absolute inset-0 bg-grid-soft opacity-25 pointer-events-none" />
+          <div className="relative flex items-start gap-4">
+            <div className="w-11 h-11 rounded-xl bg-white/15 ring-1 ring-white/20 shrink-0 grid place-items-center animate-announcement-glow">
+              <LuMegaphone size={20} strokeWidth={2} className="text-white animate-announcement-ring" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-100/80">Announcement</p>
+              <h3 className="text-base md:text-lg font-bold mt-0.5 leading-snug">{a.title}</h3>
+              <p className="text-sm text-emerald-50/90 mt-1 leading-relaxed">{a.body}</p>
+            </div>
+            <button
+              onClick={() => setDismissedBannerIds((prev) => new Set(prev).add(a.id))}
+              className="shrink-0 p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+              title="Dismiss"
+            >
+              <LuX size={16} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+      ))}
 
       {/* ── Welcome / birthday hero ── */}
       {isMyBirthdayToday ? (
