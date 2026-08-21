@@ -545,8 +545,7 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
       </div>
 
       <p className="text-[10px] text-slate-400 mt-3">
-        Check Date is always the Friday following the pay cycle&apos;s end date.
-        Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
+        Disclaimer: This pay voucher is provided solely for working hours calculation and contractor payment verification purposes. It is not intended to serve as an official payslip or proof of employment.
       </p>
     </div>
   );
