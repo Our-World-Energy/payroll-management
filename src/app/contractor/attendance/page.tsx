@@ -16,13 +16,30 @@ import {
 // Standard shift = 8 hours (matches Attendance Review / Payroll's 480-min shift).
 const STANDARD_SHIFT_MINUTES = 480;
 
-// Raw per-day log from /api/attendance/daily-log — firstIn/lastOut are ISO
-// instants (formatted in Arizona time here), totalMins is the Worksnap actual
-// daily total (sum of durations), same value shown on the admin side.
+// Daily Logs' Project/Task rows are tinted by position — 1st green, 2nd blue,
+// 3rd and every row after it pink. Rows arrive sorted by minutes descending, so
+// the tint tracks how much of the day each project/task accounts for. Written
+// as whole literal class strings so Tailwind's scanner picks them up.
+const TASK_ROW_TINTS = [
+  { row: "bg-emerald-50 border-emerald-200", title: "text-emerald-900", sub: "text-emerald-600", mins: "text-emerald-700" },
+  { row: "bg-blue-50 border-blue-200",       title: "text-blue-900",    sub: "text-blue-600",    mins: "text-blue-700"    },
+  { row: "bg-pink-50 border-pink-200",       title: "text-pink-900",    sub: "text-pink-600",    mins: "text-pink-700"    },
+];
+const taskRowTint = (i: number) => TASK_ROW_TINTS[Math.min(i, TASK_ROW_TINTS.length - 1)];
+
+// Raw per-day log from /api/attendance/daily-log — the clock-in/out fields are
+// ISO instants (formatted in Arizona time here), totalMins is the Worksnap
+// actual daily total (sum of durations), same value shown on the admin side.
+// firstInLogged/lastOutLogged are the real clock-in/out instants and are what's
+// displayed; firstIn/lastOut are the rounded Worksnap bucket boundaries, kept
+// as the fallback for rows with no logged instant (same rule the admin Task
+// Breakdown uses, so both sides show the same time).
 type DailyLog = {
   entryDate: string;
   firstIn:   string;
   lastOut:   string;
+  firstInLogged: string | null;
+  lastOutLogged: string | null;
   totalMins: number;
 };
 
@@ -208,10 +225,12 @@ export default function ContractorAttendancePage() {
       const json = res.ok ? await res.json() : { logs: [] };
       const map: Record<string, DayData> = {};
       for (const log of (json.logs ?? []) as DailyLog[]) {
+        const firstIn = log.firstInLogged ?? log.firstIn;
+        const lastOut = log.lastOutLogged ?? log.lastOut;
         map[log.entryDate.slice(0, 10)] = {
           mins:    log.totalMins ?? 0,
-          firstIn: log.firstIn ? fmtTime(log.firstIn, zone) : undefined,
-          lastOut: log.lastOut ? fmtTime(log.lastOut, zone) : undefined,
+          firstIn: firstIn ? fmtTime(firstIn, zone) : undefined,
+          lastOut: lastOut ? fmtTime(lastOut, zone) : undefined,
         };
       }
       setMonthData(map);
@@ -226,17 +245,17 @@ export default function ContractorAttendancePage() {
   }, [logQuery, monthAnchor, loadMonth]);
 
   // ── project/task breakdown for the Daily Logs panel's active date ──
-  // /api/attendance/user-breakdown only accepts a Worksnap userId (not
-  // email) and returns a whole Sun→Sat week at once — fetched for the
-  // week containing activeDate, then narrowed down to just that date.
+  // Same source and scoping the calendar above uses (`logQuery`, so a blank
+  // profile worksnapId falls back to email) and the same endpoint the admin
+  // Attendance breakdown reads. It returns a whole Sun→Sat week at once —
+  // fetched for the week containing activeDate, then narrowed to that date.
   useEffect(() => {
-    const wid = Number(profile?.worksnapId);
-    if (!profile?.worksnapId || Number.isNaN(wid)) { setDayTasks([]); return; }
+    if (!logQuery) { setDayTasks([]); return; }
 
     let isCancelled = false;
     setDayTasksLoading(true);
     const weekStart = sundayOf(activeDate);
-    fetch(`/api/attendance/user-breakdown?userId=${wid}&week=${weekStart}`)
+    fetch(`/api/attendance/user-breakdown?${logQuery}&week=${weekStart}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((json: { tasks?: { projectName: string; taskName: string; category: string; perDay?: Record<string, number> }[] } | null) => {
         if (isCancelled) return;
@@ -250,7 +269,7 @@ export default function ContractorAttendancePage() {
       .finally(() => { if (!isCancelled) setDayTasksLoading(false); });
 
     return () => { isCancelled = true; };
-  }, [activeDate, profile?.worksnapId]);
+  }, [activeDate, logQuery]);
 
   if (loading) {
     return (
@@ -524,15 +543,18 @@ export default function ContractorAttendancePage() {
                           <p className="text-xs text-slate-400">No task breakdown available for this day.</p>
                         ) : (
                           <div className="space-y-1.5">
-                            {dayTasks.map((t, i) => (
-                              <div key={i} className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
-                                <div className="min-w-0">
-                                  <p className="text-xs font-semibold text-[#191c1e] truncate">{t.projectName}</p>
-                                  <p className="text-[10px] text-slate-400 truncate">{t.taskName || t.category}</p>
+                            {dayTasks.map((t, i) => {
+                              const tint = taskRowTint(i);
+                              return (
+                                <div key={i} className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${tint.row}`}>
+                                  <div className="min-w-0">
+                                    <p className={`text-xs font-semibold truncate ${tint.title}`}>{t.projectName}</p>
+                                    <p className={`text-[10px] truncate ${tint.sub}`}>{t.taskName || t.category}</p>
+                                  </div>
+                                  <span className={`text-xs font-bold tabular-nums shrink-0 ${tint.mins}`}>{fmtHoursMinutes(t.mins)}</span>
                                 </div>
-                                <span className="text-xs font-bold text-slate-600 tabular-nums shrink-0">{fmtHoursMinutes(t.mins)}</span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         )}
                       </div>

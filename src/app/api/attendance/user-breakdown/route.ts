@@ -6,9 +6,14 @@ import { prisma } from "@/lib/prisma";
  * Shows how each day's minutes are composed (which tasks / breaks / meetings).
  *
  *   GET /api/attendance/user-breakdown?userId=1051389&week=2026-05-31
+ *   GET /api/attendance/user-breakdown?email=someone@ourworldenergy.com&week=2026-05-31
  *
  * `week` is the week start (Sunday). Keyed on worksnapUserId so users without a
- * mapped email still resolve.
+ * mapped email still resolve; `email` is accepted as an alternative and resolved
+ * to that same worksnapUserId first, so both callers run identical logic. The
+ * contractor-facing Daily Logs panel needs the email form — contractor_profiles
+ * .worksnapId is blank on every current profile (same reason
+ * /api/attendance/daily-log takes an email).
  */
 
 export const runtime = "nodejs";
@@ -28,11 +33,12 @@ type TaskRow = {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const userId = Number(url.searchParams.get("userId"));
+  const userIdParam = Number(url.searchParams.get("userId"));
+  const emailParam = url.searchParams.get("email");
   const week = url.searchParams.get("week");
 
-  if (!userId || !week) {
-    return Response.json({ error: "userId and week are required" }, { status: 400 });
+  if ((!userIdParam && !emailParam) || !week) {
+    return Response.json({ error: "userId (or email) and week are required" }, { status: 400 });
   }
 
   const weekStart = new Date(`${week}T00:00:00.000Z`);
@@ -45,6 +51,35 @@ export async function GET(request: Request) {
     const d = new Date(weekStart);
     d.setUTCDate(d.getUTCDate() + i);
     days.push(toISODate(d));
+  }
+
+  // Resolve an email caller to the worksnapUserId everything below is keyed on,
+  // so the email and userId forms produce byte-identical results. worksnap_entries
+  // is the primary lookup (it's what the task rows come from); worksnap_daily_log
+  // is the backstop for someone with clock-in rows but no task entries.
+  let userId = userIdParam;
+  if (!userId && emailParam) {
+    const where = { email: { equals: emailParam, mode: "insensitive" as const } };
+    const match =
+      (await prisma.worksnapEntry.findFirst({
+        where, select: { worksnapUserId: true }, orderBy: { entryDate: "desc" },
+      })) ??
+      (await prisma.worksnapDailyLog.findFirst({
+        where, select: { worksnapUserId: true }, orderBy: { entryDate: "desc" },
+      }));
+    userId = match?.worksnapUserId ?? 0;
+  }
+
+  // Known caller, no Worksnap identity at all — an empty week, not an error, so
+  // the panel renders "no tasks" instead of failing.
+  if (!userId) {
+    return Response.json({
+      userId: null, userName: "", email: emailParam ?? "", week, days,
+      tasks: [], dailyTotals: Object.fromEntries(days.map((d) => [d, 0])), grandTotal: 0,
+      adjustments: Object.fromEntries(days.map((d) => [d, 0])),
+      timeOff: Object.fromEntries(days.map((d) => [d, 0])),
+      timeOffStatusByDate: {}, firstIn: {}, lastOut: {},
+    });
   }
 
   const entries = await prisma.worksnapEntry.findMany({
@@ -102,10 +137,14 @@ export async function GET(request: Request) {
     if (s.timeOffStatus !== "NOT_SET") timeOffStatusByDate[d] = s.timeOffStatus;
   }
 
-  // per-day first clock-in / last clock-out (AZ time), from worksnap_daily_log
+  // per-day first clock-in / last clock-out (AZ time), from worksnap_daily_log.
+  // Displayed from firstInLogged/lastOutLogged — the actual clock-in/out
+  // instants — since firstIn/lastOut are the rounded Worksnap time-entry bucket
+  // boundaries and read a few minutes early/late. firstIn/lastOut stay as the
+  // fallback for the tail of rows that were never backfilled.
   const dailyLogs = await prisma.worksnapDailyLog.findMany({
     where: { worksnapUserId: userId, entryDate: { gte: weekStart, lte: weekEnd } },
-    select: { entryDate: true, firstIn: true, lastOut: true },
+    select: { entryDate: true, firstIn: true, lastOut: true, firstInLogged: true, lastOutLogged: true },
   });
   const fmtTime = (d: Date) =>
     d.toLocaleTimeString("en-US", {
@@ -119,8 +158,8 @@ export async function GET(request: Request) {
   const lastOut: Record<string, string> = {};
   for (const l of dailyLogs) {
     const d = toISODate(l.entryDate);
-    firstIn[d] = fmtTime(l.firstIn);
-    lastOut[d] = fmtTime(l.lastOut);
+    firstIn[d] = fmtTime(l.firstInLogged ?? l.firstIn);
+    lastOut[d] = fmtTime(l.lastOutLogged ?? l.lastOut);
   }
 
   return Response.json({ userId, userName, email, week, days, tasks, dailyTotals, grandTotal, adjustments, timeOff, timeOffStatusByDate, firstIn, lastOut });

@@ -131,10 +131,16 @@ export default function AdminPage() {
           if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
         }
 
+        // Late Today keys off `firstInLogged` — the contractor's actual clock-in
+        // instant. `firstIn` is the rounded Worksnap time-entry bucket boundary
+        // (e.g. 6:30:01 for a 6:32:51 clock-in), which reads a few minutes early
+        // and can clear the grace period when the real login didn't. Fall back to
+        // `firstIn` only for the small tail of rows with no logged instant.
         const firstInByEmail = new Map<string, Date>();
         for (const log of (dailyLogRes.logs ?? [])) {
           const email = String(log.email ?? "").trim().toLowerCase();
-          if (email && log.firstIn) firstInByEmail.set(email, new Date(log.firstIn));
+          const logged = log.firstInLogged ?? log.firstIn;
+          if (email && logged) firstInByEmail.set(email, new Date(logged));
         }
 
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
@@ -162,7 +168,7 @@ export default function AdminPage() {
         );
 
         // Late Today only applies to Fixed shift contractors — real check:
-        // firstIn (worksnap_daily_log) vs the contractor's own Shift Start
+        // firstInLogged (worksnap_daily_log) vs the contractor's own Shift Start
         // (contractor_profiles.shiftHours), in Arizona time, with a 15-minute
         // grace period (a clock-in at exactly Shift Start + 15 min is still on
         // time; one minute past that is late). Flexible shift contractors have

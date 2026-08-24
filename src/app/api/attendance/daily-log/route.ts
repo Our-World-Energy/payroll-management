@@ -44,7 +44,14 @@ export async function GET(request: Request) {
 
   const logs = await prisma.worksnapDailyLog.findMany({
     where,
-    select: { worksnapUserId: true, email: true, entryDate: true, firstIn: true, lastOut: true, totalMins: true },
+    select: {
+      worksnapUserId: true, email: true, entryDate: true,
+      firstIn: true, lastOut: true,
+      // Real clock-in/out instants — firstIn/lastOut are the rounded Worksnap
+      // bucket boundaries. Null on a small tail of un-backfilled rows.
+      firstInLogged: true, lastOutLogged: true,
+      totalMins: true,
+    },
   });
 
   return Response.json({ from, to, logs });

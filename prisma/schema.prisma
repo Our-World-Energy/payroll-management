@@ -325,6 +325,11 @@ model WorksnapDailyLog {
   entryDate      DateTime @db.Date
   firstIn        DateTime @db.Timestamptz(3)
   lastOut        DateTime @db.Timestamptz(3)
+  /// Actual clock-in/out instants, as opposed to firstIn/lastOut which are the
+  /// rounded Worksnap time-entry bucket boundaries. Nullable — a small tail of
+  /// older rows was never backfilled, so read these with a firstIn/lastOut fallback.
+  firstInLogged  DateTime? @db.Timestamptz(3)
+  lastOutLogged  DateTime? @db.Timestamptz(3)
   totalMins      Int      @default(0)
   entries        Int      @default(0)
   syncedAt       DateTime @default(now())

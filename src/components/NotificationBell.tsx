@@ -144,10 +144,14 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
           const email = String(e.email ?? "").trim().toLowerCase();
           if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
         }
+        // Keyed off `firstInLogged` (the real clock-in instant) with a `firstIn`
+        // fallback — same source the Dashboard's Late Today widget uses, so the
+        // bell's count can't drift from the widget's.
         const firstInByEmail = new Map<string, Date>();
         for (const log of (dailyLogRes.logs ?? [])) {
           const email = String(log.email ?? "").trim().toLowerCase();
-          if (email && log.firstIn) firstInByEmail.set(email, new Date(log.firstIn));
+          const logged = log.firstInLogged ?? log.firstIn;
+          if (email && logged) firstInByEmail.set(email, new Date(logged));
         }
 
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
@@ -161,7 +165,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
         );
 
         // Late Today only applies to Fixed shift contractors — same check as
-        // the Dashboard's Late Today widget (firstIn vs Shift Start + 15min grace).
+        // the Dashboard's Late Today widget (firstInLogged vs Shift Start + 15min grace).
         const late: AlertRow[] = [];
         for (const c of activeContractors) {
           const isFixed = (c.shiftType || "").trim().toLowerCase() === "fixed";
