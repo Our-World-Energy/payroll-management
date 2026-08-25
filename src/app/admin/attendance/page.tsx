@@ -3203,9 +3203,15 @@ export default function AttendancePage() {
 
   function formatArizona(iso: string | null): string {
     if (!iso) return "never";
-    return new Date(iso).toLocaleString("en-US", {
+    // syncedAt is a Postgres TIMESTAMP *without* time zone holding a UTC wall
+    // clock, so PostgREST returns it with no zone designator ("…T15:55:12.345").
+    // new Date() would read that as browser-local and the Phoenix conversion
+    // would be a no-op, showing the UTC clock. Pin it to UTC before parsing;
+    // values that already carry a zone (the sync route's toISOString) pass through.
+    const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso);
+    return new Date(hasZone ? iso : `${iso}Z`).toLocaleString("en-US", {
       timeZone: "America/Phoenix", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit",
-    }) + " MST";
+    }) + " Arizona Time";
   }
 
   // No mock-data fallback on error: showing fabricated numbers in a payroll
@@ -3348,7 +3354,11 @@ export default function AttendancePage() {
           </div>
           <div>
             <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Attendance Management</h2>
-            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>Weekly Time Tracking Review (Standard: 2,700 min/week)</p>
+            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
+              Weekly Time Tracking Review (Standard: 2,700 min/week)
+              <span className={dark ? "text-red-400/70" : "text-red-500/70"}> · Sync at: </span>
+              <span className={`font-semibold tabular-nums ${dark ? "text-red-400" : "text-red-600"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span>
+            </p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1.5">
