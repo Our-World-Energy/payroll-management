@@ -419,11 +419,12 @@ export default function AttendanceTrackerPage() {
 
         {/* Table */}
         <div className="overflow-auto" style={{ maxHeight: "65vh" }}>
-          <table className="w-full text-left" style={{ minWidth: 1100, borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left" style={{ minWidth: 1280, borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-20">
               <tr>
                 <th className={headerCell} style={{ minWidth: 260, background: "#003527" }}>Contractor</th>
                 <th className={headerCell} style={{ background: "#003527" }}>Assigned Team</th>
+                <th className={headerCell} style={{ minWidth: 170, background: "#003527" }}>Scheduled Time</th>
                 <th className={headerCell} style={{ background: "#003527" }}>Actual Time In</th>
                 <th className={headerCell} style={{ background: "#003527" }}>Actual Time Out</th>
                 <th className={headerCell} style={{ background: "#003527" }}>Project</th>
@@ -435,14 +436,14 @@ export default function AttendanceTrackerPage() {
             <tbody>
               {loading && filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={9} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     <span className="inline-flex items-center gap-1.5"><LuRefreshCw size={14} className="animate-spin" /> Loading {dayLabel}…</span>
                   </td>
                 </tr>
               )}
               {!loading && filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={9} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     {error ? (
                       <span className="inline-flex items-center gap-2 text-red-600">
                         {error}
@@ -477,15 +478,24 @@ export default function AttendanceTrackerPage() {
                           <p className="text-sm font-semibold text-slate-900">{row.userName}</p>
                           <p className="text-xs text-slate-500 truncate">{row.email || "No email"}</p>
                           <p className="text-xs font-semibold text-teal-700 mt-1 tabular-nums">Day total: {formatMinutes(row.totalMins)}</p>
-                          {row.shiftStart && row.shiftEnd && (
-                            // The window this date was actually judged against —
-                            // for a Shifting Schedule contractor it changes day to day.
-                            <p className="text-[11px] text-slate-400 tabular-nums">
-                              Shift: {row.shiftStart} – {row.shiftEnd}
-                            </p>
-                          )}
                         </td>
                         <td rowSpan={span} className={cell}>{row.department || <span className="text-slate-300">—</span>}</td>
+                        {/* Scheduled Time — the shift window in force on this
+                            date, which for a Shifting Schedule contractor comes
+                            from that date's own row and changes day to day. It's
+                            what Late and Undertime are judged against. */}
+                        <td rowSpan={span} className={clockCell} style={{ minWidth: 170 }}>
+                          {row.shiftStart && row.shiftEnd ? (
+                            <>
+                              <span className="font-semibold text-slate-800">{row.shiftStart} – {row.shiftEnd}</span>
+                              {row.expectedMins != null && row.expectedMins > 0 && (
+                                <span className="block text-[10px] font-semibold text-slate-400">{formatMinutes(row.expectedMins)} scheduled</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
                         <td rowSpan={span} className={`${clockCell} font-semibold text-slate-800`}>
                           {row.timeIn ?? <span className="font-normal text-slate-300">—</span>}
                         </td>
