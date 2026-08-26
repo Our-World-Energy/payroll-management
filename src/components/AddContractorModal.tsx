@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LuX, LuUserPlus, LuPencil } from "react-icons/lu";
+import { LuX, LuUserPlus, LuPencil, LuCalendarDays } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
+import { ShiftScheduleModal } from "@/components/ShiftScheduleModal";
+import { SHIFTING_SCHEDULE } from "@/app/admin/contractors/shiftScheduleShared";
 
 type Props = {
   onClose: () => void;
@@ -144,6 +146,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [showShiftSchedule, setShowShiftSchedule] = useState(false);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -208,7 +211,13 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       payCategory:    form.payCategory,
       payPeriod:      "Sunday – Saturday",
       shiftType:      form.shiftType,
-      shiftHours:     form.shiftType === "Fixed" ? `${form.shiftFrom} to ${form.shiftTo}` : "Flexible",
+      // Shifting Schedule stores its hours per date in contractor_shift_schedule,
+      // so shiftHours carries the label rather than a single window — that also
+      // makes parseShiftStart return null, which is what keeps the Fixed-only
+      // late check from mis-evaluating these contractors.
+      shiftHours:     form.shiftType === "Fixed" ? `${form.shiftFrom} to ${form.shiftTo}`
+                    : form.shiftType === SHIFTING_SCHEDULE ? SHIFTING_SCHEDULE
+                    : "Flexible",
       restDay:        form.restDays.length ? form.restDays.join(", ") : "—",
       currency:       form.currency,
       monthlyRate:    form.monthlyRate || "—",
@@ -427,6 +436,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
                   <option value="Fixed">Fixed</option>
                   <option value="Flexible">Flexible</option>
+                  <option value={SHIFTING_SCHEDULE}>{SHIFTING_SCHEDULE}</option>
                 </select>
               </FIELD>
               {form.shiftType === "Fixed" && (
@@ -442,6 +452,23 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     </select>
                   </FIELD>
                 </>
+              )}
+              {/* Shifting Schedule has no single start/end — the hours are set
+                  per date in their own modal, keyed on the contractor's email. */}
+              {form.shiftType === SHIFTING_SCHEDULE && (
+                <FIELD label="Shift Schedule">
+                  <div className="py-2">
+                    {form.email.trim() ? (
+                      <button type="button" onClick={() => setShowShiftSchedule(true)}
+                        className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-700 underline decoration-teal-300 hover:text-teal-900 hover:decoration-teal-500 transition-colors">
+                        <LuCalendarDays size={15} strokeWidth={2} />
+                        Enter Shift Schedule
+                      </button>
+                    ) : (
+                      <p className="text-xs text-slate-400">Enter the contractor&apos;s email first — the schedule is saved against it.</p>
+                    )}
+                  </div>
+                </FIELD>
               )}
             </div>
 
@@ -534,6 +561,17 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           </button>
         </div>
       </div>
+
+      {showShiftSchedule && (
+        <ShiftScheduleModal
+          email={form.email}
+          contractorName={[form.firstName, form.surname].filter(Boolean).join(" ")}
+          // Live from the form, so toggling Typical Non-Working Days is
+          // reflected in the schedule modal without saving first.
+          restDays={form.restDays}
+          onClose={() => setShowShiftSchedule(false)}
+        />
+      )}
     </div>
   );
 }

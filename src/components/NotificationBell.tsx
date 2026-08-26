@@ -11,6 +11,7 @@ import { fetchAnnouncements } from "@/app/admin/announcements/actions";
 import { fetchAlerts } from "@/app/admin/settings/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { SHIFTING_SCHEDULE, parseShiftTime } from "@/app/admin/contractors/shiftScheduleShared";
 
 type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
 type AlertRow = { name: string; department: string };
@@ -133,11 +134,21 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
         cutoff.setHours(7, 30, 0, 0);
         if (now < cutoff) { setAbsentRows([]); setLateRows([]); return; }
 
-        const [entriesRes, dailyLogRes] = await Promise.all([
+        const [entriesRes, dailyLogRes, shiftScheduleRes] = await Promise.all([
           fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
           fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
+          fetch(`/api/attendance/shift-schedule?date=${todayLocal}`)
+            .then((r) => (r.ok ? r.json() : { schedules: [] }))
+            .catch(() => ({ schedules: [] })),
         ]);
         if (!active) return;
+
+        // Today's assigned start for Shifting Schedule contractors.
+        const shiftStartByEmail = new Map<string, string>();
+        for (const s of (shiftScheduleRes.schedules ?? []) as { email: string; shiftStart: string }[]) {
+          const email = String(s.email ?? "").trim().toLowerCase();
+          if (email && s.shiftStart) shiftStartByEmail.set(email, s.shiftStart);
+        }
 
         const minutesByEmail = new Map<string, number>();
         for (const e of (entriesRes.entries ?? [])) {
@@ -164,15 +175,21 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
             .map((c) => ({ name: c.fullName, department: c.department }))
         );
 
-        // Late Today only applies to Fixed shift contractors — same check as
-        // the Dashboard's Late Today widget (firstInLogged vs Shift Start + 15min grace).
+        // Late Today applies to Fixed and Shifting Schedule contractors — same
+        // check as the Dashboard's Late Today widget (firstInLogged vs that
+        // date's Shift Start + 15min grace). Flexible contractors have no start
+        // time to be late against.
         const late: AlertRow[] = [];
         for (const c of activeContractors) {
-          const isFixed = (c.shiftType || "").trim().toLowerCase() === "fixed";
-          if (!isFixed) continue;
+          const shiftTypeLabel = (c.shiftType || "").trim();
+          const isFixed = shiftTypeLabel.toLowerCase() === "fixed";
+          const isShifting = shiftTypeLabel === SHIFTING_SCHEDULE;
+          if (!isFixed && !isShifting) continue;
           const email = c.email.trim().toLowerCase();
           const firstIn = firstInByEmail.get(email);
-          const shiftStart = parseShiftStart(c.shiftHours || "");
+          const shiftStart = isShifting
+            ? parseShiftTime(shiftStartByEmail.get(email) ?? "")
+            : parseShiftStart(c.shiftHours || "");
           if (!firstIn || !shiftStart) continue;
           const thresholdInstant = utcInstantForLocalTime(todayLocal, shiftStart.hour, shiftStart.minute + LATE_GRACE_MINUTES, ARIZONA_TIME_ZONE);
           if (firstIn.getTime() > thresholdInstant.getTime()) {

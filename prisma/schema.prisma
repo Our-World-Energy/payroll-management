@@ -654,3 +654,24 @@ model AttendanceDayStatus {
   @@index([email, date])
   @@map("attendance_day_status")
 }
+
+/// Per-contractor per-date shift window, for contractors whose Shift Type is
+/// "Shifting Schedule" — their start/end differs day to day, so a single
+/// contractor_profiles.shiftHours string can't express it. Keyed on
+/// email + date so one contractor can hold different hours on different days
+/// and across different weeks. Times are stored as "h:mm AM/PM" strings, the
+/// same format contractor_profiles.shiftHours already uses, so the existing
+/// shift-start parsing works unchanged.
+model ContractorShiftSchedule {
+  id         String   @id @default(uuid()) @db.Uuid
+  email      String
+  date       DateTime @db.Date
+  shiftStart String   @default("")
+  shiftEnd   String   @default("")
+  updatedAt  DateTime @updatedAt @default(now())
+
+  @@unique([email, date], name: "contractor_shift_schedule_key")
+  @@index([date])
+  @@index([email, date])
+  @@map("contractor_shift_schedule")
+}

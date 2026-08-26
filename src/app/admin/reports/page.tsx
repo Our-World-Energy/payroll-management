@@ -1,13 +1,7 @@
-import { LuDownload, LuUsers, LuWallet, LuFingerprint, LuCalendarX, LuChartColumn } from "react-icons/lu";
+import Link from "next/link";
+import { LuArrowRight, LuClock, LuChartColumn } from "react-icons/lu";
 import { fetchAllContractors } from "../contractors/actions";
 import { countryFromLocation } from "@/lib/countryTimeZones";
-
-const REPORTS = [
-  { name: "Payroll Summary – May 2026", type: "Payroll", generated: "2026-05-15", Icon: LuWallet },
-  { name: "Attendance Report – May 2026", type: "Attendance", generated: "2026-05-15", Icon: LuFingerprint },
-  { name: "Headcount by Region – Q2 2026", type: "Workforce", generated: "2026-05-01", Icon: LuUsers },
-  { name: "Leave & Absence – May 2026", type: "Time Away", generated: "2026-05-15", Icon: LuCalendarX },
-];
 
 export default async function ReportsPage() {
   const contractors = await fetchAllContractors({ country: "All Countries", status: "Active", rules: [] });
@@ -56,31 +50,32 @@ export default async function ReportsPage() {
         </div>
       </div>
 
-      {/* Downloadable reports */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-100">
-          <h4 className="text-lg font-semibold text-[#003527]">Generated Reports</h4>
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {REPORTS.map(({ name, type, generated, Icon }) => (
-            <li key={name} className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors">
+      {/* Attendance Tracker — a live per-day view, not a generated file */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8">
+        <ul>
+          <li>
+            <Link
+              href="/admin/reports/attendance-tracker"
+              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group"
+            >
               <div className="flex items-center gap-4">
                 <div className="size-9 rounded-lg bg-teal-50 text-teal-700 grid place-items-center">
-                  <Icon size={18} strokeWidth={1.75} />
+                  <LuClock size={18} strokeWidth={1.75} />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{name}</p>
-                  <p className="text-xs text-slate-400">{type} · Generated {generated}</p>
+                  <p className="text-sm font-semibold text-slate-800 group-hover:text-teal-800">Attendance Tracker</p>
+                  <p className="text-xs text-slate-400">Per-day clock-in / clock-out and project task time</p>
                 </div>
               </div>
-              <button className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 hover:text-teal-900 transition-colors">
-                <LuDownload size={14} strokeWidth={2} />
-                Download
-              </button>
-            </li>
-          ))}
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 group-hover:text-teal-900 transition-colors">
+                Open
+                <LuArrowRight size={14} strokeWidth={2} />
+              </span>
+            </Link>
+          </li>
         </ul>
       </div>
+
     </div>
   );
 }

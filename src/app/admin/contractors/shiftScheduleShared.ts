@@ -1,0 +1,34 @@
+// Shared, non-server module: a "use server" file may only export async
+// functions, so the Shift Type label and the row shape live here where both
+// client components and the server actions can import them.
+
+export const SHIFTING_SCHEDULE = "Shifting Schedule";
+
+export type ShiftScheduleDay = {
+  date: string;       // YYYY-MM-DD
+  shiftStart: string; // "7:00 AM" — same format as contractor_profiles.shiftHours
+  shiftEnd: string;   // "3:00 PM"
+};
+
+// contractor_profiles.shiftHours is free text like "9:00 AM to 6:00 PM" — pull
+// the leading start time out of it. Shared so the shift-schedule rows and the
+// Fixed-shift string are parsed by exactly the same rule.
+export function parseShiftTime(value: string): { hour: number; minute: number } | null {
+  const m = value.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!m) return null;
+  let hour = Number(m[1]) % 12;
+  if (m[3].toUpperCase() === "PM") hour += 12;
+  return { hour, minute: Number(m[2]) };
+}
+
+// Scheduled length of a shift window, in minutes. An end at or before the start
+// is read as an overnight shift and wraps past midnight.
+export function scheduledMinutes(shiftStart: string, shiftEnd: string): number | null {
+  const start = parseShiftTime(shiftStart);
+  const end = parseShiftTime(shiftEnd);
+  if (!start || !end) return null;
+
+  const startMins = start.hour * 60 + start.minute;
+  const endMins = end.hour * 60 + end.minute;
+  return endMins > startMins ? endMins - startMins : endMins + 24 * 60 - startMins;
+}

@@ -8,6 +8,7 @@ import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
+import { SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 
 type AbsentRow = {
   name: string;
@@ -118,12 +119,23 @@ export default function AdminPage() {
       ].join("-");
 
       try {
-        const [entriesRes, contractors, dailyLogRes, leaveRequests] = await Promise.all([
+        const [entriesRes, contractors, dailyLogRes, leaveRequests, shiftScheduleRes] = await Promise.all([
           fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
           fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
           fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
           fetchAllLeaveRequestsAdmin().catch(() => []),
+          // Per-date windows for Shifting Schedule contractors — their start
+          // time changes day to day, so it can't come from shiftHours.
+          fetch(`/api/attendance/shift-schedule?date=${todayLocal}`)
+            .then((r) => (r.ok ? r.json() : { schedules: [] }))
+            .catch(() => ({ schedules: [] })),
         ]);
+
+        const shiftStartByEmail = new Map<string, string>();
+        for (const s of (shiftScheduleRes.schedules ?? []) as { email: string; shiftStart: string }[]) {
+          const email = String(s.email ?? "").trim().toLowerCase();
+          if (email && s.shiftStart) shiftStartByEmail.set(email, s.shiftStart);
+        }
 
         const minutesByEmail = new Map<string, number>();
         for (const e of (entriesRes.entries ?? [])) {
@@ -167,21 +179,29 @@ export default function AdminPage() {
             .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: absenceStatusFor(c.email!.trim().toLowerCase()) }))
         );
 
-        // Late Today only applies to Fixed shift contractors — real check:
-        // firstInLogged (worksnap_daily_log) vs the contractor's own Shift Start
-        // (contractor_profiles.shiftHours), in Arizona time, with a 15-minute
-        // grace period (a clock-in at exactly Shift Start + 15 min is still on
-        // time; one minute past that is late). Flexible shift contractors have
-        // no fixed start time to be late against, so they're excluded from
-        // Late Today entirely.
+        // Late Today applies to Fixed and Shifting Schedule contractors — real
+        // check: firstInLogged (worksnap_daily_log) vs the contractor's own
+        // Shift Start for today, in Arizona time, with a 15-minute grace period
+        // (a clock-in at exactly Shift Start + 15 min is still on time; one
+        // minute past that is late). Fixed contractors take their start from
+        // contractor_profiles.shiftHours; Shifting Schedule contractors from
+        // today's row in contractor_shift_schedule. Flexible shift contractors
+        // have no start time to be late against, so they're excluded entirely.
         const lateRows: LateRow[] = [];
         for (const c of activeContractors) {
-          const isFixed = (c.shiftType || "").trim().toLowerCase() === "fixed";
-          if (!isFixed) continue;
+          const shiftTypeLabel = (c.shiftType || "").trim();
+          const isFixed = shiftTypeLabel.toLowerCase() === "fixed";
+          const isShifting = shiftTypeLabel === SHIFTING_SCHEDULE;
+          if (!isFixed && !isShifting) continue;
 
           const email = c.email!.trim().toLowerCase();
           const firstIn = firstInByEmail.get(email);
-          const shiftStart = parseShiftStart(c.shiftHours || "");
+          // A Shifting Schedule contractor is judged against today's own
+          // assigned start; with no row for today they have no start time to be
+          // late against and are skipped, the same as a Flexible contractor.
+          const shiftStart = isShifting
+            ? parseShiftTime(shiftStartByEmail.get(email) ?? "")
+            : parseShiftStart(c.shiftHours || "");
           if (!firstIn || !shiftStart) continue; // no clock-in yet today, or no parsable shift start
 
           // Shift Start (from Contractor Profile) and firstIn are both

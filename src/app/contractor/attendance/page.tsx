@@ -76,9 +76,12 @@ function holidayInitialFor(date: string, holidays: Holiday[], country: string): 
   return null;
 }
 
+// Seconds are included so the In/Out cards show the exact logged instant —
+// firstInLogged/lastOutLogged are real clock timestamps, not rounded buckets,
+// so truncating to the minute would hide up to 59s of the actual punch time.
 function fmtTime(iso: string, timeZone: string) {
   return new Date(iso).toLocaleTimeString("en-US", {
-    hour: "numeric", minute: "2-digit", hour12: true, timeZone,
+    hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true, timeZone,
   });
 }
 
@@ -519,11 +522,11 @@ export default function ContractorAttendancePage() {
                       <div className="mt-3 flex items-center gap-3">
                         <div className="flex-1 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">In</p>
-                          <p className="text-xs font-semibold text-[#191c1e] mt-0.5 tabular-nums">{data?.firstIn ?? "—"}</p>
+                          <p className="text-xs font-semibold text-[#191c1e] mt-0.5 tabular-nums whitespace-nowrap">{data?.firstIn ?? "—"}</p>
                         </div>
                         <div className="flex-1 rounded-lg bg-slate-50 border border-slate-100 px-3 py-2">
                           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">Out</p>
-                          <p className="text-xs font-semibold text-[#191c1e] mt-0.5 tabular-nums">{data?.lastOut ?? "—"}</p>
+                          <p className="text-xs font-semibold text-[#191c1e] mt-0.5 tabular-nums whitespace-nowrap">{data?.lastOut ?? "—"}</p>
                         </div>
                       </div>
                       <div className={`mt-2.5 inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full tabular-nums ${
