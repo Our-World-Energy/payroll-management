@@ -7,8 +7,17 @@ import {
   type Announcement,
 } from "@/app/admin/announcements/actions";
 
+// "Global" was previously only creatable under Settings → Global Announcement;
+// it now lives here with the country-scoped locations. It behaves differently
+// on the Contractor Portal: a Global announcement is broadcast as an animated
+// banner on every contractor's Dashboard, and only once its date arrives,
+// whereas country-scoped ones show in the Offshore Announcements list
+// immediately. GLOBAL is listed first so that difference is easy to find.
+const GLOBAL = "Global";
+
 const LOCATIONS = [
   "All Locations",
+  GLOBAL,
   "Philippines",
   "Mexico",
   "India",
@@ -64,6 +73,11 @@ export function AnnouncementBoard() {
     setEditingId(null);
     setFormError("");
   }
+
+  // A Global announcement is date-gated on the Contractor Portal, so whether
+  // it has gone live yet is worth showing. Carried over from the Settings
+  // section this replaces.
+  const today = todayIso();
 
   function openAddForm() {
     resetForm();
@@ -198,10 +212,17 @@ export function AnnouncementBoard() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</label>
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                    {location === GLOBAL ? "Date to Announce" : "Date"}
+                  </label>
                   <input type="date" className={INPUT} value={date} onChange={(e) => setDate(e.target.value)} />
                 </div>
               </div>
+              {location === GLOBAL && (
+                <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
+                  Global broadcasts an animated banner on every contractor&apos;s Dashboard, and only once the date above arrives.
+                </p>
+              )}
               {formError && <p className="text-xs font-medium text-red-600">{formError}</p>}
             </div>
             {/* Modal footer */}
@@ -258,17 +279,26 @@ export function AnnouncementBoard() {
             </p>
           </div>
         ) : (
-          filtered.map((a) => (
-            <div key={a.id} className="p-3 bg-slate-50 rounded-lg border border-slate-100 flex gap-3">
+          filtered.map((a) => {
+            const isGlobal = a.location === GLOBAL;
+            const isLive = a.date <= today;
+            return (
+            <div key={a.id} className={`p-3 rounded-lg border flex gap-3 ${isGlobal ? "bg-purple-50/60 border-purple-100" : "bg-slate-50 border-slate-100"}`}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                   <span className="text-sm font-semibold text-[#003527]">{a.title}</span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-teal-50 text-teal-700 border border-teal-100">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${isGlobal ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-teal-50 text-teal-700 border-teal-100"}`}>
                     {a.location}
                   </span>
+                  {/* Only Global is date-gated, so only Global gets a live/scheduled state. */}
+                  {isGlobal && (
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${isLive ? "text-emerald-700 bg-emerald-50" : "text-amber-700 bg-amber-50"}`}>
+                      {isLive ? `Live since ${formatAnnouncementDate(a.date)}` : `Scheduled for ${formatAnnouncementDate(a.date)}`}
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 leading-relaxed">{a.body}</p>
-                <p className="text-xs text-slate-400 mt-1">{formatAnnouncementDate(a.date)}</p>
+                {!isGlobal && <p className="text-xs text-slate-400 mt-1">{formatAnnouncementDate(a.date)}</p>}
               </div>
               <div className="shrink-0 flex items-center gap-1 self-start">
                 <button
@@ -288,7 +318,8 @@ export function AnnouncementBoard() {
                 </button>
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
