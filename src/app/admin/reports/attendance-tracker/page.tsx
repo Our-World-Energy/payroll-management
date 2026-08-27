@@ -15,6 +15,7 @@ type TrackerRow = {
   email: string;
   department: string;
   shiftType: string;
+  payCategory: string;
   location: string;
   timeIn: string | null;
   timeOut: string | null;
@@ -147,6 +148,7 @@ export default function AttendanceTrackerPage() {
   const [day, setDay] = useState(todayIso.slice(8, 10));
   const [nameSearch, setNameSearch] = useState("");
   const [teamFilter, setTeamFilter] = useState("All");
+  const [payCategoryFilter, setPayCategoryFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [countryFilter, setCountryFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -212,6 +214,11 @@ export default function AttendanceTrackerPage() {
     [rows]
   );
 
+  const payCategoryOptions = useMemo(
+    () => Array.from(new Set(rows.map((r) => r.payCategory).filter(Boolean))).sort(),
+    [rows]
+  );
+
   const shiftTypeOptions = useMemo(
     () => Array.from(new Set(rows.map((r) => r.shiftType).filter(Boolean))).sort(),
     [rows]
@@ -227,6 +234,7 @@ export default function AttendanceTrackerPage() {
     return rows.filter((row) => {
       if (search && !row.userName.toLowerCase().includes(search) && !row.email.toLowerCase().includes(search)) return false;
       if (teamFilter !== "All" && row.department !== teamFilter) return false;
+      if (payCategoryFilter !== "All" && row.payCategory !== payCategoryFilter) return false;
       if (shiftTypeFilter !== "All" && row.shiftType !== shiftTypeFilter) return false;
       if (countryFilter !== "All" && countryFromLocation(row.location) !== countryFilter) return false;
       if (statusFilter !== "All") {
@@ -241,7 +249,7 @@ export default function AttendanceTrackerPage() {
       }
       return true;
     });
-  }, [rows, nameSearch, teamFilter, shiftTypeFilter, countryFilter, statusFilter]);
+  }, [rows, nameSearch, teamFilter, payCategoryFilter, shiftTypeFilter, countryFilter, statusFilter]);
 
   const totals = useMemo(() => {
     // Counted from statusesFor so the tiles always agree with the Status column.
@@ -267,12 +275,13 @@ export default function AttendanceTrackerPage() {
     return { late, undertime, overBreak, absent, activeContractors, present };
   }, [filteredRows]);
 
-  const filtersActive = Boolean(nameSearch) || teamFilter !== "All"
+  const filtersActive = Boolean(nameSearch) || teamFilter !== "All" || payCategoryFilter !== "All"
     || shiftTypeFilter !== "All" || countryFilter !== "All" || statusFilter !== "All";
 
   function clearFilters() {
     setNameSearch("");
     setTeamFilter("All");
+    setPayCategoryFilter("All");
     setShiftTypeFilter("All");
     setCountryFilter("All");
     setStatusFilter("All");
@@ -382,6 +391,10 @@ export default function AttendanceTrackerPage() {
                 </button>
               )}
             </div>
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-44" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
+              <option value="All">All Pay Categories</option>
+              {payCategoryOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+            </FilterSelect>
             <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}

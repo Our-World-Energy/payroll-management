@@ -25,6 +25,7 @@ type TrackerRow = {
   email: string;
   department: string;
   shiftType: string;
+  payCategory: string;
   location: string;
   timeIn: string | null;
   timeOut: string | null;
@@ -85,8 +86,9 @@ export async function GET(request: Request) {
     prisma.contractorProfile.findMany({
       select: {
         email: true, department: true, fullName: true, firstName: true, surname: true, status: true,
-        // Feed the report's Shift Type and Country filters, and the Late check.
-        shiftType: true, location: true, shiftHours: true,
+        // Feed the report's Pay Category / Shift Type / Country filters, and
+        // the Late check.
+        shiftType: true, payCategory: true, location: true, shiftHours: true,
       },
     }),
     // Per-date overrides for Shifting Schedule contractors — only this one day.
@@ -159,6 +161,7 @@ export async function GET(request: Request) {
       email: email.trim(),
       department: profile?.department?.trim() ?? "",
       shiftType: profile?.shiftType?.trim() ?? "",
+      payCategory: profile?.payCategory?.trim() ?? "",
       location: profile?.location?.trim() ?? "",
       timeIn: null,
       timeOut: null,
@@ -234,6 +237,7 @@ export async function GET(request: Request) {
       email: p.email.trim(),
       department: p.department?.trim() ?? "",
       shiftType: p.shiftType?.trim() ?? "",
+      payCategory: p.payCategory?.trim() ?? "",
       location: p.location?.trim() ?? "",
       timeIn: null,
       timeOut: null,
