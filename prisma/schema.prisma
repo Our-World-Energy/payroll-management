@@ -675,3 +675,15 @@ model ContractorShiftSchedule {
   @@index([email, date])
   @@map("contractor_shift_schedule")
 }
+
+/// Global admin switches, one row per key. A key/value table rather than a
+/// column-per-setting so a new toggle needs no migration; the first key is
+/// "time_away_requests_enabled", set under Settings → Time Away Settings.
+/// Values are stored as text ("true"/"false") to keep the shape open.
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @default(now())
+
+  @@map("app_settings")
+}

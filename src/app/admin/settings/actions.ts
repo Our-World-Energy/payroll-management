@@ -341,6 +341,43 @@ export async function saveCutOffTime(monthName: string, monthNo: number): Promis
   return { ok: true };
 }
 
+// ── Global app settings ─────────────────────────────────────────────────────
+// Key/value switches in `app_settings`. Global for now; the key/value shape
+// leaves room for a more specific (per-country, per-contractor) rule later
+// without another migration.
+
+const TIME_AWAY_REQUESTS_ENABLED = "time_away_requests_enabled";
+
+/**
+ * Whether contractors may submit Time Away requests. Defaults to **enabled**
+ * when no row exists, so behaviour is unchanged until an admin turns it off —
+ * and a read failure can never silently lock every contractor out of filing.
+ */
+export async function fetchTimeAwayRequestsEnabled(): Promise<boolean> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("app_settings")
+    .select("value")
+    .eq("key", TIME_AWAY_REQUESTS_ENABLED)
+    .maybeSingle();
+
+  if (error || !data) return true;
+  return data.value !== "false";
+}
+
+export async function saveTimeAwayRequestsEnabled(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("app_settings")
+    .upsert(
+      { key: TIME_AWAY_REQUESTS_ENABLED, value: enabled ? "true" : "false", updatedAt: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // ── Notification Alerts ─────────────────────────────────────────────────────
 // Custom admin-defined alerts (name + a one-time scheduled date) — replaces
 // the old static notification-toggle list on Settings.

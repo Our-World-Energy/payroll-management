@@ -2,7 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved } from "@/lib/timeOffBalances";
-import { fetchCutOffTime } from "../../admin/settings/actions";
+import { fetchCutOffTime, fetchTimeAwayRequestsEnabled } from "../../admin/settings/actions";
 
 function getSupabase() {
   return createClient(
@@ -68,6 +68,49 @@ export async function fetchContractorTimeOff(email: string): Promise<ContractorT
   };
 }
 
+/**
+ * Leave requests that have been decided (Approved or Rejected), newest decision
+ * first — feeds the Contractor Portal notification bell.
+ *
+ * `updatedAt` stands in for a decision timestamp: the row is only written again
+ * when an admin acts on it, so it is when the outcome landed. There is no
+ * dedicated decidedAt column. Requests still Pending, or Cancelled/Archived by
+ * an admin, are not decisions the contractor needs telling about.
+ */
+export type LeaveDecision = {
+  id:        string;
+  type:      string;
+  status:    string;   // "Approved" | "Rejected"
+  startDate: string;
+  endDate:   string;
+  decidedAt: string;   // ISO instant
+};
+
+export async function fetchLeaveDecisions(email: string, sinceDays = 30): Promise<LeaveDecision[]> {
+  const sb = getSupabase();
+  const since = new Date();
+  since.setDate(since.getDate() - sinceDays);
+
+  const { data, error } = await sb
+    .from(LEAVE_TABLE)
+    .select("id, type, status, startDate, endDate, updatedAt")
+    .eq("email", email)
+    .in("status", ["Approved", "Rejected"])
+    .gte("updatedAt", since.toISOString())
+    .order("updatedAt", { ascending: false })
+    .limit(15);
+
+  if (error || !data) return [];
+  return data.map((r) => ({
+    id:        String(r.id),
+    type:      String(r.type),
+    status:    String(r.status),
+    startDate: String(r.startDate),
+    endDate:   String(r.endDate),
+    decidedAt: String(r.updatedAt),
+  }));
+}
+
 export async function fetchLeaveRequests(email: string): Promise<LeaveRequest[]> {
   const sb = getSupabase();
   const { data, error } = await sb
@@ -104,6 +147,13 @@ export async function submitLeaveRequest(params: {
   reason:      string;
 }): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
+
+  // The real enforcement of Settings → Time Away Settings → Enable Time Away
+  // Request. The Contractor Portal also disables the form, but a disabled
+  // control is a hint, not a guarantee — this is what actually holds.
+  if (!(await fetchTimeAwayRequestsEnabled())) {
+    return { ok: false, error: "Time Away requests are currently disabled by your administrator." };
+  }
 
   const now = new Date().toISOString();
   const hours = leaveTypeHours(params.type);

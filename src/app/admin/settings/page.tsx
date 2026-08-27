@@ -12,6 +12,7 @@ import {
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
   fetchCutOffTime, saveCutOffTime,
+  fetchTimeAwayRequestsEnabled, saveTimeAwayRequestsEnabled,
   fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
 
@@ -81,6 +82,35 @@ export default function SettingsPage() {
   const [cutoffSaving, setCutoffSaving] = useState(false);
   const [cutoffSaved,  setCutoffSaved]  = useState(false);
   const [cutoffError,  setCutoffError]  = useState<string | null>(null);
+
+  // ── Enable Time Away Request ──────────────────────────────────────────────
+  // Global switch for whether contractors may submit Time Away requests. Saved
+  // immediately on toggle (there's nothing to "compose" first), and reverted if
+  // the write fails so the UI can't claim a state the DB doesn't hold.
+  const [timeAwayEnabled, setTimeAwayEnabled] = useState(true);
+  const [timeAwayLoaded, setTimeAwayLoaded] = useState(false);
+  const [timeAwaySaving, setTimeAwaySaving] = useState(false);
+  const [timeAwayError, setTimeAwayError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchTimeAwayRequestsEnabled()
+      .then(setTimeAwayEnabled)
+      .catch(() => setTimeAwayEnabled(true))
+      .finally(() => setTimeAwayLoaded(true));
+  }, []);
+
+  async function handleToggleTimeAway(next: boolean) {
+    const prev = timeAwayEnabled;
+    setTimeAwayEnabled(next);
+    setTimeAwaySaving(true);
+    setTimeAwayError(null);
+    const res = await saveTimeAwayRequestsEnabled(next);
+    setTimeAwaySaving(false);
+    if (!res.ok) {
+      setTimeAwayEnabled(prev);
+      setTimeAwayError(res.error ?? "Could not save the setting.");
+    }
+  }
 
   useEffect(() => {
     fetchCutOffTime().then((saved) => {
@@ -719,6 +749,45 @@ export default function SettingsPage() {
         </button>
         {openSections.timeOff && (
           <div className="px-6 py-5">
+            {/* Enable Time Away Request — global switch for the Contractor
+                Portal's Apply Leave form. Disabling leaves balances and history
+                visible; only submitting is blocked. */}
+            <div className="mb-5 pb-5 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-semibold text-[#003527]">Enable Time Away Request</h5>
+                  <p className="text-xs text-slate-400 mt-0.5 max-w-lg">
+                    When off, contractors can still see their Time Away balances and history, but the Apply Leave
+                    form is disabled and no new request can be submitted. Applies to all contractors.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={timeAwayEnabled}
+                  aria-label="Enable Time Away Request"
+                  disabled={!timeAwayLoaded || timeAwaySaving}
+                  onClick={() => handleToggleTimeAway(!timeAwayEnabled)}
+                  className={`relative shrink-0 mt-0.5 h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${timeAwayEnabled ? "bg-emerald-600" : "bg-slate-300"}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${timeAwayEnabled ? "left-[1.375rem]" : "left-0.5"}`} />
+                </button>
+              </div>
+              <p className="mt-2 text-xs font-semibold">
+                {!timeAwayLoaded ? (
+                  <span className="text-slate-400">Loading…</span>
+                ) : timeAwaySaving ? (
+                  <span className="text-slate-400">Saving…</span>
+                ) : timeAwayError ? (
+                  <span className="text-red-600">{timeAwayError}</span>
+                ) : timeAwayEnabled ? (
+                  <span className="text-emerald-600">Enabled — contractors can submit Time Away requests.</span>
+                ) : (
+                  <span className="text-amber-700">Disabled — contractors cannot submit new Time Away requests.</span>
+                )}
+              </p>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Cut Off Time</label>
               <div className="flex flex-wrap items-center gap-3">

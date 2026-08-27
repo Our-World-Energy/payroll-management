@@ -9,12 +9,35 @@ import {
   type ContractorTimeOff, type LeaveRequest,
 } from "./actions";
 import { HOURS_PER_DAY, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuChevronRight, LuChevronDown, LuInfo, LuX, LuCircleAlert,
   LuClipboardList, LuSend, LuCalendarDays,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
+
+function fmtNoticeDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// Shown under a PTO date that falls inside the two-week notice window, so the
+// contractor can see how short the notice actually is rather than only that
+// something is wrong.
+function ShortNoticeHint({ days }: { days: number }) {
+  return (
+    <p className="mt-1.5 flex items-start gap-1.5 text-xs font-medium text-red-600">
+      <LuCircleAlert size={13} strokeWidth={2} className="mt-0.5 shrink-0" />
+      {days < 0
+        ? "This date is in the past."
+        : days === 0
+          ? "That's today — PTO needs 2 weeks' notice."
+          : `Only ${days} day${days === 1 ? "" : "s"}' notice — PTO needs 14.`}
+    </p>
+  );
+}
 
 function fmtHoursMinutes(hrs: number): string {
   const totalMins = Math.round(hrs * 60);
@@ -137,6 +160,10 @@ export default function ContractorTimeOffPage() {
   const [formError, setFormError] = useState("");
   const [success,   setSuccess]   = useState("");
   const [isPending, startTransition] = useTransition();
+  // Settings → Time Away Settings → Enable Time Away Request. Defaults to
+  // enabled so a slow or failed read never locks contractors out of filing;
+  // submitLeaveRequest re-checks server-side, which is the real enforcement.
+  const [requestsEnabled, setRequestsEnabled] = useState(true);
 
   const loadRequests = useCallback(async (userEmail: string) => {
     const reqs = await fetchLeaveRequests(userEmail);
@@ -150,10 +177,12 @@ export default function ContractorTimeOffPage() {
       if (!session?.user?.email) { router.replace("/login"); return; }
       const userEmail = session.user.email;
       setEmail(userEmail);
-      const [profile] = await Promise.all([
+      const [profile, enabled] = await Promise.all([
         fetchContractorTimeOff(userEmail),
         loadRequests(userEmail),
-      ]);
+        fetchTimeAwayRequestsEnabled().catch(() => true),
+      ]).then(([p, , e]) => [p, e] as const);
+      setRequestsEnabled(enabled);
       if (!profile) { setError("Profile not found."); setLoading(false); return; }
       setData(profile);
       // India contractors don't have PTO — default to sick leave tab
@@ -164,6 +193,32 @@ export default function ContractorTimeOffPage() {
   }, [router, loadRequests]);
 
   const isHalfDay = leaveType.endsWith("Half Day");
+  // Covers both "PTO" and "PTO Half Day", matching how the history tables below
+  // already classify a row (row.type.startsWith("PTO")).
+  const isPto = leaveType.startsWith("PTO");
+
+  // PTO must be filed at least two weeks ahead. A date on the boundary itself
+  // (exactly 14 days out) is fine; anything nearer is short notice.
+  const PTO_NOTICE_DAYS = 14;
+  const earliestPtoDate = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + PTO_NOTICE_DAYS);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+
+  // ISO date strings compare correctly as plain strings, so no Date parsing
+  // (and no timezone drift) is needed here.
+  function daysOfNotice(date: string) {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(`${date}T00:00:00`);
+    return Math.round((to.getTime() - from.getTime()) / 86400000);
+  }
+
+  const effectiveEndDate = isHalfDay ? startDate : endDate;
+  const startTooSoon = isPto && Boolean(startDate) && startDate < earliestPtoDate;
+  const endTooSoon = isPto && Boolean(effectiveEndDate) && effectiveEndDate < earliestPtoDate;
 
   const estimatedDays = (() => {
     if (isHalfDay) return startDate ? 0.5 : null;
@@ -307,6 +362,22 @@ export default function ContractorTimeOffPage() {
           </div>
 
           <div className="p-6 space-y-5">
+            {/* Requests turned off under Settings → Time Away Settings. The
+                section stays visible — balances and history are still useful —
+                but nothing here can be submitted. */}
+            {!requestsEnabled && (
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                <LuCircleAlert size={16} strokeWidth={2} className="text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">Time Away requests are currently closed</p>
+                  <p className="text-xs text-amber-700/90 mt-0.5">
+                    New requests are temporarily disabled by your administrator. Your balances and request history
+                    below are still up to date — please check back later or contact your OWE contact.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Success banner */}
             {success && (
               <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700 font-medium">
@@ -323,6 +394,9 @@ export default function ContractorTimeOffPage() {
               </div>
             )}
 
+            {/* fieldset disables every control inside in one place, so a new
+                field added later is covered without being wired up separately. */}
+            <fieldset disabled={!requestsEnabled} className={`space-y-5 border-0 p-0 m-0 ${!requestsEnabled ? "opacity-60" : ""}`}>
             {/* Leave Type */}
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">1. Leave Type</label>
@@ -339,33 +413,55 @@ export default function ContractorTimeOffPage() {
                 </select>
                 <LuChevronDown size={16} strokeWidth={2} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
               </div>
+
+              {/* PTO carries a two-week notice period; Sick Leave does not. */}
+              {isPto && (
+                <div className="mt-2 flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2.5">
+                  <LuInfo size={15} strokeWidth={2} className="text-amber-600 mt-0.5 shrink-0" />
+                  <p className="text-xs text-amber-800">
+                    <span className="font-bold">PTO must be filed at least 2 weeks in advance.</span>{" "}
+                    The earliest date that meets this is{" "}
+                    <span className="font-bold tabular-nums">{fmtNoticeDate(earliestPtoDate)}</span>.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-2">2. Start Date</label>
                 <div className="relative">
-                  <LuCalendarDays size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                  <LuCalendarDays size={16} strokeWidth={1.75} className={`absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${startTooSoon ? "text-red-500" : "text-emerald-600"}`} />
                   <input
                     type="date"
                     value={startDate}
                     onChange={e => setStartDate(e.target.value)}
-                    className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    className={`w-full text-sm font-medium rounded-lg pl-9 pr-3 py-2.5 border focus:outline-none focus:ring-2 ${
+                      startTooSoon
+                        ? "text-red-700 bg-red-50 border-red-300 focus:ring-red-500/20 focus:border-red-500"
+                        : "text-slate-700 bg-white border-slate-200 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    }`}
                   />
                 </div>
+                {startTooSoon && <ShortNoticeHint days={daysOfNotice(startDate)} />}
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-2">3. End Date</label>
                 <div className="relative">
-                  <LuCalendarDays size={16} strokeWidth={1.75} className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-600 pointer-events-none" />
+                  <LuCalendarDays size={16} strokeWidth={1.75} className={`absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${endTooSoon ? "text-red-500" : "text-emerald-600"}`} />
                   <input
                     type="date"
                     value={isHalfDay ? startDate : endDate}
                     onChange={e => setEndDate(e.target.value)}
                     disabled={isHalfDay}
-                    className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 disabled:bg-slate-100 disabled:text-slate-400"
+                    className={`w-full text-sm font-medium rounded-lg pl-9 pr-3 py-2.5 border focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${
+                      endTooSoon
+                        ? "text-red-700 bg-red-50 border-red-300 focus:ring-red-500/20 focus:border-red-500"
+                        : "text-slate-700 bg-white border-slate-200 focus:ring-emerald-500/20 focus:border-emerald-500"
+                    }`}
                   />
                 </div>
+                {endTooSoon && <ShortNoticeHint days={daysOfNotice(effectiveEndDate)} />}
               </div>
             </div>
 
@@ -400,13 +496,15 @@ export default function ContractorTimeOffPage() {
               </button>
               <button
                 onClick={handleSubmit}
-                disabled={isPending}
-                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-6 py-2.5 rounded-lg transition-all shadow-sm text-sm flex items-center gap-2 disabled:opacity-60"
+                disabled={isPending || !requestsEnabled}
+                title={!requestsEnabled ? "Time Away requests are currently disabled by your administrator" : undefined}
+                className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-6 py-2.5 rounded-lg transition-all shadow-sm text-sm flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
               >
                 {isPending ? <LuLoader size={15} className="animate-spin" /> : <LuSend size={15} strokeWidth={2} />}
-                {isPending ? "Submitting…" : "Submit Request"}
+                {isPending ? "Submitting…" : !requestsEnabled ? "Requests Closed" : "Submit Request"}
               </button>
             </div>
+            </fieldset>
           </div>
         </div>
       </section>

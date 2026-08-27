@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchCurrentMonthBirthdays } from "../profile/actions";
 import { fetchWishState } from "../dashboard/wishes";
-import { LuBell, LuCake, LuX } from "react-icons/lu";
+import { fetchLeaveDecisions, type LeaveDecision } from "../time-off/actions";
+import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { LuBell, LuCake, LuCircleCheck, LuCircleX, LuX } from "react-icons/lu";
 
 type BdayItem = { name: string; email: string; isMe: boolean };
 
@@ -14,13 +16,71 @@ function todayIsoLocal(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
 }
 
-// Contractor topbar bell — surfaces today's birthdays so wishes get seen even
-// without scrolling the dashboard, and flags wishes received on your own day.
+function fmtDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtRange(startDate: string, endDate: string): string {
+  return startDate === endDate ? fmtDate(startDate) : `${fmtDate(startDate)} – ${fmtDate(endDate)}`;
+}
+
+// "3h ago" / "2d ago" — a decision's age matters more than its exact instant.
+function fmtAge(isoInstant: string): string {
+  const then = new Date(isoInstant).getTime();
+  if (Number.isNaN(then)) return "";
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+// Per-browser high-water mark: the newest decision the contractor has already
+// seen. Only decisions *newer* than this are listed, so an approval shows once
+// and then stops appearing — the bell is for news, not a history of every
+// decision (that lives on the Time Off page).
+//
+// On first use there is no marker, so it is set to "now" and nothing already
+// decided is shown; otherwise every past decision would arrive at once looking
+// brand new.
+const SEEN_KEY = "contractor-bell-seen-decision";
+
+function readSeen(): string {
+  try {
+    return localStorage.getItem(SEEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function writeSeen(value: string) {
+  try {
+    localStorage.setItem(SEEN_KEY, value);
+  } catch {
+    // private mode / blocked storage — decisions then show once per session
+    // rather than persisting as read
+  }
+}
+
+// Contractor topbar bell — surfaces decisions on the contractor's own leave
+// requests (PTO, Medical Unavailability, Advance Sick Leave, Special Leave and
+// the rest), plus today's birthdays so wishes get seen without scrolling the
+// dashboard.
 export function ContractorBell({ dark = false }: { dark?: boolean }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [birthdays, setBirthdays] = useState<BdayItem[]>([]);
   const [myWishes, setMyWishes] = useState(0);
+  const [decisions, setDecisions] = useState<LeaveDecision[]>([]);
+  // Frozen for the lifetime of this mount: opening the panel must not make the
+  // rows the contractor is currently reading disappear underneath them. The
+  // stored marker moves immediately, so they're gone on the next load.
+  const baselineRef = useRef<string | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -32,6 +92,16 @@ export function ContractorBell({ dark = false }: { dark?: boolean }) {
   }, []);
 
   useEffect(() => {
+    // First ever use: start the clock now so nothing already decided surfaces.
+    const stored = readSeen();
+    if (stored) {
+      baselineRef.current = stored;
+    } else {
+      const now = new Date().toISOString();
+      writeSeen(now);
+      baselineRef.current = now;
+    }
+
     (async () => {
       const supabase = createClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -40,7 +110,14 @@ export function ContractorBell({ dark = false }: { dark?: boolean }) {
 
       const iso = todayIsoLocal();
       const md = iso.slice(5, 10);
-      const all = await fetchCurrentMonthBirthdays().catch(() => []);
+
+      const [all, leaveDecisions] = await Promise.all([
+        fetchCurrentMonthBirthdays().catch(() => []),
+        fetchLeaveDecisions(email).catch(() => [] as LeaveDecision[]),
+      ]);
+
+      setDecisions(leaveDecisions);
+
       const todays = all
         .filter((b) => b.dob.slice(5, 10) === md)
         .map((b) => ({ name: b.fullName, email: b.email.trim().toLowerCase(), isMe: b.email.trim().toLowerCase() === email }));
@@ -53,13 +130,30 @@ export function ContractorBell({ dark = false }: { dark?: boolean }) {
     })();
   }, []);
 
-  const count = birthdays.length;
+  // Only decisions newer than the baseline are news; anything older has been
+  // seen already and belongs to the Time Off page's history, not the bell.
+  const newDecisions = decisions.filter((d) => d.decidedAt > (baselineRef.current ?? ""));
+  const count = (acknowledged ? 0 : newDecisions.length) + birthdays.length;
   const iconColor = dark ? "text-white/80" : "text-slate-600";
+
+  function togglePanel() {
+    const opening = !open;
+    setOpen(opening);
+    // Opening acknowledges what's listed: the stored marker jumps to the newest
+    // decision so it won't come back, while baselineRef stays put so the rows
+    // remain readable until this page is left.
+    if (opening && newDecisions.length > 0) {
+      writeSeen(newDecisions[0].decidedAt);
+      setAcknowledged(true);
+    }
+  }
+
+  const isEmpty = newDecisions.length === 0 && birthdays.length === 0;
 
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={togglePanel}
         aria-label="Notifications"
         className={`relative p-2 rounded-full transition-colors hover:bg-black/5 ${iconColor} cursor-pointer`}
       >
@@ -79,10 +173,35 @@ export function ContractorBell({ dark = false }: { dark?: boolean }) {
           </div>
 
           <div className="max-h-96 overflow-y-auto">
-            {count === 0 ? (
-              <p className="px-4 py-8 text-center text-sm text-slate-400">No birthdays today.</p>
+            {isEmpty ? (
+              <p className="px-4 py-8 text-center text-sm text-slate-400">Nothing new right now.</p>
             ) : (
               <div className="divide-y divide-slate-50">
+                {/* Leave decisions first — they're actionable, birthdays aren't. */}
+                {newDecisions.map((d) => {
+                  const approved = d.status === "Approved";
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => { setOpen(false); router.push("/contractor/time-off"); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <span className={`grid place-items-center w-9 h-9 rounded-full shrink-0 ${approved ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+                        {approved ? <LuCircleCheck size={16} strokeWidth={2} /> : <LuCircleX size={16} strokeWidth={2} />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-[#003527] truncate">
+                          {leaveTypeDisplayLabel(d.type)} {approved ? "approved" : "rejected"}
+                        </span>
+                        <span className="block text-xs text-slate-400">
+                          {fmtRange(d.startDate, d.endDate)} · {fmtAge(d.decidedAt)}
+                        </span>
+                      </span>
+                      {!acknowledged && <span className="w-2 h-2 rounded-full bg-teal-500 shrink-0" />}
+                    </button>
+                  );
+                })}
+
                 {birthdays.map((b) => (
                   <button
                     key={b.email || b.name}
