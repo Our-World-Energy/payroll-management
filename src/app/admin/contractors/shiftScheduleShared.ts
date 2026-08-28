@@ -4,6 +4,17 @@
 
 export const SHIFTING_SCHEDULE = "Shifting Schedule";
 
+/**
+ * Minutes of grace after Shift Start before a clock-in counts as late. A punch
+ * at exactly Shift Start + this is still on time; one minute past it is late.
+ *
+ * Defined here because four places evaluate lateness — the Dashboard's Late
+ * Today widget, the NotificationBell, the Attendance Tracker API and the
+ * tracker's tooltips — and they previously each held their own copy of the
+ * number, which could silently drift apart.
+ */
+export const LATE_GRACE_MINUTES = 16;
+
 export type ShiftScheduleDay = {
   date: string;       // YYYY-MM-DD
   shiftStart: string; // "7:00 AM" — same format as contractor_profiles.shiftHours

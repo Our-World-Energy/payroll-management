@@ -11,7 +11,7 @@ import { fetchAnnouncements } from "@/app/admin/announcements/actions";
 import { fetchAlerts } from "@/app/admin/settings/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
-import { SHIFTING_SCHEDULE, parseShiftTime } from "@/app/admin/contractors/shiftScheduleShared";
+import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "@/app/admin/contractors/shiftScheduleShared";
 
 type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
 type AlertRow = { name: string; department: string };
@@ -19,7 +19,6 @@ type BirthdayRow = { name: string };
 type AnnouncementRow = { title: string; location: string };
 type NotificationItem = { text: string; href?: string };
 
-const LATE_GRACE_MINUTES = 15;
 
 // contractor_profiles.shiftHours is free text like "9:00 AM to 6:00 PM"
 // (or "Flexible" for non-Fixed shifts) — pull the leading start time out of

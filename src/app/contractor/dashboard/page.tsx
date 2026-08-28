@@ -342,12 +342,16 @@ export default function ContractorDashboardPage() {
         .sort((a, b) => a.date.localeCompare(b.date));
       setUpcomingHols(upcoming);
 
-      // Announcements: contractor's country + "All" (never date-gated, same
-      // as before). "Global" announcements are handled separately below —
-      // they're the only ones with a scheduled announce-date, so they're
-      // pulled out into their own animated banner instead of this list.
+      // Announcements: the contractor's own country, plus "Offshore", which is
+      // addressed to every country rather than to a place — so it reaches
+      // everyone, whatever their location. "All" is the legacy spelling of the
+      // same idea and is still honoured for older rows.
+      //
+      // None of these are date-gated. "Global" is handled separately below:
+      // it's the only kind with a scheduled announce-date, so it's pulled out
+      // into its own animated banner instead of this list.
       const filtered = allAnnouncements
-        .filter(a => a.location === "All" || a.location === country)
+        .filter(a => a.location === "All" || a.location === "Offshore" || a.location === country)
         .slice(0, 3);
       setAnnouncements(filtered);
 

@@ -687,3 +687,23 @@ model AppSetting {
 
   @@map("app_settings")
 }
+
+/// Admin override for the Attendance Tracker's NCNS (No Call No Show) column.
+/// The column derives "Unnotified" on a day coded "Absent" — no time logged,
+/// and no US holiday, approved PTO/Sick Leave or rest day to explain it — and an
+/// admin can override that verdict either way with a reason. isNcns true is
+/// Unnotified, false is Notified. One row per contractor per date; no row means
+/// the derived value stands.
+model AttendanceNcns {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String
+  date      DateTime @db.Date
+  isNcns    Boolean
+  reason    String   @default("")
+  updatedAt DateTime @updatedAt @default(now())
+
+  @@unique([email, date], name: "attendance_ncns_key")
+  @@index([date])
+  @@index([email, date])
+  @@map("attendance_ncns")
+}

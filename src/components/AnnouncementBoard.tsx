@@ -15,14 +15,19 @@ import {
 // immediately. GLOBAL is listed first so that difference is easy to find.
 const GLOBAL = "Global";
 
+// "Offshore" is addressed to every country rather than to a place: the
+// Contractor Portal shows it to everyone alongside their own country's
+// announcements. Unlike Global it isn't date-gated and isn't a banner.
+const OFFSHORE = "Offshore";
+
 const LOCATIONS = [
   "All Locations",
   GLOBAL,
   "Philippines",
   "Mexico",
   "India",
-  "USA",
-  "Offshore",
+  "Guatemala",
+  OFFSHORE,
 ];
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
@@ -221,6 +226,12 @@ export function AnnouncementBoard() {
               {location === GLOBAL && (
                 <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
                   Global broadcasts an animated banner on every contractor&apos;s Dashboard, and only once the date above arrives.
+                </p>
+              )}
+              {location === OFFSHORE && (
+                <p className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
+                  Offshore reaches contractors in every country — it appears in the Announcements list on all Dashboards
+                  straight away, rather than being scoped to one location.
                 </p>
               )}
               {formError && <p className="text-xs font-medium text-red-600">{formError}</p>}

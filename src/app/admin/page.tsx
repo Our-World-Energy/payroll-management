@@ -2,19 +2,20 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser } from "react-icons/lu";
+import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser, LuTriangleAlert } from "react-icons/lu";
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
-import { SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
+import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 
 type AbsentRow = {
   name: string;
   department: string;
   date: string;
   status: string;
+  email?: string;
 };
 
 type LateRow = {
@@ -42,7 +43,6 @@ function parseShiftStart(shiftHours: string): { hour: number; minute: number } |
   return { hour, minute: Number(m[2]) };
 }
 
-const LATE_GRACE_MINUTES = 15;
 
 // contractor_profiles.location is stored as "City, Country" — same parsing
 // convention used on the Contractors/Payroll pages for country filtering.
@@ -81,6 +81,59 @@ export default function AdminPage() {
   const [lateRows, setLateRows] = useState<LateRow[]>([]);
   const [ptoRows, setPtoRows] = useState<PtoRow[]>([]);
   const [countryCounts, setCountryCounts] = useState<CountryCounts>(EMPTY_COUNTRY_COUNTS);
+
+  // Active contractors present in Contractor Details but with no record in
+  // Worksnap at all. A subset of Absent Today by definition — no Worksnap
+  // record means no time today — but a different problem: they aren't being
+  // tracked, rather than being away.
+  const [noWorksnapRows, setNoWorksnapRows] = useState<AbsentRow[]>([]);
+  const noWorksnapEmails = new Set(noWorksnapRows.map((r) => r.email).filter(Boolean) as string[]);
+
+  // What the Absent Today modal lists: every contractor with no Worksnap time
+  // today, plus any untracked contractor not already among them. The two
+  // usually overlap completely (no Worksnap record means no time today), but
+  // absentRows is gated behind the 7:30am cutoff below — before then it is
+  // empty, and without this merge the modal would show nothing while the tile
+  // still reported 9.
+  const absentModalRows: AbsentRow[] = (() => {
+    const seen = new Set(absentRows.map((r) => r.email).filter(Boolean) as string[]);
+    const missing = noWorksnapRows.filter((r) => r.email && !seen.has(r.email));
+    const rows = [...absentRows, ...missing];
+    // Untracked contractors last, so the two groups read as groups.
+    return rows.sort((a, b) => {
+      const aUntracked = Boolean(a.email) && noWorksnapEmails.has(a.email!);
+      const bUntracked = Boolean(b.email) && noWorksnapEmails.has(b.email!);
+      if (aUntracked !== bUntracked) return aUntracked ? 1 : -1;
+      return a.name.localeCompare(b.name);
+    });
+  })();
+
+  useEffect(() => {
+    let isMounted = true;
+    // Trailing slash matches next.config's trailingSlash: true — without it
+    // this takes a 308 on every load.
+    fetch("/api/worksnap-coverage/")
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`worksnap-coverage returned ${r.status}`);
+        return r.json();
+      })
+      .then((result: { untracked?: { name: string; department: string; email: string }[] }) => {
+        if (!isMounted) return;
+        setNoWorksnapRows(
+          (result.untracked ?? []).map((c) => ({
+            name: c.name,
+            department: c.department,
+            date: "",
+            status: "No Worksnap",
+            email: c.email.trim().toLowerCase(),
+          }))
+        );
+      })
+      // Logged rather than swallowed: a silent failure here is indistinguishable
+      // from "nobody is untracked", which is exactly the wrong thing to show.
+      .catch((err) => console.error("No Worksnap count failed to load:", err));
+    return () => { isMounted = false; };
+  }, []);
 
   // Live per-country Active headcounts (independent of the absent/late gate
   // below, which only runs after 7:30am) — these tiles should always be current.
@@ -176,12 +229,12 @@ export default function AdminPage() {
         setAbsentRows(
           activeContractors
             .filter((c) => (minutesByEmail.get(c.email!.trim().toLowerCase()) ?? 0) === 0)
-            .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: absenceStatusFor(c.email!.trim().toLowerCase()) }))
+            .map((c) => ({ name: c.fullName, department: c.department, date: todayLocal, status: absenceStatusFor(c.email!.trim().toLowerCase()), email: c.email!.trim().toLowerCase() }))
         );
 
         // Late Today applies to Fixed and Shifting Schedule contractors — real
         // check: firstInLogged (worksnap_daily_log) vs the contractor's own
-        // Shift Start for today, in Arizona time, with a 15-minute grace period
+        // Shift Start for today, in Arizona time, with the LATE_GRACE_MINUTES grace period
         // (a clock-in at exactly Shift Start + 15 min is still on time; one
         // minute past that is late). Fixed contractors take their start from
         // contractor_profiles.shiftHours; Shifting Schedule contractors from
@@ -313,9 +366,24 @@ export default function AdminPage() {
             <div className="w-7 h-7 rounded-lg bg-red-100 text-red-600 grid place-items-center shrink-0">
               <LuUser size={13} strokeWidth={2} />
             </div>
-            <div className="min-w-0">
-              <p className="text-[9px] font-semibold text-red-600 uppercase tracking-wider leading-none truncate">Absent Today</p>
-              <p className="text-sm font-bold text-red-700 leading-tight mt-0.5">{absentRows.length}</p>
+            {/* Two separate figures, each with its own label: the shared
+                "Absent Today / No Worksnap" caption truncated in this narrow
+                column, which hid what the second number even was. Left is no
+                Worksnap time logged today; right is no Worksnap record at all
+                despite being in Contractor Details — a subset, and a setup
+                problem rather than an absence. */}
+            <div className="min-w-0 flex items-center gap-2.5">
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold text-red-600 uppercase tracking-wider leading-none truncate">Absent Today</p>
+                <p className="text-sm font-bold text-red-700 leading-tight mt-0.5">{absentRows.length}</p>
+              </div>
+              <div className="w-px self-stretch bg-red-200 shrink-0" />
+              {/* Violet here and on the modal rows, so the count and the nine
+                  contractors it refers to are visibly the same group. */}
+              <div className="min-w-0" title="In Contractor Details but no record in Worksnap at all">
+                <p className="text-[9px] font-semibold text-violet-600 uppercase tracking-wider leading-none truncate">No Worksnap</p>
+                <p className="text-sm font-bold text-violet-700 leading-tight mt-0.5">{noWorksnapRows.length}</p>
+              </div>
             </div>
           </button>
 
@@ -353,8 +421,11 @@ export default function AdminPage() {
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 bg-[#003527]">
               <div>
-                <h3 className="text-lg font-bold text-white">Absent Today</h3>
-                <p className="text-sm text-green-200 mt-0.5">{absentRows.length} contractor{absentRows.length !== 1 ? "s" : ""} with no time logged</p>
+                <h3 className="text-lg font-bold text-white">Absent Today / No Worksnap</h3>
+                <p className="text-sm text-green-200 mt-0.5">
+                  {absentRows.length} with no time logged today
+                  <span className="text-green-300/80"> · {noWorksnapRows.length} with no Worksnap record at all</span>
+                </p>
               </div>
               <button
                 onClick={() => setShowAbsentModal(false)}
@@ -379,24 +450,46 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {absentRows.length === 0 ? (
+                  {absentModalRows.length === 0 ? (
                     <tr>
                       <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No absences recorded today.</td>
                     </tr>
-                  ) : absentRows.map((row, i) => (
-                    <tr key={i} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 font-semibold text-slate-900 break-words">{row.name}</td>
-                      <td className="px-5 py-3 text-slate-600 break-words">{row.department}</td>
-                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
+                  ) : absentModalRows.map((row, i) => {
+                    // A contractor with no Worksnap record at all is reported as
+                    // such rather than as a plain absence — the fix is to set
+                    // them up in Worksnap, not to chase the missing day.
+                    const untracked = Boolean(row.email) && noWorksnapEmails.has(row.email!);
+                    const status = untracked ? "No Worksnap" : row.status;
+                    return (
+                    // The untracked rows are tinted and left-bordered as well as
+                    // badged, so the group is findable at a glance in a list of
+                    // seventy-odd names rather than only by reading each status.
+                    <tr
+                      key={i}
+                      className={untracked
+                        ? "bg-violet-50/70 hover:bg-violet-100/70 transition-colors"
+                        : "hover:bg-slate-50 transition-colors"}
+                    >
+                      <td className={`px-5 py-3 font-semibold break-words ${untracked ? "text-violet-900 border-l-4 border-violet-500" : "text-slate-900"}`}>
+                        {row.name}
+                      </td>
+                      <td className={`px-5 py-3 break-words ${untracked ? "text-violet-800/70" : "text-slate-600"}`}>{row.department}</td>
+                      <td className={`px-5 py-3 whitespace-nowrap ${untracked ? "text-violet-800/60" : "text-slate-600"}`}>
+                        {untracked ? "—" : row.date}
+                      </td>
                       <td className="px-5 py-3">
-                        <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${
-                          row.status === "Absent" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-bold uppercase whitespace-nowrap ${
+                          untracked ? "bg-violet-600 text-white"
+                          : status === "Absent" ? "bg-red-100 text-red-700"
+                          : "bg-orange-100 text-orange-700"
                         }`}>
-                          {row.status}
+                          {untracked && <LuTriangleAlert size={11} strokeWidth={2.5} />}
+                          {status}
                         </span>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
