@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import Link from "next/link";
-import { LuArrowLeft, LuClock, LuCoffee, LuPhoneOff, LuRefreshCw, LuSearch, LuTriangleAlert, LuUserCheck, LuUsers, LuUserX, LuX } from "react-icons/lu";
+import { LuClock, LuCoffee, LuPhoneOff, LuRefreshCw, LuSearch, LuTriangleAlert, LuUserCheck, LuUsers, LuUserX, LuX } from "react-icons/lu";
 import { FilterSelect } from "@/components/FilterSelect";
 import { addDaysIso, arizonaTodayIso, parseIsoDate, recentWeeks, sundayOf, weekLabel } from "@/lib/weekUtils";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES } from "@/app/admin/contractors/shiftScheduleShared";
-import { saveNcns, clearNcns } from "../ncnsActions";
+import { saveNcns, clearNcns } from "./ncnsActions";
 import { toast } from "sonner";
 
 type TrackerTask = {
@@ -38,6 +37,8 @@ type TrackerDay = {
   ncnsReason: string;
   ptoType: string;
   silType: string;
+  crossesMidnight: boolean;
+  timeOutIsNextDay: boolean;
   breakMins: number;
   expectedMins: number;
 };
@@ -782,10 +783,8 @@ export default function AttendanceTrackerPage() {
 
   return (
     <div className="p-3 sm:p-4 md:p-6 max-w-full overflow-x-hidden">
-      <Link href="/admin/reports" className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-teal-700 transition-colors mb-3">
-        <LuArrowLeft size={14} strokeWidth={2.5} /> Back to Reports
-      </Link>
-
+      {/* No "Back to Reports" link any more — this is its own top-level menu
+          item rather than a page reached from Reports. */}
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
         <div className="flex items-center gap-3">
           <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
@@ -1155,6 +1154,10 @@ export default function AttendanceTrackerPage() {
                               </span>
                               <span className="block text-[11px] font-semibold text-slate-500">
                                 {entry.day.shiftStart && entry.day.shiftEnd ? `${entry.day.shiftStart} – ${entry.day.shiftEnd}` : "—"}
+                                {/* A cross-day window ends the following morning. */}
+                                {entry.day.crossesMidnight && (
+                                  <span title="Shift ends the next morning — the whole shift counts on this date" className="ml-1 text-indigo-600 font-bold">+1d</span>
+                                )}
                               </span>
                               {entry.day.mins > 0 && (
                                 <span className="block text-[11px] font-bold text-teal-700 mt-0.5">{formatMinutes(entry.day.mins)}</span>
@@ -1172,6 +1175,10 @@ export default function AttendanceTrackerPage() {
                               {entry.day.timeOut
                                 ? <span className="font-semibold text-slate-800">{entry.day.timeOut}</span>
                                 : <span className="text-slate-300">—</span>}
+                              {/* Says so when the punch came from the next morning. */}
+                              {entry.day.timeOutIsNextDay && (
+                                <span className="block text-[10px] font-semibold text-indigo-600">next day</span>
+                              )}
                             </td>
                           </>
                         )}

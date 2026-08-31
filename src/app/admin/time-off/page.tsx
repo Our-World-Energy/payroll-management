@@ -766,8 +766,12 @@ export default function TimeOffPage() {
 
   const COLS = [
     "Contractor", "Country", "Assigned Team", "Engagement Start Date",
-    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Used Import", "PTO Accrual Available"] : []),
-    "Medical Unavailability Accrual", "Medical Unavailability Used", "Medical Unavailability Used Import", "Medical Unavailability Accrual Available",
+    // The two "Used Import" columns are hidden from the table — the imported
+    // baseline still drives the Used figures (see the row build above) and is
+    // surfaced/clearable from the Used cells themselves. Both values remain in
+    // the CSV export.
+    ...(!isIndia ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
+    "Medical Unavailability Accrual", "Medical Unavailability Used", "Medical Unavailability Accrual Available",
     ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
     "Advance Medical Unavailability", "Status", "Action",
   ];
@@ -1984,18 +1988,18 @@ export default function TimeOffPage() {
                         {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoBalance)}h`}
                       </td>
                       <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
-                        {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoUsed)}h`}
-                      </td>
-                      <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : (
                           <div className="flex items-center gap-1.5">
-                            <span>{fmtBalance(row.ptoUsedImport)}h</span>
+                            <span>{fmtBalance(row.ptoUsed)}h</span>
+                            {/* An imported baseline overrides ptoUsed when set, and the
+                                Used Import column is hidden — so this is the only place
+                                that override stays visible and clearable. */}
                             {row.ptoUsedImport > 0 && (
                               <button
                                 type="button"
                                 onClick={() => handleClearUsedImport(row, "pto")}
                                 disabled={clearingUsedImport?.id === row.id && clearingUsedImport.type === "pto"}
-                                title="Clear PTO Used Import"
+                                title={`Imported baseline of ${fmtBalance(row.ptoUsedImport)}h is overriding PTO Used — clear it`}
                                 className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 {clearingUsedImport?.id === row.id && clearingUsedImport.type === "pto"
@@ -2019,16 +2023,17 @@ export default function TimeOffPage() {
                       </td>
                     </>}
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveBalance)}h</td>
-                    <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">{fmtBalance(row.sickLeaveUsed)}h</td>
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                       <div className="flex items-center gap-1.5">
-                        <span>{fmtBalance(row.sickUsedImport)}h</span>
+                        <span>{fmtBalance(row.sickLeaveUsed)}h</span>
+                        {/* Same as PTO Used above — the hidden Used Import column's
+                            override stays visible and clearable from here. */}
                         {row.sickUsedImport > 0 && (
                           <button
                             type="button"
                             onClick={() => handleClearUsedImport(row, "sick")}
                             disabled={clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"}
-                            title="Clear Medical Unavailability Used Import"
+                            title={`Imported baseline of ${fmtBalance(row.sickUsedImport)}h is overriding Medical Unavailability Used — clear it`}
                             className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             {clearingUsedImport?.id === row.id && clearingUsedImport.type === "sick"

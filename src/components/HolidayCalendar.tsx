@@ -26,6 +26,12 @@ const FLAG_COLORS: Record<string, string> = {
 };
 const COUNTRIES = Object.keys(COUNTRY_COLORS);
 
+// Countries offered when adding a holiday. "Global" is excluded — a holiday
+// belongs to a country — but it keeps its colour mapping above and stays in the
+// legend and filter, so any Global holiday already on file still renders and
+// can still be found.
+const HOLIDAY_COUNTRIES = COUNTRIES.filter((c) => c !== "Global");
+
 const DAYS_OF_WEEK = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -172,7 +178,7 @@ export function HolidayCalendar() {
 
   // Add form state
   const [newName,    setNewName]    = useState("");
-  const [newCountry, setNewCountry] = useState(COUNTRIES[0]);
+  const [newCountry, setNewCountry] = useState(HOLIDAY_COUNTRIES[0]);
   const [newDate,    setNewDate]    = useState("");
   const [addError,   setAddError]   = useState("");
 
@@ -220,7 +226,7 @@ export function HolidayCalendar() {
       try {
         const created = await createHoliday({ name: n, country: newCountry, date: newDate });
         setHolidays(prev => [...prev, created].sort((a, b) => a.date.localeCompare(b.date)));
-        setNewName(""); setNewDate(""); setNewCountry(COUNTRIES[0]);
+        setNewName(""); setNewDate(""); setNewCountry(HOLIDAY_COUNTRIES[0]);
         setShowAdd(false);
       } catch (e) {
         setAddError(e instanceof Error ? e.message : "Failed to add holiday.");
@@ -513,7 +519,7 @@ export function HolidayCalendar() {
           <div className="space-y-1">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Country</label>
             <select className={SELECT} value={newCountry} onChange={(e) => setNewCountry(e.target.value)}>
-              {COUNTRIES.map(c => <option key={c}>{c}</option>)}
+              {HOLIDAY_COUNTRIES.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
           <div className="space-y-1">

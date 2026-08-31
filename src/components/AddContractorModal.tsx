@@ -5,7 +5,7 @@ import { LuX, LuUserPlus, LuPencil, LuCalendarDays } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
 import { ShiftScheduleModal } from "@/components/ShiftScheduleModal";
-import { SHIFTING_SCHEDULE } from "@/app/admin/contractors/shiftScheduleShared";
+import { SHIFTING_SCHEDULE, CROSS_DAY_SHIFT, isCrossDayWindow, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
 
 type Props = {
   onClose: () => void;
@@ -215,7 +215,11 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
       // so shiftHours carries the label rather than a single window — that also
       // makes parseShiftStart return null, which is what keeps the Fixed-only
       // late check from mis-evaluating these contractors.
-      shiftHours:     form.shiftType === "Fixed" ? `${form.shiftFrom} to ${form.shiftTo}`
+      // Cross-Day stores its window exactly like Fixed — the wrap is implied by
+      // the end time being earlier than the start, so no new format is needed
+      // and every existing shiftHours parser keeps working.
+      shiftHours:     form.shiftType === "Fixed" || form.shiftType === CROSS_DAY_SHIFT
+                        ? `${form.shiftFrom} to ${form.shiftTo}`
                     : form.shiftType === SHIFTING_SCHEDULE ? SHIFTING_SCHEDULE
                     : "Flexible",
       restDay:        form.restDays.length ? form.restDays.join(", ") : "—",
@@ -436,10 +440,13 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
                   <option value="Fixed">Fixed</option>
                   <option value="Flexible">Flexible</option>
+                  <option value={CROSS_DAY_SHIFT}>{CROSS_DAY_SHIFT}</option>
                   <option value={SHIFTING_SCHEDULE}>{SHIFTING_SCHEDULE}</option>
                 </select>
               </FIELD>
-              {form.shiftType === "Fixed" && (
+              {/* Cross-Day takes the same single window as Fixed; it just wraps
+                  past midnight, and the whole shift counts on its start date. */}
+              {(form.shiftType === "Fixed" || form.shiftType === CROSS_DAY_SHIFT) && (
                 <>
                   <FIELD label="Shift Start">
                     <select className={SELECT} value={form.shiftFrom} onChange={(e) => set("shiftFrom", e.target.value)}>
@@ -452,6 +459,19 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     </select>
                   </FIELD>
                 </>
+              )}
+              {form.shiftType === CROSS_DAY_SHIFT && (
+                <div className="sm:col-span-3">
+                  <p className={`text-xs rounded-lg px-3 py-2 border ${
+                    isCrossDayWindow(form.shiftFrom, form.shiftTo)
+                      ? "text-indigo-700 bg-indigo-50 border-indigo-100"
+                      : "text-amber-700 bg-amber-50 border-amber-200"
+                  }`}>
+                    {isCrossDayWindow(form.shiftFrom, form.shiftTo)
+                      ? `${form.shiftFrom} – ${form.shiftTo} crosses midnight (${Math.round((scheduledMinutes(form.shiftFrom, form.shiftTo) ?? 0) / 60 * 10) / 10} hrs). The whole shift counts on its start date, so a clock-out the next morning belongs to the day the shift began.`
+                      : `${form.shiftFrom} – ${form.shiftTo} ends on the same day, so this behaves like a Fixed shift. Set an end time earlier than the start for a shift that crosses midnight.`}
+                  </p>
+                </div>
               )}
               {/* Shifting Schedule has no single start/end — the hours are set
                   per date in their own modal, keyed on the contractor's email. */}

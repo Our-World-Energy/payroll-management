@@ -281,8 +281,8 @@ export default function ContractorDashboardPage() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   // "Global" location announcements whose announce-date has arrived — shown
   // as their own animated banner at the top of the page, separately from the
-  // plain Offshore Announcements list below (which only ever holds "All"/
-  // country-scoped announcements, never gated by date).
+  // plain Announcements list below (which holds the country-scoped ones plus
+  // "Offshore"/"All", and is never gated by date).
   const [globalBanners, setGlobalBanners] = useState<Announcement[]>([]);
   const [dismissedBannerIds, setDismissedBannerIds] = useState<Set<string>>(new Set());
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
@@ -355,9 +355,15 @@ export default function ContractorDashboardPage() {
         .slice(0, 3);
       setAnnouncements(filtered);
 
-      // Global Announcement (Settings → Global Announcement): only shown once
-      // its scheduled date has arrived.
-      const dueGlobal = allAnnouncements.filter(a => a.location === "Global" && a.date <= today);
+      // Banner announcements (location "Global", set on the admin Dashboard's
+      // Announcements board): shown only once the scheduled date has arrived,
+      // and only the newest one — a new banner replaces the previous rather than
+      // stacking, so contractors always see the current message instead of a
+      // pile of old ones. Sorted explicitly rather than trusting the fetch order.
+      const dueGlobal = allAnnouncements
+        .filter(a => a.location === "Global" && a.date <= today)
+        .sort((a, b) => b.date.localeCompare(a.date))
+        .slice(0, 1);
       setGlobalBanners(dueGlobal);
 
       setLoading(false);
@@ -503,7 +509,7 @@ export default function ContractorDashboardPage() {
         {/* Announcements — left 2/3 */}
         <div className="lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-[#003527]">Offshore Announcements</h3>
+            <h3 className="text-xl font-bold text-[#003527]">Announcements</h3>
             <button className="text-emerald-700 text-sm font-semibold flex items-center gap-1 hover:underline">
               View All <LuChevronRight size={16} strokeWidth={2} />
             </button>

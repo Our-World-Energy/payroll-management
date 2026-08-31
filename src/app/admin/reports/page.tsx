@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { LuArrowRight, LuClock, LuChartColumn } from "react-icons/lu";
+import { LuChartColumn } from "react-icons/lu";
 import { fetchAllContractors } from "../contractors/actions";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 
@@ -48,32 +47,6 @@ export default async function ReportsPage() {
             </tbody>
           </table>
         </div>
-      </div>
-
-      {/* Attendance Tracker — a live per-day view, not a generated file */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8">
-        <ul>
-          <li>
-            <Link
-              href="/admin/reports/attendance-tracker"
-              className="flex items-center justify-between px-6 py-4 hover:bg-slate-50 transition-colors group"
-            >
-              <div className="flex items-center gap-4">
-                <div className="size-9 rounded-lg bg-teal-50 text-teal-700 grid place-items-center">
-                  <LuClock size={18} strokeWidth={1.75} />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-slate-800 group-hover:text-teal-800">Attendance Tracker</p>
-                  <p className="text-xs text-slate-400">Per-day clock-in / clock-out and project task time</p>
-                </div>
-              </div>
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-teal-700 group-hover:text-teal-900 transition-colors">
-                Open
-                <LuArrowRight size={14} strokeWidth={2} />
-              </span>
-            </Link>
-          </li>
-        </ul>
       </div>
 
     </div>

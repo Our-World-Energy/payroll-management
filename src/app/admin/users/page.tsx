@@ -165,10 +165,18 @@ export default function UserManagementPage() {
   const admins = users.filter((u) => u.role === "admin").length;
   const normalUsers = users.filter((u) => u.role === "user").length;
 
-  const filteredUsers = users.filter((u) =>
-    (roleFilter === "All" || u.role === roleFilter) &&
-    (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
-  );
+  // Sorted alphabetically by the name actually shown in the row, falling back to
+  // the email for accounts with no name — otherwise nameless rows would sort
+  // together at one end rather than alongside the names they display as.
+  // localeCompare so accented names land where a reader expects.
+  const filteredUsers = users
+    .filter((u) =>
+      (roleFilter === "All" || u.role === roleFilter) &&
+      (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
+    )
+    .sort((a, b) =>
+      (a.fullName?.trim() || a.email).localeCompare(b.fullName?.trim() || b.email, undefined, { sensitivity: "base" })
+    );
 
   return (
     <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">

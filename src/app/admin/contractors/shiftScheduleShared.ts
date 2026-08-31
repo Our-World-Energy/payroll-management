@@ -5,6 +5,22 @@
 export const SHIFTING_SCHEDULE = "Shifting Schedule";
 
 /**
+ * A shift that starts on one calendar day and ends on the next — e.g.
+ * 10:00 PM – 7:00 AM. The whole shift belongs to its **start** date: a punch at
+ * Monday 10:05 PM and out at Tuesday 7:02 AM is Monday's shift, not two
+ * part-days.
+ */
+export const CROSS_DAY_SHIFT = "Cross-Day Shift";
+
+/** Whether a start/end pair wraps past midnight. */
+export function isCrossDayWindow(shiftStart: string, shiftEnd: string): boolean {
+  const start = parseShiftTime(shiftStart);
+  const end = parseShiftTime(shiftEnd);
+  if (!start || !end) return false;
+  return end.hour * 60 + end.minute <= start.hour * 60 + start.minute;
+}
+
+/**
  * Minutes of grace after Shift Start before a clock-in counts as late. A punch
  * at exactly Shift Start + this is still on time; one minute past it is late.
  *
