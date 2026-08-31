@@ -18,12 +18,33 @@ type AbsentRow = {
   email?: string;
 };
 
+// Clock-in time and lateness are kept as separate fields rather than one
+// pre-formatted "Logged in 9:16 AM (16 min late)" sentence, so the modal can
+// give each its own aligned column instead of crowding both into one cell.
 type LateRow = {
   name: string;
   department: string;
   date: string;
-  detail: string;
+  clockedIn: string;
+  lateByMinutes: number;
 };
+
+// Banded so a two-hour late arrival reads differently from a twenty-minute one
+// without having to compare the numbers.
+function lateSeverityClasses(minutes: number) {
+  if (minutes >= 60) return "bg-red-100 text-red-700";
+  if (minutes >= 30) return "bg-orange-100 text-orange-700";
+  return "bg-amber-100 text-amber-700";
+}
+
+// Minutes stay minutes below an hour; past that "1h 35m" is far quicker to read
+// than "95 min" and keeps the column narrow.
+function formatLateBy(minutes: number) {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
 
 type PtoRow = {
   name: string;
@@ -266,9 +287,12 @@ export default function AdminPage() {
           if (firstIn.getTime() > thresholdInstant.getTime()) {
             const lateByMinutes = Math.round((firstIn.getTime() - shiftStartInstant.getTime()) / 60000);
             const loginLabel = firstIn.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ARIZONA_TIME_ZONE });
-            lateRows.push({ name: c.fullName, department: c.department, date: todayLocal, detail: `Logged in ${loginLabel} (${lateByMinutes} min late)` });
+            lateRows.push({ name: c.fullName, department: c.department, date: todayLocal, clockedIn: loginLabel, lateByMinutes });
           }
         }
+        // Worst first — the contractors who need following up are at the top
+        // instead of scattered through the list in contractor order.
+        lateRows.sort((a, b) => b.lateByMinutes - a.lateByMinutes || a.name.localeCompare(b.name));
         setLateRows(lateRows);
 
         // PTO/Medical Unavailability Today — every active contractor with an Approved
@@ -506,11 +530,14 @@ export default function AdminPage() {
       {showLateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLateModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
-            <div className="flex items-start justify-between px-6 py-5 bg-amber-600">
-              <div>
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-start justify-between gap-3 px-6 py-5 bg-amber-600">
+              <div className="min-w-0">
                 <h3 className="text-lg font-bold text-white">Late Today</h3>
-                <p className="text-sm text-amber-100 mt-0.5">{lateRows.length} contractor{lateRows.length !== 1 ? "s" : ""} flagged today</p>
+                <p className="text-sm text-amber-100 mt-0.5">
+                  {lateRows.length} contractor{lateRows.length !== 1 ? "s" : ""} flagged today
+                  <span className="text-amber-200/80"> · {LATE_GRACE_MINUTES} min grace period · Arizona time</span>
+                </p>
               </div>
               <button
                 onClick={() => setShowLateModal(false)}
@@ -519,34 +546,77 @@ export default function AdminPage() {
                 <LuX size={18} strokeWidth={2} />
               </button>
             </div>
-            <div className="overflow-auto">
-              <table className="w-full text-left text-sm" style={{ minWidth: 480 }}>
-                <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
-                  <tr>
-                    {["Name", "Assigned Team", "Date", "Detail"].map((h) => (
-                      <th key={h} className="px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 whitespace-nowrap">{h}</th>
+
+            {/* Table on sm and up; the same rows become stacked cards on narrow
+                screens so nothing has to scroll sideways or squeeze five columns
+                into a phone width. */}
+            <div className="overflow-y-auto overflow-x-hidden">
+              {lateRows.length === 0 ? (
+                <p className="px-5 py-10 text-center text-sm text-slate-400">No late arrivals recorded today.</p>
+              ) : (
+                <>
+                  <table className="hidden w-full table-fixed text-left text-sm sm:table">
+                    <colgroup>
+                      <col className="w-[28%]" />
+                      <col className="w-[26%]" />
+                      <col className="w-[16%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[16%]" />
+                    </colgroup>
+                    <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
+                      <tr>
+                        {["Name", "Assigned Team", "Date", "Clocked In", "Late By"].map((h) => (
+                          <th
+                            key={h}
+                            className={`px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 ${h === "Late By" ? "text-right" : ""}`}
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {lateRows.map((row, i) => (
+                        <tr key={i} className="hover:bg-slate-50 transition-colors align-top">
+                          <td className="px-4 py-3 font-semibold text-slate-900 break-words">{row.name}</td>
+                          <td className="px-4 py-3 text-slate-600 break-words">{row.department || "Unassigned"}</td>
+                          <td className="px-4 py-3 text-slate-500 tabular-nums whitespace-nowrap">{row.date}</td>
+                          <td className="px-4 py-3 text-slate-700 tabular-nums whitespace-nowrap">{row.clockedIn}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span
+                              title={`${row.lateByMinutes} minutes after shift start`}
+                              className={`inline-block rounded-md px-2 py-1 text-[11px] font-bold tabular-nums whitespace-nowrap ${lateSeverityClasses(row.lateByMinutes)}`}
+                            >
+                              {formatLateBy(row.lateByMinutes)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <ul className="divide-y divide-slate-100 sm:hidden">
+                    {lateRows.map((row, i) => (
+                      <li key={i} className="px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900 break-words">{row.name}</p>
+                            <p className="text-xs text-slate-500 break-words mt-0.5">{row.department || "Unassigned"}</p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-bold tabular-nums whitespace-nowrap ${lateSeverityClasses(row.lateByMinutes)}`}
+                          >
+                            {formatLateBy(row.lateByMinutes)} late
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-slate-500 tabular-nums">
+                          Clocked in {row.clockedIn} · {row.date}
+                        </p>
+                      </li>
                     ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {lateRows.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No late arrivals recorded today.</td>
-                    </tr>
-                  ) : lateRows.map((row, i) => (
-                    <tr key={i} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-5 py-3 font-semibold text-slate-900 whitespace-nowrap">{row.name}</td>
-                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.department}</td>
-                      <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
-                      <td className="px-5 py-3">
-                        <span className="px-2 py-1 rounded-md text-[11px] font-bold bg-amber-100 text-amber-700">
-                          {row.detail}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </ul>
+                </>
+              )}
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end bg-slate-50">
               <button onClick={() => setShowLateModal(false)} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
