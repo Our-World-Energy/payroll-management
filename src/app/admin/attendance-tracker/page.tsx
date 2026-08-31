@@ -106,7 +106,11 @@ type TrackerRow = {
   absentDays: number;
 };
 
-type RangeMode = "daily" | "weekly";
+type RangeMode = "daily" | "weekly" | "monthly";
+
+// "summary" collapses the table to one row per contractor carrying only the
+// exception counts — no per-day, per-task or clock detail.
+type TableLayout = "full" | "summary";
 
 // Status values the Status column can report, reused as the filter's options.
 // A day can carry more than one (late *and* undertime *and* over break), so
@@ -216,6 +220,33 @@ function breakMinutesFor(tasks: TrackerTask[]) {
 // date (Flexible, or a Shifting Schedule day that was never assigned hours).
 const FULL_DAY_MINUTES = 480;
 
+// Disciplinary weight of one late day, half day, absence and unnotified absence,
+// reported in the Summary layout's Points columns. 0.75, 1.5, 2.5 and 4 are all
+// exact in binary floating point, so the running totals need no rounding to stay
+// accurate.
+const LATE_POINTS_PER_DAY = 0.75;
+const HALF_DAY_POINTS_PER_DAY = 1.5;
+const ABSENT_POINTS_PER_DAY = 2.5;
+const NCNS_POINTS_PER_DAY = 4;
+
+// Disciplinary action by accrued points, per policy. Each band's lower bound is
+// inclusive and its upper bound exclusive — 3.00 is a Verbal Warning while 2.75
+// is still Awareness/Coaching — and the top band is open-ended, so anything at
+// or above 10 is NTE. Ordered high to low so the first match wins.
+const DISCIPLINARY_BANDS: { min: number; label: string; style: string }[] = [
+  { min: 10, label: "NTE – Suspension/Dismissal", style: "bg-red-600 text-white" },
+  { min: 7, label: "Final Warning", style: "bg-red-100 text-red-700" },
+  { min: 5, label: "Written Warning", style: "bg-orange-100 text-orange-700" },
+  { min: 3, label: "Verbal Warning", style: "bg-amber-100 text-amber-700" },
+  { min: 0, label: "Awareness/Coaching", style: "bg-slate-100 text-slate-600" },
+];
+
+function disciplinaryActionFor(points: number) {
+  // The 0 band matches everything non-negative, so the fallback is unreachable
+  // in practice — it's there so the return type isn't optional.
+  return DISCIPLINARY_BANDS.find((band) => points >= band.min) ?? DISCIPLINARY_BANDS[DISCIPLINARY_BANDS.length - 1];
+}
+
 // What the contractor was actually scheduled to work on this date — their
 // Shifting Schedule row or Fixed shift length when there is one, otherwise a
 // standard day. This is what Undertime measures against, so a shifting
@@ -230,11 +261,20 @@ function statusesForDay(day: TrackerDay) {
   const statuses: string[] = [];
   if (day.isLate) statuses.push(STATUS_LATE);
   if (day.breakMins > BREAK_ALLOWANCE_MINUTES) statuses.push(STATUS_OVER_BREAK);
-  // isAbsent already excludes rest days, so a Saturday with no time is simply
-  // a rest day rather than an absence.
+  // isAbsent already excludes rest days, US holidays and approved PTO/Sick, so
+  // a Saturday, a holiday or a leave day with no time is simply explained
+  // rather than an absence.
   if (day.isAbsent) statuses.push(STATUS_ABSENT);
   else if (day.mins > 0 && day.mins < day.expectedMins) statuses.push(STATUS_UNDERTIME);
   return statuses;
+}
+
+// Read back off statusesForDay rather than re-testing the threshold, so the
+// Undertime column can never disagree with the Status badge beside it — an
+// absent day is an absence, not undertime, and that precedence lives in one
+// place only.
+function isUndertimeDay(day: TrackerDay) {
+  return statusesForDay(day).includes(STATUS_UNDERTIME);
 }
 
 // Single source of truth for the Status column, the Status filter and the stat
@@ -377,6 +417,23 @@ function AbsentFlag({ code, mins }: { code: AbsenceCode; mins: number }) {
   return (
     <span title={title} className={`text-xs whitespace-nowrap ${ABSENCE_CODE_STYLE[code]}`}>
       {code === "Rest day" ? <span className="text-[10px] uppercase tracking-wide">Rest day</span> : code}
+    </span>
+  );
+}
+
+// Plain Yes / No for the Undertime column, mirroring the Late column. Yes
+// carries how far short of the scheduled day it fell.
+function UndertimeFlag({ day }: { day?: TrackerDay }) {
+  if (!day || !isUndertimeDay(day)) return <span className="text-xs font-bold text-slate-400">No</span>;
+  return (
+    <span
+      title={`${formatMinutes(day.mins)} logged — ${formatMinutes(day.expectedMins - day.mins)} short of the ${formatMinutes(day.expectedMins)} scheduled`}
+      className="inline-flex flex-col items-center"
+    >
+      <span className="text-xs font-bold text-amber-700">Yes</span>
+      <span className="text-[10px] font-semibold text-amber-600 tabular-nums">
+        -{formatMinutes(day.expectedMins - day.mins)}
+      </span>
     </span>
   );
 }
@@ -579,6 +636,7 @@ export default function AttendanceTrackerPage() {
   const months = useMemo(() => recentMonths(todayIso), [todayIso]);
 
   const [mode, setMode] = useState<RangeMode>("daily");
+  const [layout, setLayout] = useState<TableLayout>("full");
   const [month, setMonth] = useState(todayIso.slice(0, 7));
   const [day, setDay] = useState(todayIso.slice(8, 10));
   // Sun→Sat weeks, most recent first — the same week list Attendance uses.
@@ -610,8 +668,26 @@ export default function AttendanceTrackerPage() {
 
   const date = `${month}-${day}`;
   const isWeekly = mode === "weekly";
-  const rangeFrom = isWeekly ? week : date;
-  const rangeTo = isWeekly ? addDaysIso(week, 6) : date;
+  const isMonthly = mode === "monthly";
+  // Every multi-day period shares one layout — a block per day, per-day
+  // verdicts and a Total row — so the table branches on this rather than on
+  // which period was picked.
+  const isRange = isWeekly || isMonthly;
+  // Summary is nothing but day-counts and the points accrued from them, so it
+  // only means anything over a range. In Daily it falls back to Detailed rather
+  // than reporting a disciplinary band derived from a single day. The layout
+  // choice itself is kept, so switching back to a range restores Summary.
+  const isSummary = layout === "summary" && isRange;
+  // A calendar month is at most 31 days, exactly the API's range ceiling.
+  const rangeFrom = isMonthly ? `${month}-01` : isWeekly ? week : date;
+  const rangeTo = isMonthly
+    ? `${month}-${String(daysInMonth(month)).padStart(2, "0")}`
+    : isWeekly ? addDaysIso(week, 6) : date;
+
+  // Period wording, so labels read "Month total" / "this month" when a month is
+  // selected instead of always saying week.
+  const periodNoun = isMonthly ? "Month" : "Week";
+  const periodPhrase = isMonthly ? "this month" : "this week";
 
   useEffect(() => {
     let isMounted = true;
@@ -751,9 +827,14 @@ export default function AttendanceTrackerPage() {
     setStatusFilter("All");
   }
 
-  // What the selection currently covers — one day, or the week's Sun→Sat span.
+  // What the selection currently covers — one day, a week's Sun→Sat span, or a
+  // whole calendar month. A month names itself rather than spelling out
+  // "August 1 – August 31, 2026", which says nothing the month name doesn't.
   const dayLabel = useMemo(() => {
-    if (isWeekly) {
+    if (isMonthly) {
+      return parseIsoDate(rangeFrom).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    }
+    if (isRange) {
       const start = parseIsoDate(rangeFrom).toLocaleDateString("en-US", { month: "long", day: "numeric" });
       const end = parseIsoDate(rangeTo).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
       return `${start} – ${end}`;
@@ -763,7 +844,7 @@ export default function AttendanceTrackerPage() {
     } catch {
       return date;
     }
-  }, [isWeekly, rangeFrom, rangeTo, date]);
+  }, [isMonthly, isRange, rangeFrom, rangeTo, date]);
 
   // Exception counts only — each tile is tinted to match its pill in the
   // Status column, and each counts the rows currently passing the filters.
@@ -772,7 +853,7 @@ export default function AttendanceTrackerPage() {
     { label: STATUS_UNDERTIME, value: totals.undertime.toLocaleString(), Icon: LuTriangleAlert, tint: "bg-amber-50 text-amber-700", valueTint: "text-amber-700" },
     { label: STATUS_OVER_BREAK, value: totals.overBreak.toLocaleString(), Icon: LuCoffee, tint: "bg-red-50 text-red-700", valueTint: "text-red-700" },
     { label: "Active Contractors", value: totals.activeContractors.toLocaleString(), Icon: LuUsers, tint: "bg-teal-50 text-teal-700", valueTint: "text-[#003527]" },
-    { label: isWeekly ? "Present In Week" : "Present Today", value: totals.present.toLocaleString(), Icon: LuUserCheck, tint: "bg-emerald-50 text-emerald-700", valueTint: "text-emerald-700" },
+    { label: isRange ? `Present In ${periodNoun}` : "Present Today", value: totals.present.toLocaleString(), Icon: LuUserCheck, tint: "bg-emerald-50 text-emerald-700", valueTint: "text-emerald-700" },
     { label: STATUS_ABSENT, value: totals.absent.toLocaleString(), Icon: LuUserX, tint: "bg-slate-100 text-slate-600", valueTint: "text-slate-700" },
     // NCNS — counts contractors with at least one Unnotified day, matching the
     // effective value in the column (an admin's override included).
@@ -800,20 +881,54 @@ export default function AttendanceTrackerPage() {
 
         {/* Period selection — Daily (Month + Day) or Weekly (Sun→Sat range) */}
         <div className="flex flex-wrap items-end gap-2 w-full sm:w-auto">
+          {/* Detailed vs Summary — independent of the period, so either period
+              can be read as full detail or as counts only. */}
           <div className="flex-1 sm:flex-none">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">View</label>
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Layout</label>
             <div className="inline-flex h-10 rounded-lg border border-slate-200 bg-white p-1">
-              {(["daily", "weekly"] as RangeMode[]).map((m) => (
+              {(["full", "summary"] as TableLayout[]).map((l) => {
+                const disabled = l === "summary" && !isRange;
+                // Reflects what's actually rendered, not just what's stored, so
+                // the toggle can't show Summary selected while Daily shows
+                // Detailed.
+                const active = l === "summary" ? isSummary : !isSummary;
+                return (
+                  <button
+                    key={l}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setLayout(l)}
+                    aria-pressed={active}
+                    title={disabled
+                      ? "Summary counts exception days across a range — pick Week Range or Monthly Range"
+                      : l === "full"
+                        ? "Every column — clock times, tasks and per-day verdicts"
+                        : "Contractor, team, the exception counts and accrued points"}
+                    className={`px-3 rounded-md text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500 ${
+                      active ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"
+                    }`}
+                  >
+                    {l === "full" ? "Detailed" : "Summary"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex-1 sm:flex-none">
+            <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Period</label>
+            <div className="inline-flex h-10 rounded-lg border border-slate-200 bg-white p-1">
+              {(["daily", "weekly", "monthly"] as RangeMode[]).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setMode(m)}
                   aria-pressed={mode === m}
-                  className={`px-3 rounded-md text-xs font-bold capitalize transition-colors ${
+                  className={`px-3 rounded-md text-xs font-bold transition-colors ${
                     mode === m ? "bg-[#003527] text-white shadow-sm" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"
                   }`}
                 >
-                  {m === "weekly" ? "Week Range" : "Daily"}
+                  {m === "weekly" ? "Week Range" : m === "monthly" ? "Monthly Range" : "Daily"}
                 </button>
               ))}
             </div>
@@ -826,6 +941,13 @@ export default function AttendanceTrackerPage() {
                 {weeks.map((w) => (
                   <option key={w} value={w}>{weekLabel(w)} ({w.slice(0, 4)})</option>
                 ))}
+              </FilterSelect>
+            </div>
+          ) : isMonthly ? (
+            <div className="flex-1 sm:flex-none">
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Month</label>
+              <FilterSelect className="w-full sm:w-44" value={month} onChange={setMonth} label="Select month range">
+                {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
               </FilterSelect>
             </div>
           ) : (
@@ -866,8 +988,17 @@ export default function AttendanceTrackerPage() {
           <div>
             <h4 className="text-lg font-semibold text-[#003527]">Daily Attendance &amp; Task Time</h4>
             <p className="mt-0.5 text-xs font-medium text-slate-500">
-              Clock times shown in Arizona time · one row per project / task
+              Clock times shown in Arizona time · {isSummary ? "one row per contractor" : "one row per project / task"}
             </p>
+            {/* Detailed renders a block per day per contractor, so a month is
+                roughly four times a week's rows. Worth saying rather than
+                letting a wide filter quietly grind. */}
+            {isMonthly && !isSummary && (
+              <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-amber-700">
+                <LuTriangleAlert size={12} strokeWidth={2} />
+                A month of per-day detail is a lot of rows — narrow the filters, or switch Layout to Summary.
+              </p>
+            )}
             {loading && (
               <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-teal-600">
                 <LuRefreshCw size={12} className="animate-spin" /> Loading {dayLabel}…
@@ -937,40 +1068,71 @@ export default function AttendanceTrackerPage() {
         {/* Fills the window like a spreadsheet rather than a fixed slice of it:
             the offset leaves room for the header, tiles and toolbar above, and
             the floor keeps it usable on a short screen. */}
-        <div className="overflow-auto" style={{ maxHeight: "max(520px, calc(100vh - 300px))" }}>
-          <table className="w-full text-left" style={{ minWidth: 1280, borderCollapse: "separate", borderSpacing: 0 }}>
+        {/* The offset leaves room for the header, tiles and toolbar above and
+            keeps the container's bottom edge — and therefore its horizontal
+            scrollbar — inside the viewport, so left/right scrolling is
+            reachable without scrolling the page first. Same single
+            overflow-auto box the Attendance and Payroll tables use. */}
+        <div className="overflow-auto" style={{ maxHeight: "max(520px, calc(100vh - 340px))" }}>
+          {/* Detailed needs room for 16 columns — wide enough that they get real
+              width and the table overflows on a normal desktop instead of
+              squeezing every cell to fit. Summary has six and needs none of it. */}
+          <table className="w-full text-left" style={{ minWidth: isSummary ? 1560 : 1900, borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-20">
               <tr>
-                <th className={headerCell} style={{ minWidth: 260, background: "#003527" }}>Contractor</th>
+                {/* Frozen like the Attendance table's Contractor column — with
+                    the table scrolling sideways in Detailed, the name has to
+                    stay put or a scrolled-right row can't be attributed to
+                    anyone. */}
+                <th className={`${headerCell} sticky left-0 z-30`} style={{ minWidth: 260, background: "#003527" }}>Contractor</th>
                 <th className={headerCell} style={{ background: "#003527" }}>Assigned Team</th>
-                <th className={headerCell} style={{ minWidth: 170, background: "#003527" }}>
-                  {isWeekly ? "Day / Scheduled" : "Scheduled Time"}
-                </th>
-                <th className={headerCell} style={{ background: "#003527" }}>{isWeekly ? "Time In" : "Actual Time In"}</th>
-                <th className={headerCell} style={{ background: "#003527" }}>{isWeekly ? "Time Out" : "Actual Time Out"}</th>
-                <th className={headerCell} style={{ background: "#003527" }}>Project</th>
-                <th className={headerCell} style={{ background: "#003527" }}>Task</th>
-                <th className={`${headerCell} text-right`} style={{ background: "#003527" }}>Task Total Time</th>
-                <th className={`${headerCell} text-center`} style={{ minWidth: 150, background: "#003527" }}>Status</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Late</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Half Day</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Absent</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>NCNS</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>PTO</th>
-                <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Sick Leave</th>
+                {isSummary ? (
+                  <>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Undertime</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Late</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Late Points</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Half Day</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Half Day Points</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Absent</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Absent Points</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>NCNS</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>NCNS Points</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Total Points</th>
+                    <th className={`${headerCell} text-center`} style={{ minWidth: 200, background: "#003527" }}>Disciplinary Action</th>
+                  </>
+                ) : (
+                  <>
+                    <th className={headerCell} style={{ minWidth: 170, background: "#003527" }}>
+                      {isRange ? "Day / Scheduled" : "Scheduled Time"}
+                    </th>
+                    <th className={headerCell} style={{ background: "#003527" }}>{isRange ? "Time In" : "Actual Time In"}</th>
+                    <th className={headerCell} style={{ background: "#003527" }}>{isRange ? "Time Out" : "Actual Time Out"}</th>
+                    <th className={headerCell} style={{ background: "#003527" }}>Project</th>
+                    <th className={headerCell} style={{ background: "#003527" }}>Task</th>
+                    <th className={`${headerCell} text-right`} style={{ background: "#003527" }}>Task Total Time</th>
+                    <th className={`${headerCell} text-center`} style={{ minWidth: 150, background: "#003527" }}>Status</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Undertime</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Late</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Half Day</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Absent</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>NCNS</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>PTO</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Sick Leave</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
               {loading && filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={isSummary ? 13 : 16} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     <span className="inline-flex items-center gap-1.5"><LuRefreshCw size={14} className="animate-spin" /> Loading {dayLabel}…</span>
                   </td>
                 </tr>
               )}
               {!loading && filteredRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
+                  <td colSpan={isSummary ? 13 : 16} className="px-6 py-10 text-center text-sm font-medium text-slate-500">
                     {error ? (
                       <span className="inline-flex items-center gap-2 text-red-600">
                         {error}
@@ -998,19 +1160,40 @@ export default function AttendanceTrackerPage() {
                 const kindTotals = minutesByKind(row.tasks);
                 const rowKey = `${row.worksnapUserId || row.email}`;
 
+                // Exception day-counts for the period. Shared by the Summary
+                // layout's row and Detailed's per-contractor Total row, so the
+                // two layouts always report the same numbers.
+                //
+                // Only the strict "Absent" code counts — "No", "PTO/SIL", "HO"
+                // and "Rest day" are explanations for a day with little or no
+                // time rather than absences. NCNS counts the effective value, so
+                // an admin's override is what gets counted.
+                const undertimeDayCount = row.perDay.filter(isUndertimeDay).length;
+                const lateDayCount = row.perDay.filter((d) => d.isLate).length;
+                const halfDayCount = row.perDay.filter((d) => d.isHalfDay).length;
+                const absentDayCount = row.perDay.filter((d) => d.absenceCode === "Absent").length;
+                const unnotifiedDayCount = row.perDay.filter((d) => ncnsValue(d)).length;
+
                 const contractorCell = (span: number) => (
                   <>
-                    <td rowSpan={span} className={`${cell} overflow-hidden`} style={{ minWidth: 260 }}>
+                    <td
+                      rowSpan={span}
+                      // Opaque background is required, not decorative: a
+                      // transparent frozen cell lets the scrolled columns show
+                      // through underneath it.
+                      className={`${cell} overflow-hidden sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r-slate-200`}
+                      style={{ minWidth: 260 }}
+                    >
                       <p className="text-sm font-semibold text-slate-900">{row.userName}</p>
                       <p className="text-xs text-slate-500 truncate">{row.email || "No email"}</p>
                       <p className="text-xs font-semibold text-teal-700 mt-1 tabular-nums">
-                        {isWeekly ? "Week total" : "Day total"}: {formatMinutes(row.totalMins)}
-                        {isWeekly && <span className="text-slate-400 font-medium"> · {row.daysLogged}/{row.days} days</span>}
+                        {isRange ? `${periodNoun} total` : "Day total"}: {formatMinutes(row.totalMins)}
+                        {isRange && <span className="text-slate-400 font-medium"> · {row.daysLogged}/{row.days} days</span>}
                       </p>
                       {/* Range-level exception summary. The Status column itself
                           is per day in Week Range, so the week's counts — which
                           the tiles and the Status filter both use — live here. */}
-                      {isWeekly && statuses.length > 0 && (
+                      {isRange && statuses.length > 0 && (
                         <p className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] font-bold uppercase tracking-wide">
                           {statuses.includes(STATUS_LATE) && <span className="text-orange-700">Late {row.lateDays}d</span>}
                           {statuses.includes(STATUS_OVER_BREAK) && <span className="text-red-700">Over Break {row.overBreakDays}d</span>}
@@ -1044,13 +1227,13 @@ export default function AttendanceTrackerPage() {
                       <span className="inline-flex flex-col items-center gap-1">
                         {statuses.includes(STATUS_LATE) && (
                           <span
-                            title={isWeekly
+                            title={isRange
                               ? `Late on ${row.lateDays} of ${row.days} days`
                               : `Clocked in at ${row.timeIn} — ${row.lateByMins} min after the ${row.shiftStart} shift start for this date (${LATE_GRACE_MINUTES} min grace applied)`}
                             className="inline-flex flex-col items-center rounded-full border border-orange-200 bg-orange-50 px-2.5 py-0.5 text-[11px] font-bold text-orange-800 whitespace-nowrap"
                           >
                             {STATUS_LATE}
-                            {isWeekly ? (
+                            {isRange ? (
                               <span className="text-[10px] font-semibold text-orange-600 tabular-nums">{row.lateDays} {row.lateDays === 1 ? "day" : "days"}</span>
                             ) : row.lateByMins != null && (
                               <span className="text-[10px] font-semibold text-orange-600 tabular-nums">+{formatMinutes(row.lateByMins)}</span>
@@ -1059,7 +1242,7 @@ export default function AttendanceTrackerPage() {
                         )}
                         {statuses.includes(STATUS_ABSENT) && (
                           <span
-                            title={isWeekly ? "No Worksnap time logged on any day in this range" : "No Worksnap time logged on this day"}
+                            title={isRange ? "No Worksnap time logged on any day in this range" : "No Worksnap time logged on this day"}
                             className="inline-flex items-center rounded-full border border-slate-300 bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 whitespace-nowrap"
                           >
                             {STATUS_ABSENT}
@@ -1067,27 +1250,27 @@ export default function AttendanceTrackerPage() {
                         )}
                         {statuses.includes(STATUS_OVER_BREAK) && (
                           <span
-                            title={isWeekly
+                            title={isRange
                               ? `Over the ${BREAK_ALLOWANCE_MINUTES} min break allowance on ${row.overBreakDays} of ${row.days} days`
                               : `${breakMins} min of break logged — ${breakMins - BREAK_ALLOWANCE_MINUTES} min over the ${BREAK_ALLOWANCE_MINUTES} min allowance`}
                             className="inline-flex flex-col items-center rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-bold text-red-700 whitespace-nowrap"
                           >
                             {STATUS_OVER_BREAK}
                             <span className="text-[10px] font-semibold text-red-500 tabular-nums">
-                              {isWeekly ? `${row.overBreakDays} ${row.overBreakDays === 1 ? "day" : "days"}` : formatMinutes(breakMins)}
+                              {isRange ? `${row.overBreakDays} ${row.overBreakDays === 1 ? "day" : "days"}` : formatMinutes(breakMins)}
                             </span>
                           </span>
                         )}
                         {statuses.includes(STATUS_UNDERTIME) && (
                           <span
-                            title={isWeekly
+                            title={isRange
                               ? `Short of the scheduled day on ${row.undertimeDays} of ${row.days} days`
                               : `${row.totalMins} min logged — ${expectedMinutesFor(row) - row.totalMins} min short of the ${formatMinutes(expectedMinutesFor(row))} scheduled${row.shiftStart ? ` (${row.shiftStart} – ${row.shiftEnd})` : ""}`}
                             className="inline-flex flex-col items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 whitespace-nowrap"
                           >
                             {STATUS_UNDERTIME}
                             <span className="text-[10px] font-semibold text-amber-600 tabular-nums">
-                              {isWeekly
+                              {isRange
                                 ? `${row.undertimeDays} ${row.undertimeDays === 1 ? "day" : "days"}`
                                 : `-${formatMinutes(expectedMinutesFor(row) - row.totalMins)}`}
                             </span>
@@ -1126,12 +1309,125 @@ export default function AttendanceTrackerPage() {
                   </>
                 );
 
-                // ── Week Range: one block per day ──────────────────────────
-                if (isWeekly) {
-                  const plan = weekRenderRows(row);
-                  const totalSpan = Math.max(1, plan.length);
+                // ── Summary: one row per contractor, counts only ───────────
+                if (isSummary) {
+                  // `text` overrides the rendered value without changing the
+                  // zero/non-zero tinting — Late Points needs decimals, the
+                  // counts don't.
+                  const countCell = (value: number, tone: string, title: string, last = false, text?: string) => (
+                    <td className={`px-3 md:px-4 py-2 text-center align-top border-b border-slate-100 ${last ? "" : "border-r"}`}>
+                      <span
+                        title={title}
+                        className={`text-sm font-bold tabular-nums ${value > 0 ? tone : "text-slate-300"}`}
+                      >
+                        {text ?? value}
+                      </span>
+                    </td>
+                  );
+                  const period = isRange ? periodPhrase : "on this day";
+                  const latePoints = lateDayCount * LATE_POINTS_PER_DAY;
+                  const halfDayPoints = halfDayCount * HALF_DAY_POINTS_PER_DAY;
+                  const absentPoints = absentDayCount * ABSENT_POINTS_PER_DAY;
+                  const ncnsPoints = unnotifiedDayCount * NCNS_POINTS_PER_DAY;
+                  // Every weight is a multiple of 0.25, so the sum is exact — no
+                  // rounding needed before it's compared against a threshold.
+                  const totalPoints = latePoints + halfDayPoints + absentPoints + ncnsPoints;
+                  const action = disciplinaryActionFor(totalPoints);
 
-                  return plan.map((entry, index) => {
+                  return (
+                    <tr key={rowKey} className="group hover:bg-slate-50/80 transition-colors">
+                      {/* Slimmer than Detailed's contractor cell on purpose: the
+                          per-kind breakdown and exception summary it carries would
+                          restate the counts this layout exists to show. */}
+                      <td
+                        className={`${cell} overflow-hidden sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r-slate-200`}
+                        style={{ minWidth: 260 }}
+                      >
+                        <p className="text-sm font-semibold text-slate-900">{row.userName}</p>
+                        <p className="text-xs text-slate-500 truncate">{row.email || "No email"}</p>
+                        <p className="text-xs font-semibold text-teal-700 mt-1 tabular-nums">
+                          {isRange ? `${periodNoun} total` : "Day total"}: {formatMinutes(row.totalMins)}
+                          {isRange && <span className="text-slate-400 font-medium"> · {row.daysLogged}/{row.days} days</span>}
+                        </p>
+                      </td>
+                      <td className={cell}>{row.department || <span className="text-slate-300">—</span>}</td>
+                      {countCell(undertimeDayCount, "text-amber-700", `${undertimeDayCount} undertime day${undertimeDayCount === 1 ? "" : "s"} ${period}`)}
+                      {countCell(lateDayCount, "text-orange-700", `Late on ${lateDayCount} day${lateDayCount === 1 ? "" : "s"} ${period}`)}
+                      {countCell(
+                        latePoints,
+                        "text-emerald-700",
+                        `${lateDayCount} late day${lateDayCount === 1 ? "" : "s"} × ${LATE_POINTS_PER_DAY} = ${latePoints.toFixed(2)} points`,
+                        false,
+                        latePoints.toFixed(2)
+                      )}
+                      {countCell(halfDayCount, "text-amber-700", `${halfDayCount} half day${halfDayCount === 1 ? "" : "s"} ${period}`)}
+                      {countCell(
+                        halfDayPoints,
+                        "text-emerald-700",
+                        `${halfDayCount} half day${halfDayCount === 1 ? "" : "s"} × ${HALF_DAY_POINTS_PER_DAY} = ${halfDayPoints.toFixed(2)} points`,
+                        false,
+                        halfDayPoints.toFixed(2)
+                      )}
+                      {countCell(absentDayCount, "text-red-600", `${absentDayCount} absent day${absentDayCount === 1 ? "" : "s"} ${period}`)}
+                      {countCell(
+                        absentPoints,
+                        "text-emerald-700",
+                        `${absentDayCount} absent day${absentDayCount === 1 ? "" : "s"} × ${ABSENT_POINTS_PER_DAY} = ${absentPoints.toFixed(2)} points`,
+                        false,
+                        absentPoints.toFixed(2)
+                      )}
+                      {countCell(unnotifiedDayCount, "text-red-600", `${unnotifiedDayCount} ${NCNS_YES_LABEL} day${unnotifiedDayCount === 1 ? "" : "s"} ${period}`)}
+                      {countCell(
+                        ncnsPoints,
+                        "text-emerald-700",
+                        `${unnotifiedDayCount} ${NCNS_YES_LABEL} day${unnotifiedDayCount === 1 ? "" : "s"} × ${NCNS_POINTS_PER_DAY} = ${ncnsPoints.toFixed(2)} points`,
+                        false,
+                        ncnsPoints.toFixed(2)
+                      )}
+                      {/* Roll-up of the four Points columns. Chipped rather than
+                          just coloured so it reads as the row's bottom line
+                          instead of a fifth peer column. */}
+                      <td className="px-3 md:px-4 py-2 text-center align-top border-r border-b border-slate-100">
+                        <span
+                          title={`${latePoints.toFixed(2)} late + ${halfDayPoints.toFixed(2)} half day + ${absentPoints.toFixed(2)} absent + ${ncnsPoints.toFixed(2)} ${NCNS_YES_LABEL} = ${totalPoints.toFixed(2)} points ${period}`}
+                          className={`inline-block rounded-md px-2 py-1 text-sm font-bold tabular-nums ${
+                            totalPoints > 0 ? "bg-emerald-50 text-emerald-700" : "text-slate-300"
+                          }`}
+                        >
+                          {totalPoints.toFixed(2)}
+                        </span>
+                      </td>
+                      {/* Policy band for the accrued total. A clean record still
+                          falls in the lowest band by the policy's own wording, so
+                          the label is kept but muted — otherwise every
+                          zero-point contractor reads as due for coaching. */}
+                      <td className="px-3 md:px-4 py-2 text-center align-top border-b border-slate-100">
+                        <span
+                          title={`${totalPoints.toFixed(2)} accrued points ${period}`}
+                          className={`inline-block rounded-md px-2 py-1 text-[11px] font-bold whitespace-nowrap ${
+                            totalPoints > 0 ? action.style : "bg-slate-50 text-slate-400"
+                          }`}
+                        >
+                          {action.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // ── Week Range: one block per day ──────────────────────────
+                if (isRange) {
+                  const plan = weekRenderRows(row);
+                  // The contractor and team cells span the week's task rows plus
+                  // the totals row below them, so the totals row starts under
+                  // Day / Scheduled instead of shifting a column to the left.
+                  const totalSpan = Math.max(1, plan.length) + 1;
+                  // Only the strict "Absent" code counts. "No", "PTO/SIL", "HO"
+                  // and "Rest day" are explanations for a day with little or no
+                  // time rather than absences, and the column reports them as
+                  // such — same rule the Absent scorecard uses.
+
+                  const weekRows = plan.map((entry, index) => {
                     const kind = entry.task ? taskKind(entry.task) : null;
                     // Group rules only apply within a day — a new day already
                     // has its own heavier rule across the row.
@@ -1142,7 +1438,7 @@ export default function AttendanceTrackerPage() {
                     const dayRule = entry.isFirstOfDay ? "border-t-2 border-t-slate-200" : "";
 
                     return (
-                      <tr key={`${rowKey}-${entry.day.date}-${index}`} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={`${rowKey}-${entry.day.date}-${index}`} className="group hover:bg-slate-50/80 transition-colors">
                         {index === 0 && contractorCell(totalSpan)}
                         {entry.isFirstOfDay && (
                           <>
@@ -1191,6 +1487,9 @@ export default function AttendanceTrackerPage() {
                             <td rowSpan={entry.dayRowSpan} className={`px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top ${dayRule}`} style={{ minWidth: 150 }}>
                               <DayStatusBadges day={entry.day} />
                             </td>
+                            <td rowSpan={entry.dayRowSpan} className={`px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top ${dayRule}`}>
+                              <UndertimeFlag day={entry.day} />
+                            </td>
                             {/* Late and Absent are per day, like the rest of the block. */}
                             <td rowSpan={entry.dayRowSpan} className={`px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top ${dayRule}`}>
                               <LateFlag isLate={entry.day.isLate} byMins={entry.day.lateByMins} />
@@ -1218,6 +1517,73 @@ export default function AttendanceTrackerPage() {
                       </tr>
                     );
                   });
+
+                  // Week totals, immediately after Saturday. Tinted and ruled
+                  // off so it reads as a summary of the block above rather than
+                  // an eighth day.
+                  const totalBase = "px-3 md:px-4 py-2 align-top bg-slate-50 border-b border-slate-100 border-t-2 border-t-slate-300";
+                  const totalCell = `${totalBase} border-r text-center`;
+                  weekRows.push(
+                    <tr key={`${rowKey}-week-total`}>
+                      <td className={`${totalBase} border-r text-xs font-bold uppercase tracking-wider text-[#003527]`}>
+                        Total
+                      </td>
+                      {/* Time In · Time Out · Project · Task · Task Total Time ·
+                          Status — nothing to total here, so they stay empty
+                          rather than carrying a filler value. */}
+                      <td className={totalCell} />
+                      <td className={totalCell} />
+                      <td className={totalCell} />
+                      <td className={totalCell} />
+                      <td className={totalCell} />
+                      <td className={totalCell} />
+                      <td className={totalCell}>
+                        <span
+                          title={`${undertimeDayCount} undertime day${undertimeDayCount === 1 ? "" : "s"} ${periodPhrase}`}
+                          className={`text-xs font-bold tabular-nums ${undertimeDayCount > 0 ? "text-amber-700" : "text-slate-400"}`}
+                        >
+                          {undertimeDayCount}
+                        </span>
+                      </td>
+                      <td className={totalCell}>
+                        <span
+                          title={`Late on ${lateDayCount} day${lateDayCount === 1 ? "" : "s"} ${periodPhrase}`}
+                          className={`text-xs font-bold tabular-nums ${lateDayCount > 0 ? "text-orange-700" : "text-slate-400"}`}
+                        >
+                          {lateDayCount}
+                        </span>
+                      </td>
+                      <td className={totalCell}>
+                        <span
+                          title={`${halfDayCount} half day${halfDayCount === 1 ? "" : "s"} ${periodPhrase}`}
+                          className={`text-xs font-bold tabular-nums ${halfDayCount > 0 ? "text-amber-700" : "text-slate-400"}`}
+                        >
+                          {halfDayCount}
+                        </span>
+                      </td>
+                      <td className={totalCell}>
+                        <span
+                          title={`${absentDayCount} day${absentDayCount === 1 ? "" : "s"} with Absent status ${periodPhrase}`}
+                          className={`text-xs font-bold tabular-nums ${absentDayCount > 0 ? "text-red-600" : "text-slate-400"}`}
+                        >
+                          {absentDayCount}
+                        </span>
+                      </td>
+                      <td className={totalCell}>
+                        <span
+                          title={`${unnotifiedDayCount} ${NCNS_YES_LABEL} day${unnotifiedDayCount === 1 ? "" : "s"} ${periodPhrase}`}
+                          className={`text-xs font-bold tabular-nums ${unnotifiedDayCount > 0 ? "text-red-600" : "text-slate-400"}`}
+                        >
+                          {unnotifiedDayCount}
+                        </span>
+                      </td>
+                      {/* PTO · Sick Leave */}
+                      <td className={totalCell} />
+                      <td className={`${totalBase} text-center`} />
+                    </tr>
+                  );
+
+                  return weekRows;
                 }
 
                 // ── Daily: one row per task ────────────────────────────────
@@ -1229,7 +1595,7 @@ export default function AttendanceTrackerPage() {
                   const groupRule = startsGroup && taskIndex > 0 ? "border-t-2 border-t-slate-200" : "";
 
                   return (
-                    <tr key={`${rowKey}-${taskIndex}`} className="hover:bg-slate-50/80 transition-colors">
+                    <tr key={`${rowKey}-${taskIndex}`} className="group hover:bg-slate-50/80 transition-colors">
                       {taskIndex === 0 && (
                         <>
                           {contractorCell(span)}
@@ -1257,6 +1623,9 @@ export default function AttendanceTrackerPage() {
                       {taskIndex === 0 && (
                         <>
                           {statusCell(span)}
+                          <td rowSpan={span} className="px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top">
+                            <UndertimeFlag day={row.perDay[0]} />
+                          </td>
                           <td rowSpan={span} className="px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top">
                             <LateFlag isLate={row.isLate} byMins={row.lateByMins} />
                           </td>

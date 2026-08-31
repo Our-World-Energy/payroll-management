@@ -514,12 +514,22 @@ export async function GET(request: Request) {
       const dayMins = acc ? (acc.hasTasks ? acc.totalMins : acc.logTotalMins ?? 0) : 0;
       totalMins += dayMins;
 
-      // A rest day with nothing logged is not an absence — only a working day is.
+      // Nothing logged is only an absence on a day the contractor was actually
+      // expected to work. A rest day, a company (US) holiday and an approved
+      // PTO/Sick day are all explanations for an empty day rather than absences
+      // — the same exclusions absenceCodeFor applies, kept in step here so the
+      // Status column, the Absent column, the range verdict and the tiles can't
+      // disagree about whether someone was absent.
       const restDay = isRestDayDate(dateIso, profile?.restDay ?? "");
-      const dayAbsent = !restDay && dayMins === 0;
+      const excused = usHolidayDates.has(dateIso)
+        || Boolean(normalizedEmail && hasPtoOrSickOn(normalizedEmail, dateIso));
+      const expectedToWork = !restDay && !excused;
+      const dayAbsent = expectedToWork && dayMins === 0;
       if (dayMins > 0) daysLogged++;
       if (dayAbsent) absentDays++;
-      if (!restDay) workingDays++;
+      // Excused days are left out of the denominator too, so a contractor on
+      // leave for a whole range isn't reported absent for it.
+      if (expectedToWork) workingDays++;
 
       if (acc && acc.breakMins > BREAK_ALLOWANCE_MINUTES) overBreakDays++;
 

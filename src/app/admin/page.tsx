@@ -25,9 +25,19 @@ type LateRow = {
   name: string;
   department: string;
   date: string;
+  shiftType: string;
+  shiftStart: string;
   clockedIn: string;
   lateByMinutes: number;
 };
+
+// {hour, minute} back to the "9:00 AM" form contractor_profiles.shiftHours and
+// the shift-schedule rows both store it in.
+function formatShiftTime({ hour, minute }: { hour: number; minute: number }) {
+  const period = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${period}`;
+}
 
 // Banded so a two-hour late arrival reads differently from a twenty-minute one
 // without having to compare the numbers.
@@ -287,7 +297,18 @@ export default function AdminPage() {
           if (firstIn.getTime() > thresholdInstant.getTime()) {
             const lateByMinutes = Math.round((firstIn.getTime() - shiftStartInstant.getTime()) / 60000);
             const loginLabel = firstIn.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ARIZONA_TIME_ZONE });
-            lateRows.push({ name: c.fullName, department: c.department, date: todayLocal, clockedIn: loginLabel, lateByMinutes });
+            lateRows.push({
+              name: c.fullName,
+              department: c.department,
+              date: todayLocal,
+              // The start shown is the one actually evaluated against: today's
+              // assigned row for a Shifting Schedule contractor, the profile's
+              // shiftHours for a Fixed one.
+              shiftType: shiftTypeLabel || "—",
+              shiftStart: formatShiftTime(shiftStart),
+              clockedIn: loginLabel,
+              lateByMinutes,
+            });
           }
         }
         // Worst first — the contractors who need following up are at the top
@@ -530,7 +551,7 @@ export default function AdminPage() {
       {showLateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLateModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between gap-3 px-6 py-5 bg-amber-600">
               <div className="min-w-0">
                 <h3 className="text-lg font-bold text-white">Late Today</h3>
@@ -555,20 +576,25 @@ export default function AdminPage() {
                 <p className="px-5 py-10 text-center text-sm text-slate-400">No late arrivals recorded today.</p>
               ) : (
                 <>
+                  {/* Shift Start sits immediately left of Clocked In so the
+                      scheduled and actual times can be compared by reading
+                      across, with Late By as the difference. */}
                   <table className="hidden w-full table-fixed text-left text-sm sm:table">
                     <colgroup>
-                      <col className="w-[28%]" />
-                      <col className="w-[26%]" />
-                      <col className="w-[16%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[16%]" />
+                      <col className="w-[20%]" />
+                      <col className="w-[17%]" />
+                      <col className="w-[13%]" />
+                      <col className="w-[15%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[11%]" />
                     </colgroup>
                     <thead className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200">
                       <tr>
-                        {["Name", "Assigned Team", "Date", "Clocked In", "Late By"].map((h) => (
+                        {["Name", "Assigned Team", "Date", "Shift Type", "Shift Start", "Clocked In", "Late By"].map((h) => (
                           <th
                             key={h}
-                            className={`px-4 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 ${h === "Late By" ? "text-right" : ""}`}
+                            className={`px-3 py-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 ${h === "Late By" ? "text-right" : ""}`}
                           >
                             {h}
                           </th>
@@ -578,11 +604,13 @@ export default function AdminPage() {
                     <tbody className="divide-y divide-slate-100">
                       {lateRows.map((row, i) => (
                         <tr key={i} className="hover:bg-slate-50 transition-colors align-top">
-                          <td className="px-4 py-3 font-semibold text-slate-900 break-words">{row.name}</td>
-                          <td className="px-4 py-3 text-slate-600 break-words">{row.department || "Unassigned"}</td>
-                          <td className="px-4 py-3 text-slate-500 tabular-nums whitespace-nowrap">{row.date}</td>
-                          <td className="px-4 py-3 text-slate-700 tabular-nums whitespace-nowrap">{row.clockedIn}</td>
-                          <td className="px-4 py-3 text-right">
+                          <td className="px-3 py-3 font-semibold text-slate-900 break-words">{row.name}</td>
+                          <td className="px-3 py-3 text-slate-600 break-words">{row.department || "Unassigned"}</td>
+                          <td className="px-3 py-3 text-slate-500 tabular-nums whitespace-nowrap">{row.date}</td>
+                          <td className="px-3 py-3 text-slate-600 break-words">{row.shiftType}</td>
+                          <td className="px-3 py-3 text-slate-700 tabular-nums whitespace-nowrap">{row.shiftStart}</td>
+                          <td className="px-3 py-3 text-slate-700 tabular-nums whitespace-nowrap">{row.clockedIn}</td>
+                          <td className="px-3 py-3 text-right">
                             <span
                               title={`${row.lateByMinutes} minutes after shift start`}
                               className={`inline-block rounded-md px-2 py-1 text-[11px] font-bold tabular-nums whitespace-nowrap ${lateSeverityClasses(row.lateByMinutes)}`}
@@ -609,7 +637,10 @@ export default function AdminPage() {
                             {formatLateBy(row.lateByMinutes)} late
                           </span>
                         </div>
-                        <p className="mt-1.5 text-xs text-slate-500 tabular-nums">
+                        <p className="mt-1.5 text-xs text-slate-500">
+                          {row.shiftType} · starts <span className="tabular-nums">{row.shiftStart}</span>
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500 tabular-nums">
                           Clocked in {row.clockedIn} · {row.date}
                         </p>
                       </li>
