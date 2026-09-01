@@ -2489,7 +2489,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
 // ── per-user task × date breakdown modal ────────────────────────────────────
 type BreakdownTask = { projectName: string; taskName: string; category: string; perDay: Record<string, number>; total: number };
-type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number>; firstIn: Record<string, string>; lastOut: Record<string, string> };
+type BreakdownResponse = { userName: string; email: string; week: string; days: string[]; tasks: BreakdownTask[]; dailyTotals: Record<string, number>; grandTotal: number; adjustments: Record<string, number>; timeOff: Record<string, number>; firstIn: Record<string, string>; lastOut: Record<string, string>; firstInLogged?: Record<string, string>; lastOutLogged?: Record<string, string> };
 
 const CAT_CHIP: Record<string, string> = { Work: "bg-emerald-50 text-emerald-700", Break: "bg-amber-50 text-amber-700", "Meeting/Training": "bg-sky-50 text-sky-700" };
 
@@ -2549,13 +2549,13 @@ function BreakdownModal({ userId, userName, email, week, onClose }: { userId: nu
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-slate-200 bg-slate-50/60">
-                  <td className="px-3 py-1.5 text-xs font-semibold text-teal-700">First In</td>
-                  {days.map((d) => { const v = data.firstIn?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-teal-700 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-xs font-semibold text-teal-700" title="Worksnaps tracks in fixed 10-minute slots, so First In is the slot boundary — the earliest the shift can have started. 'by' is the first screenshot upload, proving tracking was live by then: the real clock-in falls between the two.">First In</td>
+                  {days.map((d) => { const v = data.firstIn?.[d]; const lg = data.firstInLogged?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-teal-700 font-semibold" : "text-slate-300"}`}>{v || "·"}{v && lg ? <div className="text-[10px] font-normal text-slate-400" title={`First screenshot uploaded ${lg} — clock-in was between ${v} and ${lg}`}>by {lg}</div> : null}</td>; })}
                   <td className="px-3 py-1.5 text-right text-slate-300">—</td>
                 </tr>
                 <tr className="bg-slate-50/60">
-                  <td className="px-3 py-1.5 text-xs font-semibold text-rose-600">Last Out</td>
-                  {days.map((d) => { const v = data.lastOut?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{v || "·"}</td>; })}
+                  <td className="px-3 py-1.5 text-xs font-semibold text-rose-600" title="Last Out is the end of the final 10-minute slot — the latest the shift can have ended. 'seen' is the last screenshot upload, proving tracking was still live then: the real clock-out falls between the two.">Last Out</td>
+                  {days.map((d) => { const v = data.lastOut?.[d]; const lg = data.lastOutLogged?.[d]; return <td key={d} className={`px-2 py-1.5 text-center tabular-nums whitespace-nowrap ${v ? "text-rose-600 font-semibold" : "text-slate-300"}`}>{v || "·"}{v && lg ? <div className="text-[10px] font-normal text-slate-400" title={`Last screenshot uploaded ${lg} — clock-out was between ${lg} and ${v}`}>seen {lg}</div> : null}</td>; })}
                   <td className="px-3 py-1.5 text-right text-slate-300">—</td>
                 </tr>
                 <tr className="border-t border-slate-200 bg-slate-50">

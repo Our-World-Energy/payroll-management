@@ -79,6 +79,7 @@ export async function GET(request: Request) {
       adjustments: Object.fromEntries(days.map((d) => [d, 0])),
       timeOff: Object.fromEntries(days.map((d) => [d, 0])),
       timeOffStatusByDate: {}, firstIn: {}, lastOut: {},
+      firstInLogged: {}, lastOutLogged: {},
     });
   }
 
@@ -137,14 +138,16 @@ export async function GET(request: Request) {
     if (s.timeOffStatus !== "NOT_SET") timeOffStatusByDate[d] = s.timeOffStatus;
   }
 
-  // per-day first clock-in / last clock-out (AZ time), from worksnap_daily_log.
-  // Displayed from firstInLogged/lastOutLogged — the actual clock-in/out
-  // instants — since firstIn/lastOut are the rounded Worksnap time-entry bucket
-  // boundaries and read a few minutes early/late. firstIn/lastOut stay as the
-  // fallback for the tail of rows that were never backfilled.
+  // per-day first clock-in / last clock-out (AZ time), from worksnap_daily_log
   const dailyLogs = await prisma.worksnapDailyLog.findMany({
     where: { worksnapUserId: userId, entryDate: { gte: weekStart, lte: weekEnd } },
-    select: { entryDate: true, firstIn: true, lastOut: true, firstInLogged: true, lastOutLogged: true },
+    select: {
+      entryDate: true,
+      firstIn: true,
+      lastOut: true,
+      firstInLogged: true,
+      lastOutLogged: true,
+    },
   });
   const fmtTime = (d: Date) =>
     d.toLocaleTimeString("en-US", {
@@ -156,11 +159,19 @@ export async function GET(request: Request) {
     });
   const firstIn: Record<string, string> = {};
   const lastOut: Record<string, string> = {};
+  // Worksnaps' screenshot-upload instants. firstIn/lastOut are 10-minute slot
+  // boundaries, so these are what actually bound the real clock-in/out:
+  // clock-in in [firstIn, firstInLogged], clock-out in [lastOutLogged, lastOut].
+  // Null on days synced before the column existed — the UI omits them then.
+  const firstInLogged: Record<string, string> = {};
+  const lastOutLogged: Record<string, string> = {};
   for (const l of dailyLogs) {
     const d = toISODate(l.entryDate);
-    firstIn[d] = fmtTime(l.firstInLogged ?? l.firstIn);
-    lastOut[d] = fmtTime(l.lastOutLogged ?? l.lastOut);
+    firstIn[d] = fmtTime(l.firstIn);
+    lastOut[d] = fmtTime(l.lastOut);
+    if (l.firstInLogged) firstInLogged[d] = fmtTime(l.firstInLogged);
+    if (l.lastOutLogged) lastOutLogged[d] = fmtTime(l.lastOutLogged);
   }
 
-  return Response.json({ userId, userName, email, week, days, tasks, dailyTotals, grandTotal, adjustments, timeOff, timeOffStatusByDate, firstIn, lastOut });
+  return Response.json({ userId, userName, email, week, days, tasks, dailyTotals, grandTotal, adjustments, timeOff, timeOffStatusByDate, firstIn, lastOut, firstInLogged, lastOutLogged });
 }

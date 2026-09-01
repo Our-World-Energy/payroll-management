@@ -207,10 +207,8 @@ type DailyLog = {
   entryDate: Date;
   firstIn: Date;
   lastOut: Date;
-  // Actual clock-in/out, from each entry's logged_timestamp. firstIn/lastOut are
-  // derived from from_timestamp, which is the 10-minute tracking bucket the entry
-  // falls in — so they read a few minutes early on arrival and late on departure.
-  // Null only if no entry that day carried a logged_timestamp.
+  // Upload instant of the first / last entry — see WorksnapDailyLog in the Prisma
+  // schema. Bounds the real clock-in/out that the 10-min slots can't express.
   firstInLogged: Date | null;
   lastOutLogged: Date | null;
   totalMins: number;
@@ -224,10 +222,7 @@ const FETCH_CONCURRENCY = 10;
 
 // Per-user per-local-day first clock-in / last clock-out, from raw time entries.
 // The manager_report only carries date-level durations, so we read the granular
-// /projects/{id}/time_entries.xml endpoint (each entry has a from_timestamp —
-// the 10-minute tracking bucket — and a logged_timestamp, when it was actually
-// recorded; the bucket bounds firstIn/lastOut, the logged one firstInLogged/
-// lastOutLogged).
+// /projects/{id}/time_entries.xml endpoint (each entry has a from_timestamp).
 async function buildDailyLogs(
   projectUsers: Map<number, Set<number>>,
   userMeta: Map<number, { email: string; userName: string }>,
@@ -237,8 +232,14 @@ async function buildDailyLogs(
   if (projectUsers.size === 0) return [];
 
   type Acc = {
-    start: number; end: number; mins: number; count: number;
-    loggedStart: number | null; loggedEnd: number | null;
+    start: number;
+    end: number;
+    // logged_timestamp OF the entry that set `start` / `end` — not the min/max
+    // logged value, which could belong to any other slot in the day.
+    startLogged: number;
+    endLogged: number;
+    mins: number;
+    count: number;
   };
   const agg = new Map<string, Acc>();
 
@@ -268,24 +269,36 @@ async function buildDailyLogs(
       const mins = Math.round(
         parseFloat(field(te, "duration_in_minutes") || "0"),
       );
+      // Screenshot-capture instant — the only sub-slot signal Worksnaps exposes.
+      // `offline` entries (manually added time) have no screenshot and report
+      // logged_timestamp === from_timestamp, i.e. the slot boundary itself. That
+      // is no signal at all, and storing it would render as a to-the-second
+      // clock-in that is pure artifact — so require it to be strictly inside the
+      // slot, and treat the boundary case as unknown (0 -> null).
+      const loggedRaw = Number(field(te, "logged_timestamp")) || 0;
+      const loggedTs = loggedRaw > startTs ? loggedRaw : 0;
       const endTs = startTs + mins * 60;
-      // When the entry was actually recorded, as opposed to the bucket it falls in.
-      const loggedTs = Number(field(te, "logged_timestamp")) || null;
       const key = `${uid}|${localDateOf(startTs)}`;
       const cur = agg.get(key);
       if (cur) {
-        if (startTs < cur.start) cur.start = startTs;
-        if (endTs > cur.end) cur.end = endTs;
-        if (loggedTs !== null) {
-          if (cur.loggedStart === null || loggedTs < cur.loggedStart) cur.loggedStart = loggedTs;
-          if (cur.loggedEnd === null || loggedTs > cur.loggedEnd) cur.loggedEnd = loggedTs;
+        if (startTs < cur.start) {
+          cur.start = startTs;
+          cur.startLogged = loggedTs;
+        }
+        if (endTs > cur.end) {
+          cur.end = endTs;
+          cur.endLogged = loggedTs;
         }
         cur.mins += mins;
         cur.count += 1;
       } else {
         agg.set(key, {
-          start: startTs, end: endTs, mins, count: 1,
-          loggedStart: loggedTs, loggedEnd: loggedTs,
+          start: startTs,
+          end: endTs,
+          startLogged: loggedTs,
+          endLogged: loggedTs,
+          mins,
+          count: 1,
         });
       }
     }
@@ -306,8 +319,8 @@ async function buildDailyLogs(
       entryDate: new Date(`${dateStr}T00:00:00.000Z`),
       firstIn: new Date(a.start * 1000),
       lastOut: new Date(a.end * 1000),
-      firstInLogged: a.loggedStart === null ? null : new Date(a.loggedStart * 1000),
-      lastOutLogged: a.loggedEnd === null ? null : new Date(a.loggedEnd * 1000),
+      firstInLogged: a.startLogged ? new Date(a.startLogged * 1000) : null,
+      lastOutLogged: a.endLogged ? new Date(a.endLogged * 1000) : null,
       totalMins: a.mins,
       entries: a.count,
     });
