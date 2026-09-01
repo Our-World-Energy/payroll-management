@@ -60,7 +60,6 @@ export default function SettingsPage() {
 
   // ── Section collapse state (all collapsed by default) ────────────────────
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    organisation: false,
     officeLocations: false,
     managers: false,
     countryLocations: false,
@@ -422,40 +421,6 @@ export default function SettingsPage() {
           {errMsg}
         </div>
       )}
-
-      {/* Organisation */}
-      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <button
-          onClick={() => toggleSection("organisation")}
-          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
-        >
-          {openSections.organisation ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
-          <h4 className="text-base font-semibold text-[#003527]">Organisation</h4>
-        </button>
-        {openSections.organisation && (
-          <div className="px-6 py-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Default Timezone</label>
-                <select className={SELECT}>
-                  <option>UTC (Coordinated Universal Time)</option>
-                  <option>UTC−5 (Eastern Time)</option>
-                  <option>UTC+5:30 (India)</option>
-                  <option>UTC−6 (Central Time)</option>
-                  <option>UTC+8 (Philippines)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Fiscal Year Start</label>
-                <select className={SELECT}>
-                  <option>January</option><option>April</option>
-                  <option>July</option><option>October</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-      </section>
 
       {/* Work Locations */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

@@ -7,28 +7,44 @@ import {
   type Announcement,
 } from "@/app/admin/announcements/actions";
 
-// "Global" was previously only creatable under Settings → Global Announcement;
-// it now lives here with the country-scoped locations. It behaves differently
-// on the Contractor Portal: a Global announcement is broadcast as an animated
-// banner on every contractor's Dashboard, and only once its date arrives,
-// whereas country-scoped ones show in the Offshore Announcements list
-// immediately. GLOBAL is listed first so that difference is easy to find.
+// Shown as "Banner". Broadcast as an animated banner on every contractor's
+// Dashboard, and only once its date arrives — the only kind that is date-gated.
+// Listed first so that difference is easy to find.
 const GLOBAL = "Global";
 
-// "Offshore" is addressed to every country rather than to a place: the
-// Contractor Portal shows it to everyone alongside their own country's
-// announcements. Unlike Global it isn't date-gated and isn't a banner.
+// Shown as "All Locations". Addressed to every country rather than to a place:
+// the Contractor Portal shows it to everyone alongside their own country's
+// announcements. Unlike Banner it isn't date-gated and isn't a banner.
 const OFFSHORE = "Offshore";
 
+const ANY_LOCATION = "All Locations"; // the filter's no-filter sentinel
+
 const LOCATIONS = [
-  "All Locations",
+  ANY_LOCATION,
   GLOBAL,
   "Philippines",
   "Mexico",
   "India",
   "Guatemala",
+  "Colombia",
   OFFSHORE,
 ];
+
+// Display labels only — the stored `location` values stay "Global" and
+// "Offshore", so existing rows keep working and the Contractor Portal's
+// filtering (which matches those values) needs no change.
+//
+// The filter's own no-filter option is relabelled "Show All" so it can't be
+// mistaken for Offshore's new "All Locations" label.
+const LOCATION_LABEL: Record<string, string> = {
+  [GLOBAL]: "Banner",
+  [OFFSHORE]: "All Locations",
+  [ANY_LOCATION]: "Show All",
+};
+
+function locationLabel(location: string) {
+  return LOCATION_LABEL[location] ?? location;
+}
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer appearance-none";
@@ -50,7 +66,7 @@ export function AnnouncementBoard() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [filterLocation, setFilterLocation] = useState("All Locations");
+  const [filterLocation, setFilterLocation] = useState(ANY_LOCATION);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -144,7 +160,7 @@ export function AnnouncementBoard() {
   }
 
   const filtered =
-    filterLocation === "All Locations"
+    filterLocation === ANY_LOCATION
       ? announcements
       : announcements.filter((a) => a.location === filterLocation);
 
@@ -211,7 +227,7 @@ export function AnnouncementBoard() {
                   <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Location</label>
                   <div className="relative">
                     <select className={SELECT} value={location} onChange={(e) => setLocation(e.target.value)}>
-                      {LOCATIONS.slice(1).map((l) => <option key={l}>{l}</option>)}
+                      {LOCATIONS.slice(1).map((l) => <option key={l} value={l}>{locationLabel(l)}</option>)}
                     </select>
                     <LuChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   </div>
@@ -225,13 +241,13 @@ export function AnnouncementBoard() {
               </div>
               {location === GLOBAL && (
                 <p className="text-xs text-purple-700 bg-purple-50 border border-purple-100 rounded-lg px-3 py-2">
-                  Global broadcasts an animated banner on every contractor&apos;s Dashboard, and only once the date above arrives.
+                  Banner shows an animated banner on every contractor&apos;s Dashboard, and only once the date above arrives.
                 </p>
               )}
               {location === OFFSHORE && (
                 <p className="text-xs text-teal-700 bg-teal-50 border border-teal-100 rounded-lg px-3 py-2">
-                  Offshore reaches contractors in every country — it appears in the Announcements list on all Dashboards
-                  straight away, rather than being scoped to one location.
+                  All Locations reaches contractors in every country — it appears in the Announcements list on all
+                  Dashboards straight away, rather than being scoped to one country.
                 </p>
               )}
               {formError && <p className="text-xs font-medium text-red-600">{formError}</p>}
@@ -269,7 +285,7 @@ export function AnnouncementBoard() {
             value={filterLocation}
             onChange={(e) => setFilterLocation(e.target.value)}
           >
-            {LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+            {LOCATIONS.map((l) => <option key={l} value={l}>{locationLabel(l)}</option>)}
           </select>
           <LuChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         </div>
@@ -299,7 +315,7 @@ export function AnnouncementBoard() {
                 <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                   <span className="text-sm font-semibold text-[#003527]">{a.title}</span>
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${isGlobal ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-teal-50 text-teal-700 border-teal-100"}`}>
-                    {a.location}
+                    {locationLabel(a.location)}
                   </span>
                   {/* Only Global is date-gated, so only Global gets a live/scheduled state. */}
                   {isGlobal && (

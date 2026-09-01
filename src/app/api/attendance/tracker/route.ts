@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ARIZONA_TIME_ZONE, utcInstantForLocalTime } from "@/lib/countryTimeZones";
-import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
+import { CROSS_DAY_SHIFT, LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, isCrossDayWindow, parseShiftTime, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
 
 /**
  * Attendance across everyone for either one day or a date range, for the
@@ -116,6 +116,11 @@ type TrackerDay = {
   ptoType: string;
   /** The approved Sick Leave request type covering this date, same rules. */
   silType: string;
+  /** Whether this date's shift window wraps past midnight. */
+  crossesMidnight: boolean;
+  /** Whether timeOut was taken from the following morning — a cross-day shift's
+   *  clock-out belongs to the date the shift started. */
+  timeOutIsNextDay: boolean;
   /** Break minutes logged that day, for the per-day Over Break verdict. */
   breakMins: number;
   /** The day's resolved expected minutes — its scheduled window when it has
@@ -186,6 +191,22 @@ function toIsoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+// Minutes since midnight in Arizona for an instant — used to tell a cross-day
+// shift's morning tail from a fresh evening start.
+function arizonaMinutesOfDay(instant: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: ARIZONA_TIME_ZONE, hour12: false, hour: "2-digit", minute: "2-digit",
+  }).formatToParts(instant);
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? 0);
+  return (get("hour") % 24) * 60 + get("minute");
+}
+
+function nextDate(dateIso: string) {
+  const d = new Date(`${dateIso}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return toIsoDate(d);
+}
+
 function datesInRange(from: string, to: string) {
   const out: string[] = [];
   const cursor = new Date(`${from}T00:00:00.000Z`);
@@ -222,14 +243,19 @@ export async function GET(request: Request) {
 
   const rangeStart = new Date(`${from}T00:00:00.000Z`);
   const rangeEnd = new Date(`${to}T00:00:00.000Z`);
+  const rangeEndPlusOne = new Date(rangeEnd);
+  rangeEndPlusOne.setUTCDate(rangeEndPlusOne.getUTCDate() + 1);
 
   const [entries, logs, profiles, shiftSchedules, usHolidays, approvedLeave, ncnsOverrides] = await Promise.all([
     prisma.worksnapEntry.findMany({
       where: { entryDate: { gte: rangeStart, lte: rangeEnd } },
       select: { worksnapUserId: true, userName: true, email: true, entryDate: true, projectName: true, taskName: true, category: true, durationMins: true },
     }),
+    // One day past the range: a Cross-Day shift starting on the last day in
+    // range clocks out the following morning, and that punch belongs to the
+    // shift's start date.
     prisma.worksnapDailyLog.findMany({
-      where: { entryDate: { gte: rangeStart, lte: rangeEnd } },
+      where: { entryDate: { gte: rangeStart, lte: rangeEndPlusOne } },
       select: { worksnapUserId: true, userName: true, email: true, entryDate: true, firstIn: true, lastOut: true, firstInLogged: true, lastOutLogged: true, totalMins: true },
     }),
     prisma.contractorProfile.findMany({
@@ -332,14 +358,21 @@ export async function GET(request: Request) {
       };
     }
 
+    if (shiftType === CROSS_DAY_SHIFT) {
+      const [start = "", end = ""] = (profile?.shiftHours ?? "").split(" to ").map((v) => v.trim());
+      // Cross-Day windows are entered deliberately, so the wrap past midnight is
+      // meant and scheduledMinutes' 24-hour carry is the right length.
+      return { shiftStart: start, shiftEnd: end, expectedMins: scheduledMinutes(start, end) };
+    }
+
     if (shiftType.toLowerCase() === "fixed") {
       const [start = "", end = ""] = (profile?.shiftHours ?? "").split(" to ").map((v) => v.trim());
       // expectedMins is deliberately left null for Fixed contractors: their
       // shiftHours is long-standing free text and some rows are malformed
       // (e.g. "9:00 AM to 5:00 AM" computes to a 20-hour day), which would
       // silently change the Undertime figures that already exist for them.
-      // Only Shifting Schedule contractors — whose hours are entered per date
-      // through the new modal — drive expected hours off their window.
+      // Only Shifting Schedule and Cross-Day contractors — whose windows are
+      // entered deliberately — drive expected hours off their window.
       return { shiftStart: start, shiftEnd: end, expectedMins: null as number | null };
     }
 
@@ -459,17 +492,44 @@ export async function GET(request: Request) {
       lastWindow = window;
       if (window.shiftStart || window.shiftEnd) windows.add(`${window.shiftStart}|${window.shiftEnd}`);
 
+      // Cross-Day: the shift ends the next morning, so the clock-out that closes
+      // it lives in the following calendar day's log. Pulled onto the start date
+      // here — the whole shift belongs to the day it began.
+      //
+      // Only taken when that punch actually falls in the shift's morning tail.
+      // A contractor working consecutive nights has a *late evening* last-out on
+      // the following day too (their next shift's own start), and treating that
+      // as this shift's end would be plainly wrong.
+      const crossesMidnight = isCrossDayWindow(window.shiftStart, window.shiftEnd);
+      const shiftEnd = parseShiftTime(window.shiftEnd);
+      const nextDayAcc = crossesMidnight ? days.get(nextDate(dateIso)) : undefined;
+      const nextDayOut = nextDayAcc?.clockOut ?? null;
+      const crossDayClockOut = nextDayOut && shiftEnd
+        && arizonaMinutesOfDay(nextDayOut) <= shiftEnd.hour * 60 + shiftEnd.minute
+        ? nextDayOut
+        : null;
+
       // worksnap_daily_log carries its own total; it only stands in when there
       // were no task entries to sum (so the two can't double-count).
       const dayMins = acc ? (acc.hasTasks ? acc.totalMins : acc.logTotalMins ?? 0) : 0;
       totalMins += dayMins;
 
-      // A rest day with nothing logged is not an absence — only a working day is.
+      // Nothing logged is only an absence on a day the contractor was actually
+      // expected to work. A rest day, a company (US) holiday and an approved
+      // PTO/Sick day are all explanations for an empty day rather than absences
+      // — the same exclusions absenceCodeFor applies, kept in step here so the
+      // Status column, the Absent column, the range verdict and the tiles can't
+      // disagree about whether someone was absent.
       const restDay = isRestDayDate(dateIso, profile?.restDay ?? "");
-      const dayAbsent = !restDay && dayMins === 0;
+      const excused = usHolidayDates.has(dateIso)
+        || Boolean(normalizedEmail && hasPtoOrSickOn(normalizedEmail, dateIso));
+      const expectedToWork = !restDay && !excused;
+      const dayAbsent = expectedToWork && dayMins === 0;
       if (dayMins > 0) daysLogged++;
       if (dayAbsent) absentDays++;
-      if (!restDay) workingDays++;
+      // Excused days are left out of the denominator too, so a contractor on
+      // leave for a whole range isn't reported absent for it.
+      if (expectedToWork) workingDays++;
 
       if (acc && acc.breakMins > BREAK_ALLOWANCE_MINUTES) overBreakDays++;
 
@@ -508,7 +568,13 @@ export async function GET(request: Request) {
         shiftStart: window.shiftStart,
         shiftEnd: window.shiftEnd,
         timeIn: acc?.clockIn ? formatArizonaClock(acc.clockIn) : null,
-        timeOut: acc?.clockOut ? formatArizonaClock(acc.clockOut) : null,
+        // A cross-day shift's clock-out comes from the next morning when the
+        // start date itself has none of its own after midnight.
+        timeOut: crossDayClockOut
+          ? formatArizonaClock(crossDayClockOut)
+          : acc?.clockOut ? formatArizonaClock(acc.clockOut) : null,
+        timeOutIsNextDay: Boolean(crossDayClockOut),
+        crossesMidnight,
         mins: dayMins,
         isLate: dayLate,
         lateByMins: dayLateBy,

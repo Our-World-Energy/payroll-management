@@ -23,8 +23,17 @@ export function AdminSidebar() {
     router.replace("/login");
   }
 
-  const isActive = (href: string) =>
-    href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+  // Matches the item's own route and its sub-routes (so /admin/time-off/[id]
+  // still lights Time Away Management), but only on a path-segment boundary. A
+  // bare startsWith made "/admin/attendance-tracker" match "/admin/attendance"
+  // too, highlighting both items at once. Trailing slashes are normalised away
+  // because next.config sets trailingSlash: true.
+  const isActive = (href: string) => {
+    const path = pathname.replace(/\/+$/, "") || "/";
+    const target = href.replace(/\/+$/, "") || "/";
+    if (target === "/admin") return path === "/admin";
+    return path === target || path.startsWith(`${target}/`);
+  };
 
   const s = dark
     ? {

@@ -129,6 +129,16 @@ function formatMinutesAsMins(minutes: number) {
   return `${minutes} mins`;
 }
 
+// Attendance Review's Total Time row carries the hour reading alongside the raw
+// minutes — "8h / 480 mins" — because a week is judged in hours (the 2,700-min
+// standard is 45h) while every stored figure is minutes. Only whole hours drop
+// the minute part, so 500 reads "8h 20m / 500 mins" rather than a bare "8h".
+function formatMinutesWithHours(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${rest === 0 ? `${hours}h` : `${hours}h ${rest}m`} / ${formatMinutesAsMins(minutes)}`;
+}
+
 function timeValueToMinutes(value: string) {
   const normalized = attendanceTimeValue(dashIfEmpty(value));
   if (normalized === "-") return 0;
@@ -1794,7 +1804,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                   })}
                 </tbody>
                 <tfoot className="bg-slate-50 [&_tr]:border-t [&_tr]:border-slate-100">
-                  <tr>
+                  {/* "8h / 480 mins" is wider than the bare minute figure it
+                      replaced, so every cell on this row is kept on one line
+                      rather than wrapping mid-value. */}
+                  <tr className="[&_td]:whitespace-nowrap">
                     <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                       Total Time
                     </td>
@@ -1804,39 +1817,39 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                       </td>
                     )}
                     <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
-                      {formatMinutesAsMins(worksnapTotalMinutes)}
+                      {formatMinutesWithHours(worksnapTotalMinutes)}
                     </td>
                     <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       -
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
-                      {formatMinutesAsMins(totalRegularMinutes)}
+                      {formatMinutesWithHours(totalRegularMinutes)}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
-                      {totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(totalEvaluatedRegularMinutes) : "-"}
+                      {totalEvaluatedRegularMinutes > 0 ? formatMinutesWithHours(totalEvaluatedRegularMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
-                      {totalRegularOtMinutes > 0 ? formatMinutesAsMins(totalRegularOtMinutes) : "-"}
+                      {totalRegularOtMinutes > 0 ? formatMinutesWithHours(totalRegularOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesAsMins(totalAdjustedRdOtMinutes) : "-"}
+                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesWithHours(totalAdjustedRdOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
-                      {totalEvaluatedMinutes > 0 ? formatMinutesAsMins(totalEvaluatedMinutes) : "-"}
+                      {totalEvaluatedMinutes > 0 ? formatMinutesWithHours(totalEvaluatedMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 border-r border-slate-100">
                       {totalDisplayedUsHoMinutes > 0
-                        ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesAsMins(totalDisplayedUsHoMinutes)}</span>
+                        ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesWithHours(totalDisplayedUsHoMinutes)}</span>
                         : <span className="text-slate-500">-</span>}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalHoOtMinutes > 0 ? formatMinutesAsMins(totalHoOtMinutes) : "-"}
+                      {totalHoOtMinutes > 0 ? formatMinutesWithHours(totalHoOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       -
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalLocalHolidayMinutes > 0 ? formatMinutesAsMins(totalLocalHolidayMinutes) : "-"}
+                      {totalLocalHolidayMinutes > 0 ? formatMinutesWithHours(totalLocalHolidayMinutes) : "-"}
                     </td>
                     {!isIndia && (
                       <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
@@ -1845,17 +1858,17 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     )}
                     {!isIndia && (
                       <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                        {totalTimeOffRequestMinutes > 0 ? formatMinutesAsMins(totalTimeOffRequestMinutes) : "-"}
+                        {totalTimeOffRequestMinutes > 0 ? formatMinutesWithHours(totalTimeOffRequestMinutes) : "-"}
                       </td>
                     )}
                     <td className="px-4 py-2 font-bold text-slate-900">
-                      {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
+                      {formatMinutesWithHours(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-l border-slate-100">
                       {(() => {
                         const totalCompletionMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalAdjustedRdOtMinutes
                           + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
-                        return totalCompletionMinutes > 0 ? formatMinutesAsMins(totalCompletionMinutes) : "-";
+                        return totalCompletionMinutes > 0 ? formatMinutesWithHours(totalCompletionMinutes) : "-";
                       })()}
                     </td>
                     <td className="sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 shadow-[-1px_0_0_0_#e2e8f0]">
@@ -3322,6 +3335,125 @@ export default function AttendancePage() {
     return offsetCreditsByWeek[week]?.[row.contractorId] ?? 0;
   }
 
+  // Single source of truth for the weekly table's derived per-row values. Both
+  // the table body and Export read from here, so an exported file can't drift
+  // out of agreement with what's on screen.
+  function attendanceRowValues(row: AttendanceRow) {
+    const isOnLeave = row.weeklyStatus === "On Leave";
+    const isStandard = row.weeklyStatus === "Standard Met";
+    const isForReview = row.weeklyStatus === "For Review";
+    const isReviewed = row.weeklyStatus === "Reviewed";
+    const isProcessed = row.weeklyStatus === "Processed";
+
+    const email = row.role.includes("@") ? row.role : "";
+    const rowLeaveRequests = leaveRequests.filter((r) => r.email === email);
+    // Same conflict check Attendance Review flags per-day and in its own footer
+    // status (see ReviewModal) — an approved PTO/Sick Leave on file for a date
+    // where more than 240 min (4h) was also logged (Adjusted Time when set,
+    // else raw Worksnap Time) — a "Reviewed" row is downgraded to "Need
+    // Attention" so the weekly table always agrees with Attendance Review.
+    const needsAttention = isReviewed && rowHasLeaveOverworkConflict(
+      row, weekDates, rowLeaveRequests, adjustedByEmail.get(email.trim().toLowerCase())
+    );
+
+    const appliedOffsetCredit = appliedOffsetCreditFor(row);
+    const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
+
+    const rowDailyMins = row.dailyWorksnapMinutes ?? {};
+    const rowRestDays = restDaysForAttendanceRow(row);
+    const holidayBonusMins = weekDates.reduce(
+      (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate, row.region, allHolidays)),
+      0
+    );
+    const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
+    const completionMins = row.completionMinutes ?? (
+      isFixedContractor(row.payCategory)
+        ? Math.max(0, computedCompletionMins - appliedOffsetCredit) + holidayBonusMins
+        : computedCompletionMins + holidayBonusMins
+    );
+
+    // Only one weeklyStatus is ever set, so this ordering just picks whichever
+    // badge the Status cell would render.
+    const statusLabel = isAppliedTimeCredit ? "Applied Time Credit"
+      : isStandard ? "Standard Met"
+      : isForReview ? "For Review"
+      : isOnLeave ? "On Leave"
+      : isReviewed ? (needsAttention ? "Need Attention" : "Reviewed")
+      : isProcessed ? "Processed"
+      : "";
+
+    return {
+      email,
+      variance: row.actualMinutes - row.standardMinutes,
+      isOnLeave, isStandard, isForReview, isReviewed, isProcessed,
+      needsAttention, appliedOffsetCredit, isAppliedTimeCredit,
+      holidayBonusMins, completionMins, statusLabel,
+      timeAwayMinutes: email ? totalTimeOffRequestMinutesFor(weekDates, rowLeaveRequests) : 0,
+      missingContractorProfile: row.hasContractorProfile === false,
+    };
+  }
+
+  // Exports the weekly table as CSV: the same visible columns and the same
+  // rows the table is currently showing, so search/filter selections carry
+  // through. Cells the table renders as a dash export blank rather than 0, so
+  // "nothing logged" stays distinguishable from a real zero in a spreadsheet.
+  function handleExport() {
+    if (filteredAttendanceRows.length === 0) return;
+
+    const headers = [
+      "Week", "Contractor", "Email", "Assigned Team", "Actual Time (mins)",
+      "Total Evaluated Regular Time (mins)", "Total Regular OT Time (mins)", "Total RD OT Time (mins)",
+      "Total Evaluated Time (mins)", "Total US HO Time (mins)", "Total HO OT Time (mins)",
+      "Total Local HO Time (mins)", "Total Time Away Request Time (mins)", "Ind Time (mins)",
+      "Variance (mins)", "Status",
+    ];
+
+    const weekRange = `${rangeFrom} to ${rangeTo}`;
+    const dashed = (minutes: number | null | undefined, blank: boolean) =>
+      blank || !minutes ? "" : String(minutes);
+
+    const dataRows = filteredAttendanceRows.map((row) => {
+      const v = attendanceRowValues(row);
+      return [
+        weekRange,
+        row.name,
+        v.email,
+        departmentForAttendanceRow(row),
+        v.isOnLeave ? "" : String(row.actualMinutes),
+        dashed(row.totalEvaluatedRegularMinutes, v.isOnLeave),
+        dashed(row.totalRegularOtMinutes, v.isOnLeave),
+        dashed(row.totalRdOtMinutes, v.isOnLeave),
+        dashed(row.totalEvaluatedMinutes, v.isOnLeave),
+        dashed(row.totalUsHoMinutes, v.isOnLeave),
+        dashed(row.totalHoOtMinutes, v.isOnLeave),
+        dashed(row.totalLocalHolidayMinutes, v.isOnLeave),
+        dashed(v.timeAwayMinutes, v.isOnLeave),
+        dashed(v.completionMins, v.isOnLeave),
+        // The table blanks Variance for every status except For Review.
+        v.isOnLeave || v.isStandard || v.isReviewed || v.isProcessed ? ""
+          : v.variance > 0 ? `+${v.variance}` : String(v.variance),
+        v.statusLabel,
+      ];
+    });
+
+    const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    // Leading BOM — without it, Excel misreads the UTF-8 file as its default
+    // codepage and garbles anything beyond plain ASCII (accented names, etc.).
+    const csv = String.fromCharCode(0xFEFF) +
+      [headers, ...dataRows].map((cells) => cells.map((c) => csvCell(String(c))).join(",")).join("\n");
+
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `attendance-${rangeFrom}-to-${rangeTo}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${dataRows.length} row${dataRows.length === 1 ? "" : "s"} for ${formatRangeLabel(rangeFrom, rangeTo)}.`);
+  }
+
   function handleReviewSave(contractorId: string, offsetCreditApplied = 0) {
     // Re-fetch from Supabase rather than trust a local mutation, so the table
     // always ends up showing exactly what was persisted.
@@ -3398,7 +3530,12 @@ export default function AttendancePage() {
               <LuListChecks size={14} strokeWidth={2} />
               Process
             </button>
-            <button className={`flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 rounded-lg text-xs font-semibold border ${dark ? "bg-white/8 border-white/15 text-white/80 hover:bg-white/15" : "bg-white border-slate-200 text-[#003527] hover:bg-slate-50"}`}>
+            <button
+              onClick={handleExport}
+              disabled={filteredAttendanceRows.length === 0}
+              title={filteredAttendanceRows.length === 0 ? "Nothing to export for the selected week and filters" : `Export the ${filteredAttendanceRows.length} row(s) currently shown to CSV`}
+              className={`flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${dark ? "bg-white/8 border-white/15 text-white/80 hover:bg-white/15 disabled:hover:bg-white/8" : "bg-white border-slate-200 text-[#003527] hover:bg-slate-50 disabled:hover:bg-white"}`}
+            >
               <LuFileText size={14} />Export
             </button>
           </div>
@@ -3600,38 +3737,13 @@ export default function AttendancePage() {
                 </tr>
               )}
               {!isLoadingWorksnap && filteredAttendanceRows.map((row) => {
-                const variance = row.actualMinutes - row.standardMinutes;
-                const isOnLeave = row.weeklyStatus === "On Leave";
-                const isStandard = row.weeklyStatus === "Standard Met";
-                const isForReview = row.weeklyStatus === "For Review";
-                const isReviewed = row.weeklyStatus === "Reviewed";
-                const isProcessed = row.weeklyStatus === "Processed";
-                // Same conflict check Attendance Review flags per-day and in its own
-                // footer status (see ReviewModal) — an approved PTO/Sick Leave on file
-                // for a date where more than 240 min (4h) was also logged (Adjusted
-                // Time when set, else raw Worksnap Time) — a "Reviewed" row is
-                // downgraded to "Need Attention" here too, so the weekly table always
-                // agrees with what Attendance Review would show.
-                const rowEmailForConflict = row.role.includes("@") ? row.role : "";
-                const rowLeaveRequestsForConflict = leaveRequests.filter((r) => r.email === rowEmailForConflict);
-                const rowAdjustedDaily = adjustedByEmail.get(rowEmailForConflict.trim().toLowerCase());
-                const needsAttention = isReviewed && rowHasLeaveOverworkConflict(row, weekDates, rowLeaveRequestsForConflict, rowAdjustedDaily);
-                const appliedOffsetCredit = appliedOffsetCreditFor(row);
-                const isAppliedTimeCredit = isFixedContractor(row.payCategory) && appliedOffsetCredit > 0;
-                const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
-                const rowDailyMins = row.dailyWorksnapMinutes ?? {};
-                const rowRestDays = restDaysForAttendanceRow(row);
-                const holidayBonusMins = weekDates.reduce(
-                  (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate, row.region, allHolidays)),
-                  0
-                );
-                const completionMins = row.completionMinutes ?? (
-                  isFixedContractor(row.payCategory)
-                    ? Math.max(0, computedCompletionMins - appliedOffsetCredit) + holidayBonusMins
-                    : computedCompletionMins + holidayBonusMins
-                );
-
-                const missingContractorProfile = row.hasContractorProfile === false;
+                // Shared with Export (see attendanceRowValues) so the CSV and
+                // the table can never disagree.
+                const {
+                  variance, isOnLeave, isStandard, isForReview, isReviewed, isProcessed,
+                  needsAttention, isAppliedTimeCredit, holidayBonusMins, completionMins,
+                  timeAwayMinutes, missingContractorProfile,
+                } = attendanceRowValues(row);
                 return (
                   <tr
                     key={row.contractorId}
@@ -3743,17 +3855,11 @@ export default function AttendancePage() {
 
                     {/* Total Time Away Request Time */}
                     <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
-                      {(() => {
-                        const rowEmail = row.role.includes("@") ? row.role : "";
-                        const minutes = rowEmail
-                          ? totalTimeOffRequestMinutesFor(weekDates, leaveRequests.filter((r) => r.email === rowEmail))
-                          : 0;
-                        return isOnLeave || minutes === 0 ? (
-                          <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
-                        ) : (
-                          <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(minutes)}</span>
-                        );
-                      })()}
+                      {isOnLeave || timeAwayMinutes === 0 ? (
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
+                      ) : (
+                        <span className={`text-sm font-semibold ${dark ? "text-white/80" : "text-slate-900"}`}>{formatMinutesAsMins(timeAwayMinutes)}</span>
+                      )}
                     </td>
 
                     {/* Ind Time */}
