@@ -129,6 +129,16 @@ function formatMinutesAsMins(minutes: number) {
   return `${minutes} mins`;
 }
 
+// Attendance Review's Total Time row carries the hour reading alongside the raw
+// minutes — "8h / 480 mins" — because a week is judged in hours (the 2,700-min
+// standard is 45h) while every stored figure is minutes. Only whole hours drop
+// the minute part, so 500 reads "8h 20m / 500 mins" rather than a bare "8h".
+function formatMinutesWithHours(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${rest === 0 ? `${hours}h` : `${hours}h ${rest}m`} / ${formatMinutesAsMins(minutes)}`;
+}
+
 function timeValueToMinutes(value: string) {
   const normalized = attendanceTimeValue(dashIfEmpty(value));
   if (normalized === "-") return 0;
@@ -1794,7 +1804,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                   })}
                 </tbody>
                 <tfoot className="bg-slate-50 [&_tr]:border-t [&_tr]:border-slate-100">
-                  <tr>
+                  {/* "8h / 480 mins" is wider than the bare minute figure it
+                      replaced, so every cell on this row is kept on one line
+                      rather than wrapping mid-value. */}
+                  <tr className="[&_td]:whitespace-nowrap">
                     <td className="sticky left-0 z-20 w-[156px] min-w-[156px] bg-slate-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">
                       Total Time
                     </td>
@@ -1804,39 +1817,39 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                       </td>
                     )}
                     <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
-                      {formatMinutesAsMins(worksnapTotalMinutes)}
+                      {formatMinutesWithHours(worksnapTotalMinutes)}
                     </td>
                     <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       -
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
-                      {formatMinutesAsMins(totalRegularMinutes)}
+                      {formatMinutesWithHours(totalRegularMinutes)}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
-                      {totalEvaluatedRegularMinutes > 0 ? formatMinutesAsMins(totalEvaluatedRegularMinutes) : "-"}
+                      {totalEvaluatedRegularMinutes > 0 ? formatMinutesWithHours(totalEvaluatedRegularMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100">
-                      {totalRegularOtMinutes > 0 ? formatMinutesAsMins(totalRegularOtMinutes) : "-"}
+                      {totalRegularOtMinutes > 0 ? formatMinutesWithHours(totalRegularOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesAsMins(totalAdjustedRdOtMinutes) : "-"}
+                      {totalAdjustedRdOtMinutes > 0 ? formatMinutesWithHours(totalAdjustedRdOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
-                      {totalEvaluatedMinutes > 0 ? formatMinutesAsMins(totalEvaluatedMinutes) : "-"}
+                      {totalEvaluatedMinutes > 0 ? formatMinutesWithHours(totalEvaluatedMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 border-r border-slate-100">
                       {totalDisplayedUsHoMinutes > 0
-                        ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesAsMins(totalDisplayedUsHoMinutes)}</span>
+                        ? <span className="flex items-center gap-1 font-semibold text-blue-600"><LuCalendar size={12} strokeWidth={2} />{formatMinutesWithHours(totalDisplayedUsHoMinutes)}</span>
                         : <span className="text-slate-500">-</span>}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalHoOtMinutes > 0 ? formatMinutesAsMins(totalHoOtMinutes) : "-"}
+                      {totalHoOtMinutes > 0 ? formatMinutesWithHours(totalHoOtMinutes) : "-"}
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
                       -
                     </td>
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
-                      {totalLocalHolidayMinutes > 0 ? formatMinutesAsMins(totalLocalHolidayMinutes) : "-"}
+                      {totalLocalHolidayMinutes > 0 ? formatMinutesWithHours(totalLocalHolidayMinutes) : "-"}
                     </td>
                     {!isIndia && (
                       <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
@@ -1845,17 +1858,17 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     )}
                     {!isIndia && (
                       <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                        {totalTimeOffRequestMinutes > 0 ? formatMinutesAsMins(totalTimeOffRequestMinutes) : "-"}
+                        {totalTimeOffRequestMinutes > 0 ? formatMinutesWithHours(totalTimeOffRequestMinutes) : "-"}
                       </td>
                     )}
                     <td className="px-4 py-2 font-bold text-slate-900">
-                      {formatMinutesAsMins(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
+                      {formatMinutesWithHours(isIndia ? indiaTotalMinutes + totalHolidayMins : completionTotalMinutes)}
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-l border-slate-100">
                       {(() => {
                         const totalCompletionMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalAdjustedRdOtMinutes
                           + totalDisplayedUsHoMinutes + totalLocalHolidayMinutes + totalTimeOffRequestMinutes;
-                        return totalCompletionMinutes > 0 ? formatMinutesAsMins(totalCompletionMinutes) : "-";
+                        return totalCompletionMinutes > 0 ? formatMinutesWithHours(totalCompletionMinutes) : "-";
                       })()}
                     </td>
                     <td className="sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 shadow-[-1px_0_0_0_#e2e8f0]">
