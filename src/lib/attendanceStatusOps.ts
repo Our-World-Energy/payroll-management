@@ -42,6 +42,7 @@ export type AttendanceStatusInput = {
   week?: unknown;
   requestStatus?: unknown;
   completionMinutes?: unknown;
+  offsetCreditMinutes?: unknown;
   days?: unknown;
   processed?: unknown;
 };
@@ -61,6 +62,10 @@ export function buildAttendanceStatusOps(
   const completionMinutes = Number.isFinite(Number(body.completionMinutes)) ? Math.trunc(Number(body.completionMinutes)) : null;
   const days = Array.isArray(body.days) ? (body.days as DayInput[]) : [];
   const processed = body.processed === true;
+  // Fixed-Ind Apply Time Credit, granted on this week and repaid out of the
+  // next one. Never negative — a negative credit would silently subtract real
+  // worked time from the following week.
+  const offsetCreditMinutes = Math.max(0, asInt(body.offsetCreditMinutes));
 
   // Derived from the same per-day values being saved below, so the week totals
   // can never drift from their own days.
@@ -91,12 +96,14 @@ export function buildAttendanceStatusOps(
         worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
         totalCompletionTimeMinutes,
+        offsetCreditMinutes,
         processed,
       },
       update: {
         email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
         totalCompletionTimeMinutes,
+        offsetCreditMinutes,
         processed,
       },
     }),

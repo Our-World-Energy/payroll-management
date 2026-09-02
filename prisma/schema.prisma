@@ -366,6 +366,11 @@ model AttendanceWeekStatus {
   totalRdOtMinutes     Int                     @default(0)         // sum of the week's per-day "RD OT Time"
   totalHoOtMinutes     Int                     @default(0)         // sum of the week's per-day "HO OT Time"
   totalCompletionTimeMinutes Int               @default(0)         // sum of the week's per-day "Total Completion Time"
+  // Fixed-Ind "Apply Time Credit": minutes granted on THIS week to bring a
+  // short week up to the 2,400-min target. Repaid out of the following week's
+  // Ind Time, so that week reads this row to know what it owes. Previously
+  // lived only in React state and was lost on reload.
+  offsetCreditMinutes  Int                     @default(0)
   note                 String?
   updatedAt            DateTime                @updatedAt @default(now())
   processed            Boolean                 @default(false)     // set true by the Weekly Time Tracking "Process Attendance" action, distinct from an individual/Bulk Approve review

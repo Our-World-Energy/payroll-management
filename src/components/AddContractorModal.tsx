@@ -454,9 +454,27 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     </select>
                   </FIELD>
                   <FIELD label="Shift End">
-                    <select className={SELECT} value={form.shiftTo} onChange={(e) => set("shiftTo", e.target.value)}>
-                      {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <select className={SELECT} value={form.shiftTo} onChange={(e) => set("shiftTo", e.target.value)}>
+                        {TIME_OPTIONS.map((t) => <option key={t}>{t}</option>)}
+                      </select>
+                      {/* Opens the same per-date schedule Shifting Schedule uses,
+                          pre-reading this contractor's Shift Start / Shift End on
+                          every day. Editing a day saves an override effective
+                          from that date; untouched days keep the window above. */}
+                      <button
+                        type="button"
+                        onClick={() => setShowShiftSchedule(true)}
+                        disabled={!form.email.trim()}
+                        title={form.email.trim()
+                          ? "Edit shift — set different hours from a given date onwards"
+                          : "Enter the contractor's email first — the schedule is saved against it"}
+                        aria-label="Edit shift schedule"
+                        className="grid size-9 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:border-teal-400 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:text-slate-500"
+                      >
+                        <LuPencil size={14} strokeWidth={2} />
+                      </button>
+                    </div>
                   </FIELD>
                 </>
               )}
@@ -589,6 +607,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
           // Live from the form, so toggling Typical Non-Working Days is
           // reflected in the schedule modal without saving first.
           restDays={form.restDays}
+          // Shifting Schedule has no profile window to fall back on — its hours
+          // only exist per date. Fixed and Cross-Day do, so their days open
+          // already reading it.
+          fallbackShift={form.shiftType === SHIFTING_SCHEDULE ? null : { shiftStart: form.shiftFrom, shiftEnd: form.shiftTo }}
           onClose={() => setShowShiftSchedule(false)}
         />
       )}

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ARIZONA_TIME_ZONE, utcInstantForLocalTime } from "@/lib/countryTimeZones";
-import { CROSS_DAY_SHIFT, LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, isCrossDayWindow, parseShiftTime, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
+import { CROSS_DAY_SHIFT, LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, effectiveShiftOn, isCrossDayWindow, parseShiftTime, scheduledMinutes, sortSchedulesNewestFirst, type ShiftScheduleDay } from "@/app/admin/contractors/shiftScheduleShared";
 
 /**
  * Attendance across everyone for either one day or a date range, for the
@@ -268,9 +268,12 @@ export async function GET(request: Request) {
         restDay: true,
       },
     }),
-    // Per-date overrides for Shifting Schedule contractors, across the range.
+    // Shift schedules for Shifting Schedule contractors. Deliberately NOT
+    // bounded below by rangeStart: a row is effective-from, so one saved weeks
+    // before the range is still the window in force inside it. The table holds
+    // one row per change rather than one per day, so this stays small.
     prisma.contractorShiftSchedule.findMany({
-      where: { date: { gte: rangeStart, lte: rangeEnd } },
+      where: { date: { lte: rangeEnd } },
       select: { email: true, date: true, shiftStart: true, shiftEnd: true },
     }),
     // United States holidays in the range — the "HO" code.
@@ -298,10 +301,19 @@ export async function GET(request: Request) {
       .map((p) => [p.email.trim().toLowerCase(), p])
   );
 
-  // email + date -> that day's assigned window.
-  const scheduleByEmailDate = new Map(
-    shiftSchedules.map((s) => [`${s.email.trim().toLowerCase()}|${toIsoDate(s.date)}`, s])
-  );
+  // Each contractor's saved schedules, newest-first, so effectiveShiftOn can
+  // pick the latest row dated on or before any given date.
+  const scheduleByEmail = new Map<string, ShiftScheduleDay[]>();
+  for (const s of shiftSchedules) {
+    const key = s.email.trim().toLowerCase();
+    if (!key) continue;
+    const list = scheduleByEmail.get(key) ?? [];
+    list.push({ date: toIsoDate(s.date), shiftStart: s.shiftStart, shiftEnd: s.shiftEnd });
+    scheduleByEmail.set(key, list);
+  }
+  for (const [key, list] of scheduleByEmail) {
+    scheduleByEmail.set(key, sortSchedulesNewestFirst(list));
+  }
 
   const usHolidayDates = new Set(usHolidays.map((h) => toIsoDate(h.date)));
 
@@ -340,16 +352,19 @@ export async function GET(request: Request) {
   const silTypeOn = leaveTypeOn("sick leave");
 
   // The shift window in force for one contractor on one date. A Shifting
-  // Schedule contractor is driven entirely by their own per-date row — with no
-  // row for the date they simply have no window, rather than silently falling
-  // back to a company-wide default that was never theirs.
+  // Schedule contractor is driven entirely by their own saved schedule — with
+  // nothing saved on or before the date they simply have no window, rather than
+  // silently falling back to a company-wide default that was never theirs.
+  //
+  // Saved rows are effective-from, so the latest one dated on or before this
+  // date applies (see effectiveShiftOn).
   function shiftWindowFor(email: string, dateIso: string) {
     const key = email.toLowerCase();
     const profile = key ? profileByEmail.get(key) : undefined;
     const shiftType = profile?.shiftType?.trim() ?? "";
 
     if (shiftType === SHIFTING_SCHEDULE) {
-      const scheduled = scheduleByEmailDate.get(`${key}|${dateIso}`);
+      const scheduled = effectiveShiftOn(scheduleByEmail.get(key) ?? [], dateIso);
       if (!scheduled) return { shiftStart: "", shiftEnd: "", expectedMins: null as number | null };
       return {
         shiftStart: scheduled.shiftStart,
@@ -358,21 +373,37 @@ export async function GET(request: Request) {
       };
     }
 
+    // Fixed and Cross-Day contractors have a profile window, but a saved
+    // schedule row overrides it from its own date forward — that's what the
+    // "Edit shift" pencil beside Shift End writes. Nothing saved on or before
+    // the date leaves the profile window in charge.
+    const override = effectiveShiftOn(scheduleByEmail.get(key) ?? [], dateIso);
+
     if (shiftType === CROSS_DAY_SHIFT) {
       const [start = "", end = ""] = (profile?.shiftHours ?? "").split(" to ").map((v) => v.trim());
+      const shiftStart = override?.shiftStart || start;
+      const shiftEnd = override?.shiftEnd || end;
       // Cross-Day windows are entered deliberately, so the wrap past midnight is
       // meant and scheduledMinutes' 24-hour carry is the right length.
-      return { shiftStart: start, shiftEnd: end, expectedMins: scheduledMinutes(start, end) };
+      return { shiftStart, shiftEnd, expectedMins: scheduledMinutes(shiftStart, shiftEnd) };
     }
 
     if (shiftType.toLowerCase() === "fixed") {
+      if (override) {
+        // An override was entered deliberately through the schedule modal, so
+        // unlike raw shiftHours it can be trusted to drive expected hours.
+        return {
+          shiftStart: override.shiftStart,
+          shiftEnd: override.shiftEnd,
+          expectedMins: scheduledMinutes(override.shiftStart, override.shiftEnd),
+        };
+      }
       const [start = "", end = ""] = (profile?.shiftHours ?? "").split(" to ").map((v) => v.trim());
       // expectedMins is deliberately left null for Fixed contractors: their
       // shiftHours is long-standing free text and some rows are malformed
       // (e.g. "9:00 AM to 5:00 AM" computes to a 20-hour day), which would
       // silently change the Undertime figures that already exist for them.
-      // Only Shifting Schedule and Cross-Day contractors — whose windows are
-      // entered deliberately — drive expected hours off their window.
+      // Only deliberately entered windows drive expected hours.
       return { shiftStart: start, shiftEnd: end, expectedMins: null as number | null };
     }
 

@@ -27,10 +27,16 @@ type Props = {
    *  falling on one are flagged red — a shift assigned on a rest day is
    *  usually a mistake, and the admin should see it before saving. */
   restDays?: string[];
+  /** For a Fixed (or Cross-Day) contractor: the window from their profile's own
+   *  Shift Start / Shift End. Shown on every day that has no saved row and
+   *  nothing carried in, so the schedule opens already reading the contractor's
+   *  actual hours. Editing a day writes an override effective from that date;
+   *  leaving it be keeps the profile window. */
+  fallbackShift?: { shiftStart: string; shiftEnd: string } | null;
   onClose: () => void;
 };
 
-export function ShiftScheduleModal({ email, contractorName, restDays = [], onClose }: Props) {
+export function ShiftScheduleModal({ email, contractorName, restDays = [], fallbackShift = null, onClose }: Props) {
   const restDaySet = useMemo(
     () => new Set(restDays.map((d) => d.trim().toLowerCase()).filter(Boolean)),
     [restDays]
@@ -50,6 +56,9 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
 
   const [week, setWeek] = useState(weeks.find((w) => w === sundayOf(new Date().toISOString().slice(0, 10))) ?? weeks[4] ?? weeks[0]);
   const [rows, setRows] = useState<ShiftScheduleDay[]>([]);
+  // The latest row saved before this week — still in effect, and what the blank
+  // days inherit until a row inside the week supersedes it.
+  const [carriedIn, setCarriedIn] = useState<ShiftScheduleDay | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -67,11 +76,17 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
       try {
         const saved = await fetchShiftSchedule(email, week, addDaysIso(week, 6));
         if (!isMounted) return;
-        const savedByDate = new Map(saved.map((d) => [d.date, d]));
+        // Only explicitly saved rows go into the inputs. A day left blank
+        // inherits, and loading the inherited window into every input would
+        // turn all seven days into change points on the next save — which is
+        // exactly what carry-forward exists to avoid.
+        const savedByDate = new Map(saved.days.map((d) => [d.date, d]));
+        setCarriedIn(saved.carriedIn);
         setRows(weekDates.map((date) => savedByDate.get(date) ?? { date, shiftStart: "", shiftEnd: "" }));
       } catch (err) {
         if (!isMounted) return;
         setRows(weekDates.map((date) => ({ date, shiftStart: "", shiftEnd: "" })));
+        setCarriedIn(null);
         setError(err instanceof Error ? err.message : "Unable to load the saved schedule.");
       } finally {
         if (isMounted) setLoading(false);
@@ -87,17 +102,6 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
   function setDay(date: string, field: "shiftStart" | "shiftEnd", value: string) {
     setSavedNote("");
     setRows((current) => current.map((row) => (row.date === date ? { ...row, [field]: value } : row)));
-  }
-
-  // Fills every remaining blank day from the first day that has both times —
-  // most shifting schedules only differ on a couple of days.
-  function copyFirstToBlanks() {
-    const source = rows.find((r) => r.shiftStart && r.shiftEnd);
-    if (!source) return;
-    setSavedNote("");
-    setRows((current) => current.map((row) => (
-      row.shiftStart || row.shiftEnd ? row : { ...row, shiftStart: source.shiftStart, shiftEnd: source.shiftEnd }
-    )));
   }
 
   function clearAll() {
@@ -168,11 +172,11 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
               {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)} ({w.slice(0, 4)})</option>)}
             </select>
           </div>
+          {/* "Fill blanks from first day" is gone: blank days now inherit the
+              shift before them automatically, and filling them would write six
+              redundant change points that block a later edit from carrying
+              forward. */}
           <div className="flex items-center gap-2 ml-auto">
-            <button type="button" onClick={copyFirstToBlanks}
-              className="h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
-              Fill blanks from first day
-            </button>
             <button type="button" onClick={clearAll}
               className="h-9 px-3 rounded-lg text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors">
               Clear week
@@ -195,9 +199,17 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {rows.map((row) => {
+                {rows.map((row, index) => {
                   const isSet = Boolean(row.shiftStart && row.shiftEnd);
                   const restDay = isRestDay(row.date);
+                  // What this day actually resolves to: the most recent complete
+                  // row at or above it in the week, else whatever carried in from
+                  // before it, else the contractor's own profile window.
+                  const inheritedRow = isSet
+                    ? null
+                    : [...rows.slice(0, index)].reverse().find((r) => r.shiftStart && r.shiftEnd) ?? carriedIn;
+                  const inherited = inheritedRow
+                    ?? (!isSet && fallbackShift ? { date: "", ...fallbackShift } : null);
                   return (
                     // Rest day wins over the "filled" tint — the point is that
                     // it stays visible even once hours have been entered.
@@ -216,14 +228,24 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
                       <td className="px-5 py-2.5" style={{ minWidth: 140 }}>
                         <select className={SELECT} value={row.shiftStart} aria-label={`Shift start for ${row.date}`}
                           onChange={(e) => setDay(row.date, "shiftStart", e.target.value)}>
-                          <option value="">—</option>
+                          <option value="">{inherited ? inherited.shiftStart : "—"}</option>
                           {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
+                        {/* Says what the blank day resolves to, so an admin can
+                            see the carried-forward window without having to
+                            re-enter it. */}
+                        {inherited && (
+                          <span className="mt-1 block text-[10px] font-semibold text-slate-400">
+                            {inherited.date
+                              ? `in effect from ${formatShortDate(inherited.date)}`
+                              : "from Shift Start / Shift End"}
+                          </span>
+                        )}
                       </td>
                       <td className="px-5 py-2.5" style={{ minWidth: 140 }}>
                         <select className={SELECT} value={row.shiftEnd} aria-label={`Shift end for ${row.date}`}
                           onChange={(e) => setDay(row.date, "shiftEnd", e.target.value)}>
-                          <option value="">—</option>
+                          <option value="">{inherited ? inherited.shiftEnd : "—"}</option>
                           {TIME_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </td>
@@ -241,7 +263,7 @@ export function ShiftScheduleModal({ email, contractorName, restDays = [], onClo
             {!error && savedNote && <span className="text-emerald-700">{savedNote}</span>}
             {!error && !savedNote && (
               <span className="text-slate-400">
-                Leave a day blank to use no shift window for that date.
+                A saved shift stays in effect for every following day until you set a new one — leave a day blank to keep the one before it.
                 {restDaySet.size > 0 && <> Rows in <span className="font-semibold text-red-600">red</span> are the contractor&apos;s non-working days.</>}
               </span>
             )}

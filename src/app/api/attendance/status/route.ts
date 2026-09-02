@@ -32,7 +32,17 @@ export async function POST(request: Request) {
   const result = buildAttendanceStatusOps(prisma, body);
   if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
 
-  await runOpsSequentially(result.ops);
+  // A throw here (a stale Prisma client after a schema change, a constraint
+  // violation, a dropped pooled connection) otherwise became an unhandled 500
+  // with no JSON body, which the client could only report as the generic
+  // "Failed to save. Please try again." — hiding the one detail needed to fix it.
+  try {
+    await runOpsSequentially(result.ops);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("attendance status save failed:", err);
+    return Response.json({ error: `Save failed: ${message.split("\n")[0]}` }, { status: 500 });
+  }
 
   const days = Array.isArray(body.days) ? body.days : [];
   return Response.json({ ok: true, savedDays: days.length });
