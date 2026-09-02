@@ -37,6 +37,28 @@ export type ShiftScheduleDay = {
   shiftEnd: string;   // "3:00 PM"
 };
 
+/**
+ * A saved row is an *effective-from* marker, not a single-day override: the
+ * window it sets carries forward to every following date until a later row
+ * supersedes it, and dates before it keep whatever was in effect for them.
+ *
+ * So 7:00 AM – 3:00 PM saved on Sep 2 applies to Sep 3, Sep 4 and onwards; if
+ * 8:00 AM – 4:00 PM is then saved on Sep 10 it applies from Sep 10 forward,
+ * while Sep 2–9 still read 7:00 AM – 3:00 PM.
+ *
+ * Rows must be for a single contractor. Sorted newest-first so the first row
+ * dated on or before the date is the answer; ISO dates compare correctly as
+ * plain strings, so no parsing is involved.
+ */
+export function sortSchedulesNewestFirst(rows: ShiftScheduleDay[]): ShiftScheduleDay[] {
+  return [...rows].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/** The window in effect on `dateIso`, or null if nothing was ever saved by then. */
+export function effectiveShiftOn(newestFirst: ShiftScheduleDay[], dateIso: string): ShiftScheduleDay | null {
+  return newestFirst.find((row) => row.date <= dateIso) ?? null;
+}
+
 // contractor_profiles.shiftHours is free text like "9:00 AM to 6:00 PM" — pull
 // the leading start time out of it. Shared so the shift-schedule rows and the
 // Fixed-shift string are parsed by exactly the same rule.

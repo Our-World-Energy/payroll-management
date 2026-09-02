@@ -24,21 +24,44 @@ function toIsoDate(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export async function fetchShiftSchedule(email: string, from: string, to: string): Promise<ShiftScheduleDay[]> {
+/**
+ * Saved rows are effective-from markers, so a week can be governed by a row
+ * saved before it. `days` is what was explicitly saved inside [from, to] — the
+ * change points the modal lets you edit — and `carriedIn` is the latest row
+ * before `from`, still in effect and shown as the inherited window on days with
+ * no row of their own.
+ */
+export async function fetchShiftSchedule(
+  email: string,
+  from: string,
+  to: string,
+): Promise<{ days: ShiftScheduleDay[]; carriedIn: ShiftScheduleDay | null }> {
   const normalized = email.trim().toLowerCase();
-  if (!normalized) return [];
+  if (!normalized) return { days: [], carriedIn: null };
 
-  const rows = await prisma.contractorShiftSchedule.findMany({
-    where: { email: normalized, date: { gte: toDbDate(from), lte: toDbDate(to) } },
-    select: { date: true, shiftStart: true, shiftEnd: true },
-    orderBy: { date: "asc" },
-  });
+  const [rows, previous] = await Promise.all([
+    prisma.contractorShiftSchedule.findMany({
+      where: { email: normalized, date: { gte: toDbDate(from), lte: toDbDate(to) } },
+      select: { date: true, shiftStart: true, shiftEnd: true },
+      orderBy: { date: "asc" },
+    }),
+    prisma.contractorShiftSchedule.findFirst({
+      where: { email: normalized, date: { lt: toDbDate(from) } },
+      select: { date: true, shiftStart: true, shiftEnd: true },
+      orderBy: { date: "desc" },
+    }),
+  ]);
 
-  return rows.map((row) => ({
+  const toDay = (row: { date: Date; shiftStart: string; shiftEnd: string }) => ({
     date: toIsoDate(row.date),
     shiftStart: row.shiftStart,
     shiftEnd: row.shiftEnd,
-  }));
+  });
+
+  return {
+    days: rows.map(toDay),
+    carriedIn: previous ? toDay(previous) : null,
+  };
 }
 
 /**

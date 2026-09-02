@@ -280,12 +280,13 @@ export default function AdminPage() {
 
           const email = c.email!.trim().toLowerCase();
           const firstIn = firstInByEmail.get(email);
-          // A Shifting Schedule contractor is judged against today's own
-          // assigned start; with no row for today they have no start time to be
-          // late against and are skipped, the same as a Flexible contractor.
-          const shiftStart = isShifting
-            ? parseShiftTime(shiftStartByEmail.get(email) ?? "")
-            : parseShiftStart(c.shiftHours || "");
+          // A saved schedule row wins wherever one is in effect — for a Shifting
+          // Schedule contractor that's the only source of a start time, and for a
+          // Fixed one it's the "Edit shift" override on top of their profile
+          // window. A Shifting contractor with nothing in effect has no start to
+          // be late against and is skipped, the same as a Flexible one.
+          const scheduled = parseShiftTime(shiftStartByEmail.get(email) ?? "");
+          const shiftStart = scheduled ?? (isShifting ? null : parseShiftStart(c.shiftHours || ""));
           if (!firstIn || !shiftStart) continue; // no clock-in yet today, or no parsable shift start
 
           // Shift Start (from Contractor Profile) and firstIn are both

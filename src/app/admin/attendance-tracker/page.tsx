@@ -1670,6 +1670,13 @@ export default function AttendanceTrackerPage() {
                               <span className="block text-xs font-bold uppercase tracking-wider text-[#003527]">
                                 {dayInitial(entry.day.date)} {parseIsoDate(entry.day.date).getDate()}
                               </span>
+                              {/* The bare day number is ambiguous once a range
+                                  crosses a month — a Monthly Range, or a week
+                                  like Aug 30 – Sep 5 — so the date is spelled
+                                  out under it. */}
+                              <span className="block text-[10px] font-semibold text-slate-400 tabular-nums">
+                                {entry.day.date}
+                              </span>
                               <span className="block text-[11px] font-semibold text-slate-500">
                                 {entry.day.shiftStart && entry.day.shiftEnd ? `${entry.day.shiftStart} – ${entry.day.shiftEnd}` : "—"}
                                 {/* A cross-day window ends the following morning. */}

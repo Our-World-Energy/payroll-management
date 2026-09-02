@@ -186,9 +186,11 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
           if (!isFixed && !isShifting) continue;
           const email = c.email.trim().toLowerCase();
           const firstIn = firstInByEmail.get(email);
-          const shiftStart = isShifting
-            ? parseShiftTime(shiftStartByEmail.get(email) ?? "")
-            : parseShiftStart(c.shiftHours || "");
+          // A saved schedule row wins wherever one is in effect — the only start
+          // for a Shifting contractor, and the "Edit shift" override for a Fixed
+          // one. Same rule as the Dashboard's Late Today.
+          const scheduled = parseShiftTime(shiftStartByEmail.get(email) ?? "");
+          const shiftStart = scheduled ?? (isShifting ? null : parseShiftStart(c.shiftHours || ""));
           if (!firstIn || !shiftStart) continue;
           const thresholdInstant = utcInstantForLocalTime(todayLocal, shiftStart.hour, shiftStart.minute + LATE_GRACE_MINUTES, ARIZONA_TIME_ZONE);
           if (firstIn.getTime() > thresholdInstant.getTime()) {

@@ -31,13 +31,33 @@ function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
   };
 }
 
+const AUTH_PAGE_SIZE = 200;
+// Enough for 20,000 accounts; a backstop against an endpoint that never returns
+// a short page rather than a real limit.
+const AUTH_MAX_PAGES = 100;
+
+// listUsers returns a single page, so asking for one page of 200 silently drops
+// every account past it — and it orders newest first, so what goes missing is
+// the *oldest* accounts, which are the admin ones set up before the contractor
+// backfill. Pages through until a short page comes back.
+async function listAllAuthUsers(sb: ReturnType<typeof getSupabase>) {
+  const all: Record<string, unknown>[] = [];
+  for (let page = 1; page <= AUTH_MAX_PAGES; page++) {
+    const { data, error } = await sb.auth.admin.listUsers({ page, perPage: AUTH_PAGE_SIZE });
+    if (error) throw new Error(error.message);
+    const batch = (data.users ?? []) as unknown as Record<string, unknown>[];
+    all.push(...batch);
+    if (batch.length < AUTH_PAGE_SIZE) break;
+  }
+  return all;
+}
+
 export async function fetchUsers(): Promise<AppUser[]> {
   const sb = getSupabase();
-  const [{ data, error }, contractorsRes] = await Promise.all([
-    sb.auth.admin.listUsers({ perPage: 200 }),
+  const [authUsers, contractorsRes] = await Promise.all([
+    listAllAuthUsers(sb),
     sb.from("contractor_profiles").select("email, status, fullName"),
   ]);
-  if (error) throw new Error(error.message);
 
   // Only show Active contractors — accounts with no matching contractor
   // record (e.g. admin-only accounts) always show, since there's no status
@@ -50,9 +70,8 @@ export async function fetchUsers(): Promise<AppUser[]> {
     ])
   );
 
-  return (data.users ?? [])
-    .map((u) => {
-      const raw = u as unknown as Record<string, unknown>;
+  return authUsers
+    .map((raw) => {
       const profile = profileByEmail.get(String(raw.email ?? "").trim().toLowerCase());
       return toAppUser(raw, profile?.fullName);
     })
