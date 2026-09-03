@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type ContractorProfile, type BirthdayEntry } from "../profile/actions";
@@ -114,9 +114,6 @@ function HolidayCalendarModal({
     else setCalMonth(m => m + 1);
   }
 
-  const todayFull = new Date(todayStr + "T00:00:00").toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric", year: "numeric",
-  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -295,10 +292,10 @@ export default function ContractorDashboardPage() {
   const [receivedWishes, setReceivedWishes] = useState<ReceivedWish[]>([]);
 
   // Local calendar date (YYYY-MM-DD) — the wishDate key for today's birthdays.
-  const todayIso = (() => {
+  const todayIso = useMemo(() => {
     const n = new Date();
     return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-  })();
+  }, []);
 
   useEffect(() => {
     const supabase = createClient();
@@ -368,7 +365,7 @@ export default function ContractorDashboardPage() {
 
       setLoading(false);
     })();
-  }, [router]);
+  }, [router, todayIso]);
 
   // Live-refresh wishes ONLY on the viewer's own birthday — that's the only day
   // they can receive wishes, so there's nothing to poll for otherwise.

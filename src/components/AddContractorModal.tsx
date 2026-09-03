@@ -263,7 +263,6 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
   const subDepts = Object.keys(deptTree[form.department] ?? {});
   const roles    = deptTree[form.department]?.[form.subDepartment] ?? [];
-  const states   = COUNTRY_STATES[form.country] ?? [];
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

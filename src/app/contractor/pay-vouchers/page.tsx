@@ -9,7 +9,7 @@ import {
   type ContractorVoucher, type ContractorVoucherProfile,
 } from "./actions";
 import { DAY_LABELS, REST_DAY_TO_LABEL, fmtVoucherDate } from "@/lib/payrollVoucher";
-import { datesBetween, addDaysIso } from "@/lib/weekUtils";
+import { datesBetween } from "@/lib/weekUtils";
 import { PageHeader } from "../_components/portal";
 import { Logo } from "@/components/Logo";
 import {

@@ -53,11 +53,14 @@ export default function LoginPage() {
       {/* Background */}
       <div className="fixed inset-0 z-0">
         {/* Solar farm photo */}
-        <img
+        <Image
           src="/login-bg.jpg"
           alt=""
           aria-hidden="true"
-          className="absolute inset-0 w-full h-full object-cover"
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover"
         />
         {/* Dark green gradient overlay */}
         <div

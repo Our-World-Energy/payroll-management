@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { prisma } from "@/lib/prisma";
 
 const BASE = "https://api.worksnaps.com/api";

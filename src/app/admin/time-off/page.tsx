@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronLeft, LuChevronRight, LuChevronDown, LuChevronUp, LuDownload, LuUpload, LuCalendarPlus, LuUmbrella, LuStethoscope,
+  LuShieldCheck, LuChevronLeft, LuChevronRight, LuChevronDown, LuChevronUp, LuDownload, LuUpload, LuCalendarPlus,
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote,
 } from "react-icons/lu";
 import {
@@ -16,13 +16,12 @@ import {
 } from "../contractors/actions";
 import { fetchCutOffTime, fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
 import { arizonaTodayIso, addDaysIso, arizonaNowParts } from "@/lib/weekUtils";
 
-const HOURS_PER_DAY = 8;
 const TODAY = new Date();
 
 function fmtDate(date: string) {
@@ -252,7 +251,6 @@ function calculateUnusedSickLeave(hireDate: string, sickLeaveUsedHours: number, 
   return roundBalance(Math.max(prevYearAccrued - sickLeaveUsedHours, 0));
 }
 
-type RequestDecision = "Approved" | "Pending" | "Declined";
 
 function countryFromLocation(location: string) {
   const parts = location.split(",").map((p) => p.trim()).filter(Boolean);
@@ -291,13 +289,13 @@ function BalanceBar({ used, total, color }: { used: number; total: number; color
 const REVIEW_BADGE: Record<RequestDecision, string> = {
   Approved: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   Pending:  "bg-amber-50 text-amber-700 border border-amber-200",
-  Declined: "bg-red-50 text-red-600 border border-red-200",
+  Rejected: "bg-red-50 text-red-600 border border-red-200",
 };
 
 const REVIEW_ICON: Record<RequestDecision, React.ReactNode> = {
   Approved: <LuCircleCheck size={11} />,
   Pending:  <LuClock size={11} />,
-  Declined: <LuCircleX size={11} />,
+  Rejected: <LuCircleX size={11} />,
 };
 
 type TimeOffRow = {
@@ -2071,7 +2069,7 @@ export default function TimeOffPage() {
                       {latest ? (
                         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
                           reviewStatus === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                          reviewStatus === "Declined" || reviewStatus === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
+                          reviewStatus === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
                           {reviewStatus === "Approved" ? <LuCircleCheck size={11} /> : reviewStatus === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}

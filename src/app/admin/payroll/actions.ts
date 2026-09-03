@@ -21,13 +21,17 @@ export type PayrollAdjustment = {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  /** Fixed-Ind only: hours entered at a percentage rate. Total hours =
+   *  indHours × indPercentage/100; that × Rate/hr is added to Gross. */
+  indHours: number;
+  indPercentage: number;
 };
 
 export async function fetchPayrollAdjustments(weekStart: string): Promise<PayrollAdjustment[]> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from(TABLE)
-    .select("email, weekStart, bonus, misc, retroPay, reim, cashAdvance, hmo, tax")
+    .select("email, weekStart, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, indHours, indPercentage")
     .eq("weekStart", weekStart);
 
   if (error || !data) return [];
@@ -41,6 +45,8 @@ export async function fetchPayrollAdjustments(weekStart: string): Promise<Payrol
     cashAdvance: Number(r.cashAdvance ?? 0),
     hmo: Number(r.hmo ?? 0),
     tax: Number(r.tax ?? 0),
+    indHours: Number(r.indHours ?? 0),
+    indPercentage: Number(r.indPercentage ?? 0),
   }));
 }
 
@@ -54,6 +60,8 @@ export async function savePayrollAdjustment(params: {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  indHours: number;
+  indPercentage: number;
 }): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
   const email = params.email.trim().toLowerCase();
@@ -76,6 +84,8 @@ export async function savePayrollAdjustment(params: {
     cashAdvance: params.cashAdvance,
     hmo: params.hmo,
     tax: params.tax,
+    indHours: params.indHours,
+    indPercentage: params.indPercentage,
     updatedAt: new Date().toISOString(),
   };
 
@@ -183,9 +193,18 @@ export type ProcessedPayrollRow = {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  /** Fixed-Ind hours-at-percentage amount, part of Gross. */
+  indHoursPay: number;
   // Per-bucket hours/pay breakdown and the Sun→Sat daily grid — stored so a
   // "Processed" voucher can render fully frozen, with nothing computed live.
   ptoHours: number;
+  /** Paid leave by kind — each its own voucher line and part of Gross. */
+  sickHours: number;
+  sickPay: number;
+  specialHours: number;
+  specialPay: number;
+  advanceHours: number;
+  advancePay: number;
   regHours: number;
   regOtHours: number;
   rdOtHours: number;
@@ -266,7 +285,16 @@ export type ProcessedSnapshot = {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  /** Fixed-Ind hours-at-percentage amount, part of Gross. */
+  indHoursPay: number;
   ptoHours: number;
+  /** Paid leave by kind — each its own voucher line and part of Gross. */
+  sickHours: number;
+  sickPay: number;
+  specialHours: number;
+  specialPay: number;
+  advanceHours: number;
+  advancePay: number;
   regHours: number;
   regOtHours: number;
   rdOtHours: number;
@@ -287,7 +315,7 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
   const sb = getSupabase();
   const { data, error } = await sb
     .from(PROCESS_TABLE)
-    .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
+    .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, indHoursPay, ptoHours, sickHours, sickPay, specialHours, specialPay, advanceHours, advancePay, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
     .eq("weekStart", weekStart);
   if (error || !data) return {};
   return Object.fromEntries(data.map((r) => [String(r.email), {
@@ -315,7 +343,14 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
     cashAdvance: Number(r.cashAdvance ?? 0),
     hmo: Number(r.hmo ?? 0),
     tax: Number(r.tax ?? 0),
+    indHoursPay: Number(r.indHoursPay ?? 0),
     ptoHours: Number(r.ptoHours ?? 0),
+    sickHours: Number(r.sickHours ?? 0),
+    sickPay: Number(r.sickPay ?? 0),
+    specialHours: Number(r.specialHours ?? 0),
+    specialPay: Number(r.specialPay ?? 0),
+    advanceHours: Number(r.advanceHours ?? 0),
+    advancePay: Number(r.advancePay ?? 0),
     regHours: Number(r.regHours ?? 0),
     regOtHours: Number(r.regOtHours ?? 0),
     rdOtHours: Number(r.rdOtHours ?? 0),

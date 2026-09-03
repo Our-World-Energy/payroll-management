@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   LuChevronLeft, LuClock, LuCircleCheck, LuCircleX, LuCircleAlert, LuX, LuTrash2, LuBan, LuArchive,
@@ -67,8 +67,7 @@ function typeBadgeClass(type: string) {
 const HISTORY_FILTERS = ["All", "Approved", "Rejected", "Archived", "Cancelled"] as const;
 type HistoryFilter = typeof HISTORY_FILTERS[number];
 
-// Split into "current" (pending) and "historical" (decided) buckets
-const CUTOFF_DATE = "2026-01-01"; // requests from before this treated as historical even if pending
+// Split into "current" (pending) and "historical" (decided) buckets by status.
 
 export default function ContractorTimeOffPage() {
   const { id } = useParams<{ id: string }>();
@@ -86,7 +85,6 @@ export default function ContractorTimeOffPage() {
   const [pendingSearch, setPendingSearch] = useState("");
   const [historySearch, setHistorySearch] = useState("");
   const [historyFilter, setHistoryFilter] = useState<HistoryFilter>("All");
-  const [, startTransition] = useTransition();
 
   const loadData = useCallback(async () => {
     const [all, requests, savedCutoff] = await Promise.all([
@@ -586,7 +584,7 @@ export default function ContractorTimeOffPage() {
                 <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
                   This will mark the {leaveTypeDisplayLabel(cancelTarget.type)} request for {fmtDate(cancelTarget.startDate)} – {fmtDate(cancelTarget.endDate)} as Cancelled.
                   {cancelTarget.status === "Approved" && " Its approved hours will be reversed from the contractor's balance."}
-                  {" "}The request itself stays on file and is still visible here — it just won't appear in the contractor's own Recent Requests anymore.
+                  {" "}The request itself stays on file and is still visible here — it just won&apos;t appear in the contractor&apos;s own Recent Requests anymore.
                 </p>
               </div>
             </div>
