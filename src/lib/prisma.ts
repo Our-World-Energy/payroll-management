@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 
 declare global {
-  var __prisma: PrismaClient | undefined; // eslint-disable-line no-var
+  var __prisma: PrismaClient | undefined;
 }
 
 export const prisma =

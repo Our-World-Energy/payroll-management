@@ -488,7 +488,13 @@ model PayrollAdjustment {
   reim        Float    @default(0)
   cashAdvance Float    @default(0)
   hmo         Float    @default(0)
-  tax         Float    @default(0)
+  tax         Float    @default(0)   // retired: no longer entered or shown, kept for legacy rows
+  // Fixed-Ind only. Hours worked at a percentage rate, entered via the clock
+  // icon on the Payroll table's Action column. Total hours = indHours ×
+  // indPercentage/100, and that × Rate/hr is added to Gross. The two inputs are
+  // stored rather than the product, so the figure stays reproducible.
+  indHours      Float  @default(0)
+  indPercentage Float  @default(0)
   updatedAt   DateTime @updatedAt
 
   @@unique([email, weekStart], name: "payroll_adjustment_key")
@@ -527,7 +533,18 @@ model ProcessWeeklyPayroll {
   reim               Float    @default(0)
   cashAdvance        Float    @default(0)
   hmo                Float    @default(0)
-  tax                Float    @default(0)
+  tax                Float    @default(0)   // retired: no longer entered or shown
+  // Fixed-Ind hours-at-percentage, as the resolved amount rather than the two
+  // inputs — a snapshot freezes outcomes, and this one is part of Gross.
+  indHoursPay        Float    @default(0)
+  // Paid leave, split by kind — each is its own voucher earnings line and part
+  // of Gross. ptoHours/ptoPay below cover the PTO line; these cover the rest.
+  sickHours          Float    @default(0)   // Medical Unavailability
+  sickPay            Float    @default(0)
+  specialHours       Float    @default(0)
+  specialPay         Float    @default(0)
+  advanceHours       Float    @default(0)   // Advance PTO/Birthday + Advance Sick
+  advancePay         Float    @default(0)
   processedAt        DateTime @updatedAt
   restDay            String   @default("")
   ptoHours           Float    @default(0)

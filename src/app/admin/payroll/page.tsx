@@ -12,7 +12,7 @@ import {
   processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow, type ProcessedSnapshot,
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
-import { payComponentsFor, totalPtoHoursFor } from "@/lib/payrollVoucher";
+import { payComponentsFor, leaveHoursFor } from "@/lib/payrollVoucher";
 import { fetchFixedTimeForWeek } from "../attendance/actions";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -38,6 +38,15 @@ type PayrollRow = {
   totalHoOtMinutes: number | null;
   totalTimeOffRequestMinutes: number;
   ptoHours: number;
+  /** Paid leave by kind — see leaveHoursFor. Each is its own voucher line. */
+  sickHours: number;
+  specialHours: number;
+  advanceHours: number;
+  /** Each paid-leave kind as money, at Rate/hr — its own payroll column. */
+  ptoPay: number;
+  sickPay: number;
+  specialPay: number;
+  advancePay: number;
   department: string;
   payCategory: string;
   shiftType: string;
@@ -48,6 +57,9 @@ type PayrollRow = {
   actualMinutes: number;
   completionMinutes: number | null;
   hours: number | null;
+  /** Pay derived from time alone — the pay components plus PTO pay, before any
+   *  Manual Payroll Adjustment. Gross is this plus Bonus/MISC/Retro Pay/REIM. */
+  earnings: number | null;
   gross: number | null;
   deductions: number | null;
   net: number | null;
@@ -67,6 +79,12 @@ type PayrollRow = {
   cashAdvance: number;
   hmo: number;
   tax: number;
+  /** Fixed-Ind hours-at-percentage entry. Total hours = indHours ×
+   *  indPercentage/100; that × hourlyRate is the amount added to Gross. */
+  indHours: number;
+  indPercentage: number;
+  /** The money indHours/indPercentage contributes to Gross, at Rate/hr. */
+  indHoursPay: number;
 };
 
 // A leave request's hours are a flat per-request amount (not scaled by date
@@ -132,6 +150,23 @@ function numsDiffer(a: number, b: number, epsilon = 0.01) {
   return Math.abs(a - b) > epsilon;
 }
 
+/** Fixed-Ind — the pay category the hours-at-percentage entry applies to. */
+function isFixedIndCategory(payCategory: string) {
+  return payCategory.trim().toLowerCase() === "fixed-ind";
+}
+
+// Fixed-Ind hours-at-percentage. The Total the entry window shows is an HOURS
+// figure — hours × percentage — and it reaches Gross at the contractor's own
+// Rate/hr. Defined once so the window's preview and the payroll row can't
+// disagree about the amount.
+function fixedIndTotalHours(hours: number, percentage: number) {
+  return hours * (percentage / 100);
+}
+
+function fixedIndHoursPay(hours: number, percentage: number, hourlyRate: number) {
+  return fixedIndTotalHours(hours, percentage) * hourlyRate;
+}
+
 function fmtMoney(n: number, currency: string) {
   return `${currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -155,6 +190,7 @@ export default function PayrollPage() {
   const [departmentFilter, setDepartmentFilter] = useState("All");
   const [voucherTarget, setVoucherTarget] = useState<PayrollRow | null>(null);
   const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
+  const [hoursTarget,   setHoursTarget]   = useState<PayrollRow | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [processedByEmail, setProcessedByEmail] = useState<Record<string, ProcessedSnapshot>>({});
@@ -293,7 +329,10 @@ export default function PayrollPage() {
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
             const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
             const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(rangeFrom, rangeTo, contractorRequests);
-            const ptoHours = totalPtoHoursFor(rangeFrom, rangeTo, contractorRequests);
+            // Paid leave, split by kind. Regular Medical Unavailability used to
+            // be excluded from pay entirely; it now pays like the rest.
+            const leaveHours = leaveHoursFor(rangeFrom, rangeTo, contractorRequests);
+            const ptoHours = leaveHours.pto;
 
             // Earnings and deductions both come straight from this contractor's
             // Manual Payroll Adjustment for the week, rather than a placeholder.
@@ -305,13 +344,27 @@ export default function PayrollPage() {
             const cashAdvance = adjustment?.cashAdvance ?? 0;
             const hmo = adjustment?.hmo ?? 0;
             const tax = adjustment?.tax ?? 0;
+            const indHours = adjustment?.indHours ?? 0;
+            const indPercentage = adjustment?.indPercentage ?? 0;
+            // Fixed-Ind hours at a percentage: the Total is an hours figure
+            // (hours × percentage), and it reaches Gross at the contractor's own
+            // Rate/hr — the same rate every other pay component uses.
+            // Gated on the pay category, not just on the stored values: the
+            // clock icon is Fixed-Ind-only, but a contractor re-categorised
+            // after entering hours would otherwise keep the amount in Gross
+            // while the voucher hides the line explaining it.
+            const indPay = isFixedIndCategory(c.payCategory || "")
+              ? fixedIndHoursPay(indHours, indPercentage, hourlyRate)
+              : 0;
 
             // Gross Pay is the sum of each payroll component calculated independently
             // (its own time total × Hourly Rate × its own multiplier), plus PTO Pay
             // and the Manual Payroll Adjustment earnings — see payComponentsFor —
             // so this always matches the voucher's total exactly.
             const hasGrossInputs = (isFixedMex && fixedMinutes != null) || isReviewed;
-            const gross = hasGrossInputs
+            // Earnings is the time-derived half, broken out so the table can show
+            // it beside the manual adjustments that make up the rest of Gross.
+            const earnings = hasGrossInputs
               ? payComponentsFor(c.payCategory || "", hourlyRate, completionMinutes, {
                   totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
                   totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
@@ -319,9 +372,25 @@ export default function PayrollPage() {
                   totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
                   totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
                   localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
-                }).grossPay + ptoHours * hourlyRate + bonus + misc + retroPay + reim
+                }).grossPay
               : null;
-            const deductions = gross != null ? cashAdvance + hmo + tax : null;
+            // Each paid-leave kind at the contractor's Rate/hr, its own column.
+            const ptoPay = leaveHours.pto * hourlyRate;
+            const sickPay = leaveHours.sick * hourlyRate;
+            const specialPay = leaveHours.special * hourlyRate;
+            const advancePay = leaveHours.advance * hourlyRate;
+            // Gross is still the sum of every earnings column, so the row reads
+            // left to right into it — Earnings now just excludes the leave that
+            // the four columns beside it show.
+            const gross = earnings != null
+              ? earnings + ptoPay + sickPay + specialPay + advancePay
+                + bonus + misc + retroPay + reim + indPay
+              : null;
+            // Tax is no longer part of payroll — it is neither entered nor shown,
+            // so Deductions is exactly the two components the table and the
+            // voucher list. The column itself is kept on payroll_adjustments for
+            // legacy rows (all currently 0) rather than dropped destructively.
+            const deductions = gross != null ? cashAdvance + hmo : null;
             const net = gross != null && deductions != null ? gross - deductions : null;
 
             // Compare the live-computed values against the saved snapshot to
@@ -362,6 +431,13 @@ export default function PayrollPage() {
               totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
               totalTimeOffRequestMinutes,
               ptoHours,
+              sickHours: leaveHours.sick,
+              specialHours: leaveHours.special,
+              advanceHours: leaveHours.advance,
+              ptoPay,
+              sickPay,
+              specialPay,
+              advancePay,
               department: c.department || "-",
               payCategory: c.payCategory || "-",
               shiftType: c.shiftType || "-",
@@ -372,6 +448,7 @@ export default function PayrollPage() {
               actualMinutes,
               completionMinutes,
               hours,
+              earnings,
               gross,
               deductions,
               net,
@@ -391,6 +468,9 @@ export default function PayrollPage() {
               cashAdvance,
               hmo,
               tax,
+              indHours,
+              indPercentage,
+              indHoursPay: indPay,
             };
           });
 
@@ -429,7 +509,7 @@ export default function PayrollPage() {
     const headers = [
       "Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-      "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status",
+      "Completion Time", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     const lines = [
@@ -445,7 +525,20 @@ export default function PayrollPage() {
         r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
         r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
         `${r.currency} ${r.hourlyRate.toFixed(2)}`, r.hourlyRate.toFixed(2),
+        r.earnings != null ? fmtMoney(r.earnings, r.currency) : "",
+        r.ptoPay ? fmtMoney(r.ptoPay, r.currency) : "",
+        r.sickPay ? fmtMoney(r.sickPay, r.currency) : "",
+        r.specialPay ? fmtMoney(r.specialPay, r.currency) : "",
+        r.advancePay ? fmtMoney(r.advancePay, r.currency) : "",
+        // Blank rather than 0.00 when an adjustment wasn't entered, so a real
+        // zero stays distinguishable from "nothing recorded" in a spreadsheet.
+        r.bonus ? fmtMoney(r.bonus, r.currency) : "",
+        r.misc ? fmtMoney(r.misc, r.currency) : "",
+        r.retroPay ? fmtMoney(r.retroPay, r.currency) : "",
+        r.reim ? fmtMoney(r.reim, r.currency) : "",
         r.gross != null ? fmtMoney(r.gross, r.currency) : "",
+        r.cashAdvance ? fmtMoney(r.cashAdvance, r.currency) : "",
+        r.hmo ? fmtMoney(r.hmo, r.currency) : "",
         r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "",
         r.net != null ? fmtMoney(r.net, r.currency) : "",
         r.status,
@@ -496,9 +589,34 @@ export default function PayrollPage() {
     cashAdvance: number; hmo: number; tax: number;
   }) {
     if (!reviewTarget) return { ok: false, error: "No contractor selected." };
-    const result = await savePayrollAdjustment({ email: reviewTarget.email, weekStart: rangeFrom, ...values });
+    // savePayrollAdjustment writes the whole row, so the Fixed-Ind hours entry
+    // is passed through unchanged — otherwise saving here would clear it.
+    const result = await savePayrollAdjustment({
+      email: reviewTarget.email, weekStart: rangeFrom, ...values,
+      indHours: reviewTarget.indHours, indPercentage: reviewTarget.indPercentage,
+    });
     if (result.ok) {
       setRows((prev) => prev.map((r) => r.email === reviewTarget.email ? { ...r, ...values } : r));
+    }
+    return result;
+  }
+
+  // Mirror of handleSaveAdjustment for the Fixed-Ind hours window: only the two
+  // hours fields change, and every other adjustment on the row is passed through
+  // so this can't wipe a Bonus or Cash Advance entered in the other window.
+  async function handleSaveIndHours(values: { indHours: number; indPercentage: number }) {
+    if (!hoursTarget) return { ok: false, error: "No contractor selected." };
+    const result = await savePayrollAdjustment({
+      email: hoursTarget.email, weekStart: rangeFrom,
+      bonus: hoursTarget.bonus, misc: hoursTarget.misc, retroPay: hoursTarget.retroPay, reim: hoursTarget.reim,
+      cashAdvance: hoursTarget.cashAdvance, hmo: hoursTarget.hmo, tax: hoursTarget.tax,
+      ...values,
+    });
+    if (result.ok) {
+      // Gross/Deductions/Net are derived in the load effect, so a reload keeps
+      // the table honest rather than patching the money here by hand.
+      setRows((prev) => prev.map((r) => r.email === hoursTarget.email ? { ...r, ...values } : r));
+      setReloadKey((k) => k + 1);
     }
     return result;
   }
@@ -664,25 +782,25 @@ export default function PayrollPage() {
 
         {/* Table */}
         <div className="overflow-auto" style={{ maxHeight: "60vh" }}>
-          <table className="w-full text-left text-sm" style={{ minWidth: "1180px", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left text-sm" style={{ minWidth: "2340px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-                  "Completion Time", "Rate/hr", "Rate", "Gross", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
+                  "Completion Time", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
-                      h === "Status" || h === "Action" ? "text-center" : ""
+                      h === "Status" ? "text-center" : ""
                     } ${
                       i === 0 ? "sticky left-0 z-20 w-[180px] min-w-[180px] shadow-[1px_0_0_0_#e2e8f0]" : ""
-                    } ${h === "Status" ? "sticky right-[90px] z-20 border-l border-white/20" : ""} ${
+                    } ${h === "Status" ? "sticky right-[132px] z-20 border-l border-white/20" : ""} ${
                       h === "Action" ? "sticky right-0 z-20 border-l border-white/20" : ""
                     }`}
                     style={
                       i === 0 ? { background: "#003527" }
                       : h === "Status" ? { minWidth: 150, width: 150, maxWidth: 150, background: "#003527" }
-                      : h === "Action" ? { minWidth: 90, width: 90, maxWidth: 90, background: "#003527" }
+                      : h === "Action" ? { minWidth: 132, width: 132, maxWidth: 132, background: "#003527" }
                       : undefined
                     }
                   >
@@ -694,7 +812,7 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={21} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
+                  <td colSpan={32} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
@@ -728,11 +846,47 @@ export default function PayrollPage() {
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.currency} {r.hourlyRate.toFixed(2)}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.hourlyRate.toFixed(2)}</td>
+                  {/* Earnings is the time-derived pay; the four that follow are
+                      this week's Manual Payroll Adjustments. Together they make
+                      up Gross, so the breakdown reads left to right into it. */}
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.earnings != null ? fmtMoney(r.earnings, r.currency) : "—"}</td>
+                  {/* Paid leave by kind. Each is money at Rate/hr; the hours
+                      behind it are in the tooltip, since four extra hour columns
+                      would double the width for a figure that's rarely read. */}
+                  {([
+                    ["ptoPay", r.ptoPay, r.ptoHours, "PTO"],
+                    ["sickPay", r.sickPay, r.sickHours, "Medical Unavailability"],
+                    ["specialPay", r.specialPay, r.specialHours, "Special Leave"],
+                    ["advancePay", r.advancePay, r.advanceHours, "Advance Leave"],
+                  ] as [string, number, number, string][]).map(([key, amount, hours, label]) => (
+                    <td key={key} title={amount ? `${hours} hrs of ${label} at ${r.currency} ${r.hourlyRate.toFixed(2)}/hr` : undefined}
+                      className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
+                        amount ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
+                      }`}>
+                      {amount ? fmtMoney(amount, r.currency) : "—"}
+                    </td>
+                  ))}
+                  {([["bonus", r.bonus], ["misc", r.misc], ["retroPay", r.retroPay], ["reim", r.reim]] as [string, number][]).map(([key, amount]) => (
+                    <td key={key} className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
+                      amount ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
+                    }`}>
+                      {amount ? fmtMoney(amount, r.currency) : "—"}
+                    </td>
+                  ))}
                   <td className={`px-4 md:px-6 py-3 md:py-4 font-medium tabular-nums whitespace-nowrap border-r ${dark ? "text-white/80 border-white/8" : "text-slate-700 border-slate-100"}`}>{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
+                  {/* The two deduction components that make up the Deductions
+                      total beside them. */}
+                  {([["cashAdvance", r.cashAdvance], ["hmo", r.hmo]] as [string, number][]).map(([key, amount]) => (
+                    <td key={key} className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
+                      amount ? (dark ? "text-red-400" : "text-red-500") : (dark ? "text-white/25" : "text-slate-300")
+                    }`}>
+                      {amount ? `−${fmtMoney(amount, r.currency)}` : "—"}
+                    </td>
+                  ))}
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-red-400 border-white/8" : "text-red-500 border-slate-100"}`}>{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 font-semibold tabular-nums whitespace-nowrap border-r ${dark ? "text-teal-300 border-white/8" : "text-teal-700 border-slate-100"}`}>{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
                   <td
-                    className={`text-center sticky right-[90px] z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
+                    className={`text-center sticky right-[132px] z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
                     style={{ minWidth: 150, width: 150, maxWidth: 150 }}
                   >
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${STATUS_STYLES[r.status]}`}>
@@ -741,10 +895,10 @@ export default function PayrollPage() {
                     </span>
                   </td>
                   <td
-                    className={`text-center sticky right-0 z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
-                    style={{ minWidth: 90, width: 90, maxWidth: 90 }}
+                    className={`text-left sticky right-0 z-10 border-l overflow-hidden px-4 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
+                    style={{ minWidth: 132, width: 132, maxWidth: 132 }}
                   >
-                    <div className="flex items-center justify-center gap-3">
+                    <div className="flex items-center justify-start gap-3">
                       <button
                         onClick={() => setVoucherTarget(r)}
                         title="View payroll voucher"
@@ -759,6 +913,23 @@ export default function PayrollPage() {
                       >
                         <LuPencil size={16} strokeWidth={1.75} />
                       </button>
+                      {/* Fixed-Ind only — hours at a percentage, added to Gross
+                          at the contractor's Rate/hr. */}
+                      {isFixedIndCategory(r.payCategory) && (
+                        <button
+                          onClick={() => setHoursTarget(r)}
+                          title={r.indHours > 0
+                            ? `Hours at percentage — ${r.indHours} hrs x ${r.indPercentage}%`
+                            : "Hours at percentage"}
+                          className={`transition-colors ${
+                            r.indHours > 0
+                              ? (dark ? "text-teal-300 hover:text-teal-200" : "text-teal-600 hover:text-teal-800")
+                              : (dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]")
+                          }`}
+                        >
+                          <LuClock size={16} strokeWidth={1.75} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -790,6 +961,14 @@ export default function PayrollPage() {
           row={reviewTarget}
           onSave={handleSaveAdjustment}
           onClose={() => setReviewTarget(null)}
+        />
+      )}
+
+      {hoursTarget && (
+        <FixedIndHoursModal
+          row={hoursTarget}
+          onSave={handleSaveIndHours}
+          onClose={() => setHoursTarget(null)}
         />
       )}
 
@@ -902,10 +1081,17 @@ function PayrollVoucherModal({
         misc: row.misc,
         retroPay: row.retroPay,
         reim: row.reim,
+        indHoursPay: row.indHoursPay,
         cashAdvance: row.cashAdvance,
         hmo: row.hmo,
         tax: row.tax,
         ptoHours: row.ptoHours,
+        sickHours: row.sickHours,
+        sickPay: row.sickHours * row.hourlyRate,
+        specialHours: row.specialHours,
+        specialPay: row.specialHours * row.hourlyRate,
+        advanceHours: row.advanceHours,
+        advancePay: row.advanceHours * row.hourlyRate,
         regHours: live.regHours,
         regOtHours: live.regOtHours,
         rdOtHours: live.rdOtHours,
@@ -957,10 +1143,17 @@ function PayrollVoucherModal({
         localHolidayPay: processedSnapshot!.localHolidayPay,
         ptoHours: processedSnapshot!.ptoHours,
         ptoPay: processedSnapshot!.ptoPay,
+        sickHours: processedSnapshot!.sickHours,
+        sickPay: processedSnapshot!.sickPay,
+        specialHours: processedSnapshot!.specialHours,
+        specialPay: processedSnapshot!.specialPay,
+        advanceHours: processedSnapshot!.advanceHours,
+        advancePay: processedSnapshot!.advancePay,
         bonus: processedSnapshot!.bonus,
         misc: processedSnapshot!.misc,
         retroPay: processedSnapshot!.retroPay,
         reim: processedSnapshot!.reim,
+        indHoursPay: processedSnapshot!.indHoursPay,
         cashAdvance: processedSnapshot!.cashAdvance,
         hmo: processedSnapshot!.hmo,
         tax: processedSnapshot!.tax,
@@ -984,8 +1177,18 @@ function PayrollVoucherModal({
           localHolidayMinutes: row.localHolidayMinutes,
         });
         const ptoPay = row.ptoHours * row.hourlyRate;
-        const grossPay = live.grossPay + ptoPay + row.bonus + row.misc + row.retroPay + row.reim;
-        const totalDeductions = row.cashAdvance + row.hmo + row.tax;
+        const sickPay = row.sickHours * row.hourlyRate;
+        const specialPay = row.specialHours * row.hourlyRate;
+        const advancePay = row.advanceHours * row.hourlyRate;
+        // Every earnings line the voucher prints is in this sum, and every
+        // deduction line is in totalDeductions below — so Net Pay is exactly
+        // what the two lists show, and matches the table's Net Pay column.
+        const grossPay = live.grossPay + ptoPay + row.bonus + row.misc + row.retroPay + row.reim + row.indHoursPay
+          + sickPay + specialPay + advancePay;
+        // Matches the two lines the voucher actually prints — Tax used to be in
+        // this sum without appearing in the list, so the total read higher than
+        // the deductions shown.
+        const totalDeductions = row.cashAdvance + row.hmo;
         return {
           name: row.name,
           role: row.role,
@@ -1003,10 +1206,17 @@ function PayrollVoucherModal({
           localHolidayPay: live.localHolidayPay,
           ptoHours: row.ptoHours,
           ptoPay,
+          sickHours: row.sickHours,
+          sickPay,
+          specialHours: row.specialHours,
+          specialPay,
+          advanceHours: row.advanceHours,
+          advancePay,
           bonus: row.bonus,
           misc: row.misc,
           retroPay: row.retroPay,
           reim: row.reim,
+          indHoursPay: row.indHoursPay,
           cashAdvance: row.cashAdvance,
           hmo: row.hmo,
           tax: row.tax,
@@ -1028,7 +1238,8 @@ function PayrollVoucherModal({
   const {
     regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
     regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    ptoHours, ptoPay, bonus, misc, retroPay, reim, cashAdvance, hmo,
+    ptoHours, ptoPay, sickPay, specialPay, advancePay,
+    bonus, misc, retroPay, reim, indHoursPay, cashAdvance, hmo,
     grossPay, totalDeductions, netPay,
   } = figures;
 
@@ -1084,7 +1295,7 @@ function PayrollVoucherModal({
             </div>
           </div>
           {canProcess && (
-            <div className="flex items-center justify-start gap-3 mb-2.5">
+            <div className="flex items-center justify-center gap-3 mb-2.5">
               <button
                 onClick={handleProcessClick}
                 disabled={isSaving}
@@ -1181,10 +1392,16 @@ function PayrollVoucherModal({
                 ["HO OT", hoOtPay],
                 ["LOCAL HOLIDAY PAY", localHolidayPay],
                 ["PTO", ptoPay],
+                ["Medical Unavailability", sickPay],
+                ["Special Leave", specialPay],
+                ["Advance Leave", advancePay],
                 ["Bonus", bonus],
                 ["MISC", misc],
                 ["Retro Pay", retroPay],
                 ["REIM", reim],
+                // Fixed-Ind only — no other pay category can accrue it, so the
+                // line is left out rather than printed as a zero.
+                ...(isFixedIndCategory(row.payCategory) ? [["IND HRS", indHoursPay]] : []),
               ].map(([label, value]) => (
                 <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                   <span className="text-slate-500">{label}</span>
@@ -1226,7 +1443,7 @@ function PayrollVoucherModal({
 
           <p className="text-[10px] text-slate-400 mt-2">
             Check Date is always the Friday following the pay cycle&apos;s end date.
-            Bonus, MISC, Retro Pay, REIM, Cash Advance, HMO Premium, and Tax can be entered via the Review action on the payroll table.
+            Bonus, MISC, Retro Pay, REIM, Cash Advance and HMO Premium can be entered via the Review action on the payroll table. Paid-leave hours come from approved Time Away requests.
           </p>
 
           <div className="flex justify-end gap-2 mt-3">
@@ -1279,7 +1496,6 @@ function PayrollAdjustmentModal({
   const [reim,        setReim]        = useState(row.reim ? row.reim.toString() : "");
   const [cashAdvance, setCashAdvance] = useState(row.cashAdvance ? row.cashAdvance.toString() : "");
   const [hmo,         setHmo]         = useState(row.hmo ? row.hmo.toString() : "");
-  const [tax,         setTax]         = useState(row.tax ? row.tax.toString() : "");
   const [saving,      setSaving]      = useState(false);
   const [error,       setError]       = useState("");
 
@@ -1292,7 +1508,6 @@ function PayrollAdjustmentModal({
   const deductionFields: [string, string, (v: string) => void][] = [
     ["Cash Advance", cashAdvance, setCashAdvance],
     ["HMO",          hmo,         setHmo],
-    ["Tax",          tax,         setTax],
   ];
 
   async function handleSave() {
@@ -1305,7 +1520,9 @@ function PayrollAdjustmentModal({
       reim: parseFloat(reim) || 0,
       cashAdvance: parseFloat(cashAdvance) || 0,
       hmo: parseFloat(hmo) || 0,
-      tax: parseFloat(tax) || 0,
+      // Retired: no input, not shown, and out of both Deductions sums. Written
+      // as 0 so a saved row can't keep a value nothing can reach.
+      tax: 0,
     });
     setSaving(false);
     if (!result.ok) {
@@ -1372,6 +1589,118 @@ function PayrollAdjustmentModal({
           className="w-full mt-5 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
         >
           <LuCircleCheck size={15} strokeWidth={2} /> {saving ? "Saving…" : "Save Adjustments"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Fixed-Ind hours-at-percentage entry, opened from the clock icon on the
+ * Payroll table's Action column. Two inputs and a derived Total:
+ *
+ *   Total (hrs) = Hours × Percentage
+ *   added to Gross = Total × Rate/hr
+ *
+ * Stores the two inputs rather than the product, so the figure stays
+ * reproducible from what was typed. Only the two Fixed-Ind fields are sent —
+ * every other adjustment on the row is passed through untouched, so saving here
+ * can't wipe a Bonus or a Cash Advance entered in the other window.
+ */
+function FixedIndHoursModal({
+  row, onClose, onSave,
+}: {
+  row: PayrollRow;
+  onClose: () => void;
+  onSave: (values: { indHours: number; indPercentage: number }) => Promise<{ ok: boolean; error?: string }>;
+}) {
+  const [hours, setHours] = useState(row.indHours ? row.indHours.toString() : "");
+  const [percentage, setPercentage] = useState(row.indPercentage ? row.indPercentage.toString() : "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const hoursNum = parseFloat(hours) || 0;
+  const pctNum = parseFloat(percentage) || 0;
+  const totalHours = fixedIndTotalHours(hoursNum, pctNum);
+  const totalPay = fixedIndHoursPay(hoursNum, pctNum, row.hourlyRate);
+
+  async function handleSave() {
+    setError("");
+    setSaving(true);
+    const result = await onSave({ indHours: hoursNum, indPercentage: pctNum });
+    setSaving(false);
+    if (!result.ok) {
+      setError(result.error ?? "Failed to save.");
+      return;
+    }
+    onClose();
+  }
+
+  const fields: [string, string, string, (v: string) => void][] = [
+    ["Hours", "0.00", hours, setHours],
+    ["Percentage (%)", "0", percentage, setPercentage],
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !saving && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <button
+          onClick={onClose}
+          disabled={saving}
+          className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-40"
+        >
+          <LuX size={18} strokeWidth={2} />
+        </button>
+
+        <h3 className="text-base font-bold text-[#003527]">Hours at Percentage</h3>
+        <p className="text-xs text-slate-400 mt-1 mb-5">{row.name} · {row.payCategory}</p>
+
+        <div className="space-y-3">
+          {fields.map(([label, placeholder, value, setValue]) => (
+            <div key={label} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">{label}</p>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder={placeholder}
+                className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* Total is the hours figure the two inputs produce. The money it adds to
+            Gross is shown beneath it, since the Total alone doesn't say what
+            will reach payroll. */}
+        <div className="mt-4 rounded-xl border-2 border-[#003527] px-3 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total</span>
+            <span className="text-base font-bold tabular-nums text-[#003527]">
+              {totalHours.toFixed(2)} <span className="text-xs font-semibold text-slate-400">hrs</span>
+            </span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between border-t border-dotted border-slate-300 pt-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Added to Gross · {row.currency} {row.hourlyRate.toFixed(2)}/hr
+            </span>
+            <span className={`text-sm font-semibold tabular-nums ${totalPay > 0 ? "text-teal-700" : "text-slate-300"}`}>
+              {fmtMoney(totalPay, row.currency)}
+            </span>
+          </div>
+        </div>
+
+        {error && <p className="text-xs font-medium text-red-600 mt-3">{error}</p>}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full mt-5 py-2.5 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          <LuCircleCheck size={15} strokeWidth={2} /> {saving ? "Saving…" : "Save Hours"}
         </button>
       </div>
     </div>
@@ -1634,10 +1963,17 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
         misc: r.misc,
         retroPay: r.retroPay,
         reim: r.reim,
+        indHoursPay: r.indHoursPay,
         cashAdvance: r.cashAdvance,
         hmo: r.hmo,
         tax: r.tax,
         ptoHours: r.ptoHours,
+        sickHours: r.sickHours,
+        sickPay: r.sickHours * r.hourlyRate,
+        specialHours: r.specialHours,
+        specialPay: r.specialHours * r.hourlyRate,
+        advanceHours: r.advanceHours,
+        advancePay: r.advanceHours * r.hourlyRate,
         regHours: live.regHours,
         regOtHours: live.regOtHours,
         rdOtHours: live.rdOtHours,

@@ -73,30 +73,69 @@ export function payComponentsFor(
   return computePayComponents(hourlyRate, totals);
 }
 
-// PTO hours for the voucher's PTO HRS line — regular PTO ("PTO"/"PTO Half
-// Day"), Advance PTO/Birthday Leave and Advance Sick Leave overrides, and
-// Special Leave (excludes regular Medical Unavailability/Sick Leave
-// requests). Advance overrides always stamp their hours on
-// sickLeaveUsedHours regardless of which advance pool they draw from (see
-// createAdvanceLeaveOverride), while Special Leave has its own dedicated
-// specialLeaveUsedHours column (see LEAVE_BUCKET_FIELDS).
-export const PTO_HRS_TYPES = [
-  "PTO", "PTO Half Day", "Advance PTO/Birthday Leave", "Advance Sick Leave",
-  "Advance PTO/Birthday Leave Half Day", "Advance Sick Leave Half Day", "Special Leave",
-];
+// Paid leave hours for the week, split by kind so each gets its own voucher
+// line and its own column instead of one combined "PTO" figure.
+//
+// Which hour column a request stamps is NOT inferable from the kind: advance
+// overrides always write to sickLeaveUsedHours regardless of which pool they
+// draw from (see createAdvanceLeaveOverride), and Special Leave has its own
+// dedicated column (see LEAVE_BUCKET_FIELDS). So the kind is decided by `type`
+// and the hours are then read from whichever column that kind uses.
+//
+// Unpaid Leave is deliberately absent — it carries no paid hours. Callers are
+// expected to have filtered to Approved requests already.
+export type LeaveHours = {
+  pto: number;
+  /** Medical Unavailability — regular Sick Leave, not the advance pool. */
+  sick: number;
+  special: number;
+  /** Advance PTO/Birthday Leave and Advance Sick Leave, either half-day or full. */
+  advance: number;
+};
 
-export function totalPtoHoursFor(
+type LeaveRequestHours = {
+  type: string;
+  startDate: string;
+  endDate: string;
+  ptoUsedHours: number;
+  sickLeaveUsedHours: number;
+  specialLeaveUsedHours: number;
+};
+
+/** Which paid-leave line a request belongs on, or null if it isn't paid leave. */
+function leaveKindFor(type: string): keyof LeaveHours | null {
+  // "Advance" is tested first: "Advance PTO/Birthday Leave" also starts with
+  // "PTO"-ish wording but belongs on the Advance line, not the PTO one.
+  if (type.startsWith("Advance ")) return "advance";
+  if (type.startsWith("PTO")) return "pto";
+  if (type.startsWith("Special Leave")) return "special";
+  if (type.startsWith("Sick Leave")) return "sick";
+  return null;
+}
+
+export function leaveHoursFor(
   rangeFrom: string,
   rangeTo: string,
-  requests: Array<{ type: string; startDate: string; endDate: string; ptoUsedHours: number; sickLeaveUsedHours: number; specialLeaveUsedHours: number }>
-) {
-  return requests
-    .filter((r) => PTO_HRS_TYPES.includes(r.type) && r.startDate <= rangeTo && r.endDate >= rangeFrom)
-    .reduce((sum, r) => sum + (
-      r.type.startsWith("PTO") ? r.ptoUsedHours :
-      r.type === "Special Leave" ? r.specialLeaveUsedHours :
-      r.sickLeaveUsedHours
-    ), 0);
+  requests: Array<LeaveRequestHours>
+): LeaveHours {
+  const totals: LeaveHours = { pto: 0, sick: 0, special: 0, advance: 0 };
+
+  for (const r of requests) {
+    if (r.startDate > rangeTo || r.endDate < rangeFrom) continue;
+    const kind = leaveKindFor(r.type);
+    if (!kind) continue;
+    totals[kind] += kind === "pto" ? r.ptoUsedHours
+      : kind === "special" ? r.specialLeaveUsedHours
+      // Both Medical Unavailability and the advance pools stamp their hours here.
+      : r.sickLeaveUsedHours;
+  }
+
+  return totals;
+}
+
+/** Every paid-leave hour for the week, whatever its kind. */
+export function totalLeaveHours(hours: LeaveHours) {
+  return hours.pto + hours.sick + hours.special + hours.advance;
 }
 
 export const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THUR", "FRI", "SAT"];

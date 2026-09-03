@@ -130,7 +130,6 @@ function BalanceCard({
   );
 }
 
-const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm text-slate-800 focus:outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/10 transition-all bg-white";
 
 function statusStyle(status: string) {
   if (status === "Approved") return "bg-emerald-50 text-emerald-700 border-emerald-100";

@@ -61,10 +61,6 @@ function fmtDate(d: string) {
   return m && day ? `${m}-${day}-${y}` : d;
 }
 
-function contractorFullName(contractor: Contractor) {
-  return contractor.fullName || [contractor.firstName, contractor.surname].filter(Boolean).join(" ");
-}
-
 // Live-computed from Engagement Start Date + the current Cut Off Time, rather
 // than trusting the stored snapshot — so a Cut Off Time change is reflected
 // immediately without waiting for each contractor to be saved again.

@@ -103,16 +103,6 @@ function fmtHireDate(d?: string) {
   return m && day ? `${m}-${day}-${y}` : d;
 }
 
-function timeOffStatusFor(record: AttendanceRecord) {
-  const request = TIME_OFF.find((item) =>
-    item.name === record.name &&
-    record.date >= item.from &&
-    record.date <= item.to
-  );
-
-  if (request) return `${request.type} - ${request.status}`;
-  return record.status === "On Leave" ? "On Leave" : "No Time Off";
-}
 
 function attendanceTimeValue(value: string) {
   return value && !value.includes("â") && !value.includes("—") ? value : "-";
@@ -219,13 +209,6 @@ function evaluatedTimeFor(
   return approved ? formatMinutesAsMins(worksnapMinutes) : formatMinutesAsMins(480);
 }
 
-function worksnapTimeFor(date: string) {
-  if (date === "2026-05-11") return "470 mins";
-  if (date === "2026-05-12") return "540 mins";
-  if (date === "2026-05-13") return "560 mins";
-  if (date === "2026-05-15") return "240 mins";
-  return date >= "2026-05-11" && date <= "2026-05-15" ? "480 mins" : "-";
-}
 
 function worksnapTimeForDate(dailyWorksnapMinutes: Record<string, number>, date: string) {
   const minutes = dailyWorksnapMinutes[date] ?? 0;
@@ -240,7 +223,7 @@ function worksnapTimeForDate(dailyWorksnapMinutes: Record<string, number>, date:
 // A US Holiday is treated the same as a regular day here — worked time up to
 // 480 min is Regular Time as-is; only time beyond 480 min is HO OT Time
 // instead of Regular OT Time (see otMinutesFor).
-function regularTimeMinutesFor(worksnapMinutes: number, isRestDay: boolean, isFullTimeOffDay = false, isHolidayDay = false, isFixedInd = false) {
+function regularTimeMinutesFor(worksnapMinutes: number, isRestDay: boolean, isFullTimeOffDay = false, _isHolidayDay = false, isFixedInd = false) {
   // Fixed-Ind treats every worked day alike — see evaluatedTimeFor for why rest
   // days and full-leave days can't be diverted for this pay category.
   if (!isFixedInd && (isRestDay || isFullTimeOffDay)) return 0;
@@ -257,7 +240,7 @@ function evaluatedMinutesWithBorrow(evaluatedTime: string, regularTimeMinutes: n
   return timeValueToMinutes(evaluatedTime) + Math.max(evaluatedRegularTime - regularTimeMinutes, 0);
 }
 
-function defaultAdjustedTimesFor(weekDates: string[], attendanceStatus = "No Status") {
+function defaultAdjustedTimesFor(weekDates: string[], _attendanceStatus = "No Status") {
   return weekDates.reduce<Record<string, string>>((times, date) => {
     times[date] = "";
     return times;
@@ -1162,10 +1145,6 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
     const weekStart = weekDates[0] ?? "";
     router.push(`/admin/payroll?openEmail=${encodeURIComponent(contractorEmail)}${weekStart ? `&week=${weekStart}` : ""}`);
   }
-  const actual = record.actualMinutes;
-  const variance = record.actualMinutes - record.standardMinutes;
-  const type = record.actualMinutes > record.standardMinutes ? "overtime" : "undertime";
-  const [note, setNote] = useState("");
   const [dailyDecisionStatuses, setDailyDecisionStatuses] = useState<Record<string, string>>({});
   const [adjustedTimes, setAdjustedTimes] = useState<Record<string, string>>({});
   const [editingAdjustedDate, setEditingAdjustedDate] = useState<string | null>(null);
@@ -1243,6 +1222,10 @@ const totalHolidayMins = weekDates.reduce(
   // credits included, so 2,400 is the ceiling on Net Time itself and not just on
   // the worked part of it. See fixedIndNetMinutes.
   const indiaNetCompletionMinutes = fixedIndNetMinutes(indiaPoolMinutes, appliedOffsetCredit);
+  // A Time Credit touched this week either way round: granted here, or repaid
+  // here out of Ind Time. Drives the "Applied Credits" status badge below, the
+  // same rule the main table's Status column uses.
+  const isAppliedCredits = isIndia && (offsetCredit > 0 || appliedOffsetCredit > 0);
   // Displayed US HO Time total — unlike totalHolidayMins (used for Completion
   // Time), this includes the rest-day-holiday RD OT Time boost so the footer
   // matches what each day's US HO Time cell actually shows.
@@ -1443,7 +1426,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     return () => { isCancelled = true; };
   }, [record, weekDates, retryNonce]);
 
-  function finishAdjustedEdit(date: string, fallbackValue: string) {
+  function finishAdjustedEdit(date: string, _fallbackValue: string) {
     setAdjustedTimes((current) => ({
       ...current,
       [date]: formatAdjustedInput(current[date] ?? ""),
@@ -1727,7 +1710,6 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {weekDates.map((date) => {
-                    const hasRecord = record.date === date;
                     const dailyDecisionStatus = dailyDecisionStatuses[date] ?? "No Status";
                     // Raw Worksnap Time — reference display only, never fed into calculations.
                     const rawWorksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
@@ -2060,6 +2042,21 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         </div>
         <div className="px-5 py-3 sm:px-6 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50">
           <div className="mr-auto flex items-center gap-3">
+            {/* A Time Credit moved this week's figures — either it was granted
+                here, or it's being repaid out of this week's Ind Time. Takes
+                precedence over the stored weeklyStatus, matching the main
+                table's Status column. */}
+            {isAppliedCredits ? (
+              <span
+                title={offsetCredit > 0
+                  ? `${offsetCredit} min of Time Credit applied to this week — repaid out of the following week's Ind Time`
+                  : `${appliedOffsetCredit} min of Time Credit from the previous week repaid out of this week's Ind Time`}
+                className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase"
+              >
+                Applied Credits
+              </span>
+            ) : (
+              <>
             {record.weeklyStatus === "Standard Met" && <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-md text-[11px] font-bold uppercase">Standard Met</span>}
             {record.weeklyStatus === "For Review" && (
               <span className="flex items-center gap-1 text-red-600">
@@ -2079,6 +2076,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               )
             )}
             {record.weeklyStatus === "Processed" && <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-md text-[11px] font-bold uppercase">Processed</span>}
+              </>
+            )}
             {saveError && <p className="text-sm font-medium text-red-600">{saveError}</p>}
           </div>
           <button
@@ -3503,12 +3502,13 @@ export default function AttendancePage() {
     );
 
     const appliedOffsetCredit = appliedOffsetCreditFor(row);
-    // Keys off the credit granted on THIS week (persisted as
-    // AttendanceWeekStatus.offsetCreditMinutes), not appliedOffsetCredit — that
-    // is the repayment the *following* week owes, so basing the badge on it
-    // flagged the wrong week and showed nothing on the week where the credit was
-    // actually applied.
-    const isAppliedTimeCredit = isFixedContractor(row.payCategory) && (row.offsetCreditMinutes ?? 0) > 0;
+    // Both ends of a Time Credit carry the badge: the week it was granted on
+    // (persisted as AttendanceWeekStatus.offsetCreditMinutes) and the following
+    // week that repays it out of its own Ind Time (appliedOffsetCredit). Either
+    // week's figures were moved by the credit, so both say so.
+    const grantedCreditMins = row.offsetCreditMinutes ?? 0;
+    const isAppliedTimeCredit = isFixedContractor(row.payCategory)
+      && (grantedCreditMins > 0 || appliedOffsetCredit > 0);
 
     const rowDailyMins = row.dailyWorksnapMinutes ?? {};
     const rowRestDays = restDaysForAttendanceRow(row);
@@ -3903,7 +3903,7 @@ export default function AttendancePage() {
                 // the table can never disagree.
                 const {
                   variance, isOnLeave, isStandard, isForReview, isReviewed, isProcessed,
-                  needsAttention, isAppliedTimeCredit, holidayBonusMins, completionMins,
+                  needsAttention, isAppliedTimeCredit, appliedOffsetCredit, holidayBonusMins, completionMins,
                   timeAwayMinutes, missingContractorProfile,
                 } = attendanceRowValues(row);
                 return (
@@ -4062,7 +4062,9 @@ export default function AttendancePage() {
                     >
                       {isAppliedTimeCredit ? (
                         <span
-                          title={`${row.offsetCreditMinutes ?? 0} min of Time Credit applied to this week — repaid out of the following week's Ind Time`}
+                          title={(row.offsetCreditMinutes ?? 0) > 0
+                            ? `${row.offsetCreditMinutes} min of Time Credit applied to this week — repaid out of the following week's Ind Time`
+                            : `${appliedOffsetCredit} min of Time Credit from the previous week repaid out of this week's Ind Time`}
                           className="px-2 py-1 bg-red-100 text-red-700 rounded-md text-[11px] font-bold uppercase"
                         >
                           Applied Credits
