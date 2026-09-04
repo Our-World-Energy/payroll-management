@@ -13,29 +13,9 @@ import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
 import { fetchFixedTimeForWeek, saveFixedTime } from "./actions";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 import type { Contractor } from "../contractors/types";
 
-
-// Transparently retries a fetch on network failure or a 5xx/429 response —
-// covers the transient blips (cold starts, brief DB connection hiccups) that
-// were otherwise surfacing as "no data" until the user manually refreshed.
-// 4xx responses are returned as-is since retrying won't fix a bad request.
-async function fetchWithRetry(input: string, init?: RequestInit, retries = 2): Promise<Response> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const response = await fetch(input, init);
-      if (response.ok || (response.status < 500 && response.status !== 429)) return response;
-      lastError = new Error(`Request failed with status ${response.status}`);
-    } catch (err) {
-      lastError = err;
-    }
-    if (attempt < retries) {
-      await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
-    }
-  }
-  throw lastError instanceof Error ? lastError : new Error("Request failed");
-}
 
 function formatDayLabel(date: string) {
   return parseIsoDate(date).toLocaleDateString("en-US", {
@@ -1225,7 +1205,9 @@ const totalHolidayMins = weekDates.reduce(
   // A Time Credit touched this week either way round: granted here, or repaid
   // here out of Ind Time. Drives the "Applied Credits" status badge below, the
   // same rule the main table's Status column uses.
-  const isAppliedCredits = isIndia && (offsetCredit > 0 || appliedOffsetCredit > 0);
+  const isAppliedCredits = isIndia
+    && record.weeklyStatus !== "Processed"
+    && (offsetCredit > 0 || appliedOffsetCredit > 0);
   // Displayed US HO Time total — unlike totalHolidayMins (used for Completion
   // Time), this includes the rest-day-holiday RD OT Time boost so the footer
   // matches what each day's US HO Time cell actually shows.
@@ -2125,7 +2107,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   );
 }
 
-function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays, week, isWeekEnded }: {
+function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, usaHolidays, allHolidays, week, isWeekEnded, repaymentFor }: {
   worksnapRows: AttendanceRow[];
   allLeaveRequests: AdminLeaveRequest[];
   onClose: () => void;
@@ -2134,6 +2116,8 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   allHolidays: HolidayEntry[];
   week: string;
   isWeekEnded: boolean;
+  /** Fixed-Ind: the Time Credit this week owes back, granted on the week before. */
+  repaymentFor: (row: AttendanceRow) => number;
 }) {
   const [countryFilter, setCountryFilter] = useState("All");
   const [deptFilter, setDeptFilter] = useState("All");
@@ -2315,13 +2299,20 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
 
     const items = rowsToSave.map((r) => {
       const email = r.role.includes("@") ? r.role : "";
+      // Same Net Time rule and credit pass-through as Attendance Review and
+      // Process Attendance, so all three record the identical figure.
+      const rawCompletion = approvedMinutesById.get(r.contractorId) ?? 0;
+      const grantedCredit = isFixedContractor(r.payCategory) ? (r.offsetCreditMinutes ?? 0) : 0;
       return {
         contractorId: r.contractorId,
         worksnapUserId: r.worksnapUserId,
         email,
         week: modalWeekDates[0],
         requestStatus: "APPROVED",
-        completionMinutes: approvedMinutesById.get(r.contractorId) ?? 0,
+        completionMinutes: isFixedContractor(r.payCategory)
+          ? fixedIndNetMinutes(rawCompletion, repaymentFor(r)) + grantedCredit
+          : rawCompletion,
+        offsetCreditMinutes: grantedCredit,
         days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
       };
     });
@@ -2719,12 +2710,14 @@ function BreakdownModal({ userId, userName, email, week, onClose }: { userId: nu
 // too) in one shot, skipping "For Review" rows entirely. Reuses the exact
 // same per-day snapshot builder and bulk-save endpoint Bulk Approve does, so
 // the persisted numbers are computed identically either way.
-function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolidays, week, onClose, onProcessed }: {
+function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolidays, week, repaymentFor, onClose, onProcessed }: {
   rows: AttendanceRow[];
   allLeaveRequests: AdminLeaveRequest[];
   usaHolidays: HolidayEntry[];
   allHolidays: HolidayEntry[];
   week: string;
+  /** Fixed-Ind: the Time Credit this week owes back, granted on the week before. */
+  repaymentFor: (row: AttendanceRow) => number;
   onClose: () => void;
   onProcessed: () => void;
 }) {
@@ -2836,12 +2829,24 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       const rowLeaveRequests = leaveRequests.filter((req) => req.email === email);
       const adjustedDaily = adjustedByContractor.get(r.contractorId);
       const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests);
+      // Fixed-Ind follows the same Net Time rule Attendance Review saves —
+      // repay first, cap at 2,400, then add the credit granted on this week —
+      // so processing a week can't record a different figure than reviewing it
+      // did. totalCompletionMinutes is the per-day Ind Time summed, which is
+      // exactly the pool the modal caps (see indiaPoolMinutes).
+      const grantedCredit = isFixedContractor(r.payCategory) ? (r.offsetCreditMinutes ?? 0) : 0;
+      const completionMinutes = isFixedContractor(r.payCategory)
+        ? fixedIndNetMinutes(totals.totalCompletionMinutes, repaymentFor(r)) + grantedCredit
+        : totals.totalCompletionMinutes;
       return {
         worksnapUserId: r.worksnapUserId,
         email,
         week: weekDates[0],
         requestStatus: "APPROVED",
-        completionMinutes: totals.totalCompletionMinutes,
+        completionMinutes,
+        // Carried through explicitly: the ops builder writes whatever it is
+        // given, so omitting it would zero a credit that had been applied.
+        offsetCreditMinutes: grantedCredit,
         days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests),
         processed: true,
       };
@@ -3507,7 +3512,11 @@ export default function AttendancePage() {
     // week that repays it out of its own Ind Time (appliedOffsetCredit). Either
     // week's figures were moved by the credit, so both say so.
     const grantedCreditMins = row.offsetCreditMinutes ?? 0;
+    // Processed outranks it: once a week has been through Process Attendance
+    // that is the state worth reporting, same as every other pay category.
+    // The credit is still visible in the Review modal's Offset Credit row.
     const isAppliedTimeCredit = isFixedContractor(row.payCategory)
+      && !isProcessed
       && (grantedCreditMins > 0 || appliedOffsetCredit > 0);
 
     const rowDailyMins = row.dailyWorksnapMinutes ?? {};
@@ -4190,6 +4199,7 @@ export default function AttendancePage() {
           allHolidays={allHolidays}
           week={week}
           isWeekEnded={isSelectedWeekEnded}
+          repaymentFor={appliedOffsetCreditFor}
         />
       )}
 
@@ -4201,6 +4211,7 @@ export default function AttendancePage() {
           usaHolidays={usaHolidays}
           allHolidays={allHolidays}
           week={week}
+          repaymentFor={appliedOffsetCreditFor}
           onClose={() => setShowProcessModal(false)}
           onProcessed={handleBulkApprove}
         />

@@ -9,6 +9,7 @@ import { BirthdayCalendar } from "@/components/BirthdayCalendar";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
+import { fetchWithRetry } from "@/lib/fetchWithRetry";
 
 type AbsentRow = {
   name: string;
@@ -143,7 +144,9 @@ export default function AdminPage() {
     let isMounted = true;
     // Trailing slash matches next.config's trailingSlash: true — without it
     // this takes a 308 on every load.
-    fetch("/api/worksnap-coverage/")
+    // Retried: the route reads two tables, so a brief database hiccup would
+    // otherwise turn one unlucky request into a hard error on every load.
+    fetchWithRetry("/api/worksnap-coverage/")
       .then(async (r) => {
         if (!r.ok) throw new Error(`worksnap-coverage returned ${r.status}`);
         return r.json();
