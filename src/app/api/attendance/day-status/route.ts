@@ -8,8 +8,8 @@ import { prisma } from "@/lib/prisma";
  *   GET /api/attendance/day-status?userId=1051389&week=2026-05-31
  *
  * Bulk mode (no userId, from/to instead of week) returns every contractor's
- * saved per-day Evaluated Time, Evaluated Regular Time, and Adjusted Time in
- * the range — feeds the Payroll Voucher's Sun→Sat grid (which needs the
+ * saved per-day Evaluated Time, Evaluated Regular Time, Regular OT Time, US HO Time,
+ * and Adjusted Time in the range — feeds the Payroll Voucher's Sun→Sat grid (which needs the
  * reviewed/adjusted Evaluated Time rather than raw Worksnap minutes) and Bulk
  * Approve's Adjusted Time lookup (one request for every candidate contractor
  * instead of one per row).
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
   if (!userId && from && to) {
     const rows = await prisma.attendanceDayStatus.findMany({
       where: { date: { gte: new Date(`${from}T00:00:00.000Z`), lte: new Date(`${to}T00:00:00.000Z`) } },
-      select: { worksnapUserId: true, email: true, date: true, decisionStatus: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, adjustedMinutes: true, totalCompletionTime: true },
+      select: { worksnapUserId: true, email: true, date: true, decisionStatus: true, evaluatedMinutes: true, evaluatedRegularMinutes: true, regularOtMinutes: true, holidayMinutes: true, adjustedMinutes: true, totalCompletionTime: true },
     });
     return Response.json({
       days: rows.map((r) => ({
@@ -44,6 +44,8 @@ export async function GET(request: Request) {
         decisionStatus: r.decisionStatus,
         evaluatedMinutes: r.evaluatedMinutes,
         evaluatedRegularMinutes: r.evaluatedRegularMinutes,
+        regularOtMinutes: r.regularOtMinutes,
+        holidayMinutes: r.holidayMinutes,
         adjustedMinutes: r.adjustedMinutes,
         totalCompletionTime: r.totalCompletionTime,
       })),

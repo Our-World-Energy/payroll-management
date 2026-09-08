@@ -219,6 +219,9 @@ export type ProcessedPayrollRow = {
   hoOtPay: number;
   localHolidayPay: number;
   evaluatedDailyMinutes: Record<string, number>;
+  /** Saved per-day Regular OT Time — voucher Day View display only; the paid
+   *  OT total is regOtHours, which this never feeds into. */
+  regularOtDailyMinutes: Record<string, number>;
 };
 
 type ProcessRowResult = { email: string; ok: true } | { email: string; ok: false; error: string };
@@ -309,13 +312,16 @@ export type ProcessedSnapshot = {
   hoOtPay: number;
   localHolidayPay: number;
   evaluatedDailyMinutes: Record<string, number>;
+  /** Saved per-day Regular OT Time — voucher Day View display only; the paid
+   *  OT total is regOtHours, which this never feeds into. */
+  regularOtDailyMinutes: Record<string, number>;
 };
 
 export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Record<string, ProcessedSnapshot>> {
   const sb = getSupabase();
   const { data, error } = await sb
     .from(PROCESS_TABLE)
-    .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, indHoursPay, ptoHours, sickHours, sickPay, specialHours, specialPay, advanceHours, advancePay, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes")
+    .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, indHoursPay, ptoHours, sickHours, sickPay, specialHours, specialPay, advanceHours, advancePay, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes, regularOtDailyMinutes")
     .eq("weekStart", weekStart);
   if (error || !data) return {};
   return Object.fromEntries(data.map((r) => [String(r.email), {
@@ -365,5 +371,6 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
     hoOtPay: Number(r.hoOtPay ?? 0),
     localHolidayPay: Number(r.localHolidayPay ?? 0),
     evaluatedDailyMinutes: (r.evaluatedDailyMinutes ?? {}) as Record<string, number>,
+    regularOtDailyMinutes: (r.regularOtDailyMinutes ?? {}) as Record<string, number>,
   }]));
 }

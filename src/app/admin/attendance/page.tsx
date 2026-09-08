@@ -440,8 +440,15 @@ function holidayTimeFor(
   // the contractor's own-country (Local) Holiday is excluded the same way —
   // legitimately not worked for a reason unrelated to this US Holiday, so it
   // shouldn't count against them here either.
+  //
+  // Only days that have already happened are checked. Mid-week the remaining
+  // days have no logged time yet, so including them denied the credit to
+  // everyone until the week ended — a US Holiday on Monday showed nothing all
+  // week. The rule still applies in full once the week is complete.
+  const today = arizonaTodayIso();
   const otherWorkingDays = weekDates.filter(
     (d) => d !== date
+      && d <= today
       && !isRestDayDate(d, restDaysStr)
       && !isBeforeHireDate(d, hireDate)
       && !usaHolidays.some((h) => h.date.slice(0, 10) === d)
@@ -1254,7 +1261,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
       }, 0);
   const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
-    .filter((heading) => !(isIndia && (heading === "Decision" || heading === "Time Away Request" || heading === "Time Away Request Time")));
+    // Only Decision is hidden for Fixed-Ind: they have no per-day decision, and
+    // the evaluation rules depend on that. Time Away Request is shown — an
+    // approved leave day is as relevant to their week as anyone else's.
+    .filter((heading) => !(isIndia && heading === "Decision"));
   const totalTimeOffRequestMinutes = totalTimeOffRequestMinutesFor(weekDates, leaveRequests);
 
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time
@@ -1858,16 +1868,12 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`} style={{ minWidth: 150 }}>
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
-                        {!isIndia && (
-                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
-                            {timeOffRequestTypeFor(date, leaveRequests)}
-                          </td>
-                        )}
-                        {!isIndia && (
-                          <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
-                            {timeOffRequestMinutesFor(date, leaveRequests)}
-                          </td>
-                        )}
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
+                          {timeOffRequestTypeFor(date, leaveRequests)}
+                        </td>
+                        <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
+                          {timeOffRequestMinutesFor(date, leaveRequests)}
+                        </td>
                         <td className={`px-4 py-2 ${conflictCellClass}`}>
                           {completionTime}
                         </td>
@@ -1935,16 +1941,12 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className="px-4 py-2 text-slate-500 border-r border-slate-100 whitespace-nowrap" style={{ minWidth: 150 }}>
                       {totalLocalHolidayMinutes > 0 ? formatMinutesWithHours(totalLocalHolidayMinutes) : "-"}
                     </td>
-                    {!isIndia && (
-                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                        -
-                      </td>
-                    )}
-                    {!isIndia && (
-                      <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
-                        {totalTimeOffRequestMinutes > 0 ? formatMinutesWithHours(totalTimeOffRequestMinutes) : "-"}
-                      </td>
-                    )}
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
+                      -
+                    </td>
+                    <td className="px-4 py-2 text-slate-500 border-r border-slate-100">
+                      {totalTimeOffRequestMinutes > 0 ? formatMinutesWithHours(totalTimeOffRequestMinutes) : "-"}
+                    </td>
                     <td className="px-4 py-2 font-bold text-slate-900">
                       {formatMinutesWithHours(isIndia ? indiaPoolMinutes : completionTotalMinutes)}
                     </td>
@@ -1968,8 +1970,11 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
                         <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
                         {/* Regular Time, Evaluated Regular Time, Regular OT Time, RD OT Time,
-                            Evaluated Time, US HO Time, HO OT Time, Local HO, Local HO Time —
-                            9 placeholder cells, matching weeklyDayHeadings 1:1 for isIndia. */}
+                            Evaluated Time, US HO Time, HO OT Time, Local HO, Local HO Time,
+                            Time Away Request, Time Away Request Time — 11 placeholder
+                            cells, matching weeklyDayHeadings 1:1 for isIndia. */}
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
@@ -1991,7 +1996,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
                         <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
-                        {/* Same 9 placeholder cells as the Offset Credit row above. */}
+                        {/* Same 11 placeholder cells as the Offset Credit row above. */}
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
+                        <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
@@ -3186,6 +3193,17 @@ export default function AttendancePage() {
   // totals are still incomplete, so bulk-approving it would lock in partial data.
   const isSelectedWeekEnded = arizonaTodayIso() > rangeTo;
 
+  // Holidays falling inside the selected week, for visibility in the Weekly
+  // Time Tracking header. Matched on the Arizona-equivalent date, the same
+  // bucketing holidayTimeFor and the Worksnap day totals use, so what's listed
+  // here is exactly what the US HO Time column can credit.
+  const holidaysThisWeek = useMemo(() => {
+    const inWeek = (h: HolidayEntry) => weekDates.includes(arizonaDateOf(h));
+    const us = allHolidays.filter((h) => h.country === "United States" && inWeek(h));
+    const local = allHolidays.filter((h) => h.country !== "United States" && inWeek(h));
+    return { us, local };
+  }, [allHolidays, weekDates]);
+
   useEffect(() => {
     fetch("/api/holidays")
       .then((r) => r.json())
@@ -3648,92 +3666,125 @@ export default function AttendancePage() {
     setReloadKey((key) => key + 1);
   }
 
+  // Sizing is fluid rather than stepped: every clamp() maxes out at its intended
+  // desktop size (reached at roughly 1500px, the width this page is designed
+  // against) and shrinks from there, so a narrow screen gets a scaled-down copy
+  // of the same layout instead of a rearranged one. Keep new chrome on the same
+  // scale — filter/control height clamp(1.75rem,2.13vw,2rem), control text
+  // clamp(0.6875rem,0.87vw,0.8125rem), small text clamp(0.625rem,0.73vw,
+  // 0.6875rem), headings clamp(1rem,1.45vw,1.25rem).
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+    <div className="p-[clamp(0.75rem,2.2vw,2rem)] max-w-full overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-[clamp(0.5rem,1vw,0.75rem)] mb-[clamp(0.5rem,1.2vw,1rem)]">
+        <div className="flex min-w-0 items-center gap-[clamp(0.5rem,1vw,0.75rem)]">
+          <div className="grid size-[clamp(1.75rem,2.4vw,2.25rem)] shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
             <LuFingerprint size={18} strokeWidth={2} />
           </div>
           <div>
-            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Attendance Management</h2>
-            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
+            <h2 className={`text-[clamp(1rem,1.45vw,1.25rem)] font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Attendance Management</h2>
+            <p className={`text-[clamp(0.6875rem,0.95vw,0.875rem)] mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
               Weekly Time Tracking Review (Standard: 2,700 min/week)
-              <span className={dark ? "text-red-400/70" : "text-red-500/70"}> · Sync at: </span>
-              <span className={`font-semibold tabular-nums ${dark ? "text-red-400" : "text-red-600"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span>
+            </p>
+            <p className={`text-[clamp(0.6875rem,0.95vw,0.875rem)] mt-0.5 ${dark ? "text-red-400/70" : "text-red-500/70"}`}>
+              Sync at: <span className={`font-semibold tabular-nums ${dark ? "text-red-400" : "text-red-600"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span>
             </p>
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <div className="flex flex-wrap gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-col items-end gap-1.5">
+          <div className="flex w-full min-w-0 flex-nowrap justify-end gap-[clamp(0.375rem,0.8vw,0.75rem)] overflow-x-auto">
             <button
               onClick={() => setShowFixedTimeModal(true)}
-              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm"
+              className="flex items-center justify-center gap-[clamp(0.1875rem,0.4vw,0.3125rem)] min-w-fit max-w-[8rem] flex-1 basis-[8rem] px-[clamp(0.375rem,0.7vw,0.625rem)] py-[clamp(0.1875rem,0.42vw,0.3125rem)] bg-white border border-slate-300 text-slate-700 rounded-lg text-[0.6875rem] font-semibold whitespace-nowrap hover:bg-slate-50 transition-all shadow-sm"
             >
-              <LuTimer size={14} strokeWidth={2} />
-              Fixed Time
+              <LuTimer size={13} strokeWidth={2} className="shrink-0" />
+              <span>Fixed Time</span>
             </button>
             <button
               onClick={handleSync}
               disabled={syncing}
-              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-xs font-semibold transition-all shadow-md disabled:opacity-50"
+              className="flex items-center justify-center gap-[clamp(0.1875rem,0.4vw,0.3125rem)] min-w-fit max-w-[8rem] flex-1 basis-[8rem] px-[clamp(0.375rem,0.7vw,0.625rem)] py-[clamp(0.1875rem,0.42vw,0.3125rem)] bg-[#003527] hover:bg-[#064E3B] text-white rounded-lg text-[0.6875rem] font-semibold whitespace-nowrap transition-all shadow-md disabled:opacity-50"
             >
-              <LuRefreshCw size={14} strokeWidth={2} className={syncing ? "animate-spin" : ""} />
-              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync All Data"}</span>
-              <span className="sm:hidden">{syncing ? "…" : "Sync"}</span>
+              <LuRefreshCw size={13} strokeWidth={2} className={`shrink-0 ${syncing ? "animate-spin" : ""}`} />
+              <span>{syncing ? "Syncing…" : "Sync All Data"}</span>
             </button>
             <button
               onClick={() => setShowBulkApproveModal(true)}
               disabled={!isSelectedWeekEnded}
               title={!isSelectedWeekEnded ? "Bulk Approve is only available once the selected week has ended" : undefined}
-              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
+              className="flex items-center justify-center gap-[clamp(0.1875rem,0.4vw,0.3125rem)] min-w-fit max-w-[8rem] flex-1 basis-[8rem] px-[clamp(0.375rem,0.7vw,0.625rem)] py-[clamp(0.1875rem,0.42vw,0.3125rem)] bg-emerald-600 text-white rounded-lg text-[0.6875rem] font-semibold whitespace-nowrap hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
             >
-              <LuCircleCheck size={14} strokeWidth={2} />
-              <span className="hidden sm:inline">Bulk Approve</span>
-              <span className="sm:hidden">Approve</span>
+              <LuCircleCheck size={13} strokeWidth={2} className="shrink-0" />
+              <span>Bulk Approve</span>
             </button>
             <button
               onClick={() => setShowProcessModal(true)}
               disabled={!isSelectedWeekEnded}
               title={!isSelectedWeekEnded ? "Process Attendance is only available once the selected week has ended" : undefined}
-              className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+              className="flex items-center justify-center gap-[clamp(0.1875rem,0.4vw,0.3125rem)] min-w-fit max-w-[8rem] flex-1 basis-[8rem] px-[clamp(0.375rem,0.7vw,0.625rem)] py-[clamp(0.1875rem,0.42vw,0.3125rem)] bg-blue-600 text-white rounded-lg text-[0.6875rem] font-semibold whitespace-nowrap hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
             >
-              <LuListChecks size={14} strokeWidth={2} />
-              Process
+              <LuListChecks size={13} strokeWidth={2} className="shrink-0" />
+              <span>Process</span>
             </button>
             <button
               onClick={handleExport}
               disabled={filteredAttendanceRows.length === 0}
               title={filteredAttendanceRows.length === 0 ? "Nothing to export for the selected week and filters" : `Export the ${filteredAttendanceRows.length} row(s) currently shown to CSV`}
-              className={`flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 rounded-lg text-xs font-semibold border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${dark ? "bg-white/8 border-white/15 text-white/80 hover:bg-white/15 disabled:hover:bg-white/8" : "bg-white border-slate-200 text-[#003527] hover:bg-slate-50 disabled:hover:bg-white"}`}
+              className={`flex items-center justify-center gap-[clamp(0.1875rem,0.4vw,0.3125rem)] min-w-fit max-w-[8rem] flex-1 basis-[8rem] px-[clamp(0.375rem,0.7vw,0.625rem)] py-[clamp(0.1875rem,0.42vw,0.3125rem)] rounded-lg text-[0.6875rem] font-semibold whitespace-nowrap border transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${dark ? "bg-white/8 border-white/15 text-white/80 hover:bg-white/15 disabled:hover:bg-white/8" : "bg-white border-slate-200 text-[#003527] hover:bg-slate-50 disabled:hover:bg-white"}`}
             >
-              <LuFileText size={14} />Export
+              <LuFileText size={13} className="shrink-0" /><span>Export</span>
             </button>
           </div>
-          <p className={`text-xs ${dark ? "text-white/30" : "text-slate-400"}`}>Last updated: <span className={`font-semibold ${dark ? "text-white/50" : "text-slate-500"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
+          <p className={`text-[clamp(0.625rem,0.85vw,0.75rem)] ${dark ? "text-white/30" : "text-slate-400"}`}>Last updated: <span className={`font-semibold ${dark ? "text-white/50" : "text-slate-500"}`}>{syncing ? "syncing…" : formatArizona(lastSyncedAt)}</span></p>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 md:gap-4 mb-3 md:mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-[clamp(0.375rem,0.7vw,0.625rem)] mb-[clamp(0.5rem,0.9vw,0.75rem)]">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className={`p-2.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-2.5 ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${dark ? "bg-white/8 text-white/60" : `${iconBg} ${iconColor}`}`}><Icon size={14} strokeWidth={1.75} /></div>
-            <div><p className={`text-[10px] font-bold uppercase tracking-wider ${dark ? "text-white/40" : "text-slate-500"}`}>{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p></div>
+          <div key={label} className={`p-[clamp(0.375rem,0.55vw,0.5rem)] rounded-lg border shadow-sm hover:shadow-md transition-all flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)] ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
+            <div className={`flex size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md items-center justify-center shrink-0 ${dark ? "bg-white/8 text-white/60" : `${iconBg} ${iconColor}`}`}><Icon size={12} strokeWidth={1.75} /></div>
+            {/* Label and figure share one line, so the card is a single row
+                tall. The label absorbs any shortfall in width; the figure is
+                the point of the card and never truncates. */}
+            <p className={`min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide ${dark ? "text-white/40" : "text-slate-600"}`}>{label}</p>
+            <p className={`shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p>
           </div>
         ))}
       </div>
 
       <div className={`rounded-xl border overflow-hidden ${dark ? "bg-[#1c2320] border-white/10" : "bg-white border-slate-200"}`}>
         {/* Table header toolbar */}
-        <div className={`px-4 md:px-6 py-3 border-b flex flex-col gap-3 ${dark ? "bg-[#1c2320] border-white/10" : "bg-linear-to-b from-slate-50/80 to-white border-slate-100"}`}>
+        <div className={`px-[clamp(0.75rem,1.6vw,1.5rem)] py-[clamp(0.5rem,0.9vw,0.75rem)] border-b flex flex-col gap-[clamp(0.5rem,0.9vw,0.75rem)] ${dark ? "bg-[#1c2320] border-white/10" : "bg-linear-to-b from-slate-50/80 to-white border-slate-100"}`}>
           {/* Row 1: title + week selector */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Time Tracking</h3>
-              <p className={`mt-0.5 text-xs font-medium ${dark ? "text-white/40" : "text-slate-500"}`}>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-[clamp(0.5rem,0.9vw,0.75rem)]">
+            <div className="min-w-0">
+              <h3 className={`text-[clamp(1rem,1.45vw,1.25rem)] font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Time Tracking</h3>
+              <p className={`mt-0.5 text-[clamp(0.625rem,0.85vw,0.75rem)] font-medium ${dark ? "text-white/40" : "text-slate-500"}`}>
                 Summed from Worksnap entries · <span className={`font-semibold ${dark ? "text-white/60" : "text-slate-600"}`}>{formatRangeLabel(rangeFrom, rangeTo)}</span>
               </p>
+              {/* Named for visibility whether or not the credit lands: US HO Time
+                  is withheld on a rest day, before the hire date, or when an
+                  already-passed working day has no logged time, so a blank
+                  column shouldn't be the only signal that a holiday exists. */}
+              {(holidaysThisWeek.us.length > 0 || holidaysThisWeek.local.length > 0) && (
+                <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium">
+                  {holidaysThisWeek.us.map((h) => (
+                    <span key={`us-${h.date}-${h.name}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${dark ? "bg-blue-500/15 text-blue-300" : "bg-blue-50 text-blue-700"}`}>
+                      <LuCalendar size={11} strokeWidth={2} />
+                      US Holiday · {h.name} · {formatDayLabel(arizonaDateOf(h))}
+                    </span>
+                  ))}
+                  {holidaysThisWeek.local.map((h) => (
+                    <span key={`local-${h.country}-${h.date}-${h.name}`}
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-semibold ${dark ? "bg-violet-500/15 text-violet-300" : "bg-violet-50 text-violet-700"}`}
+                      title={`Local holiday — credited only to contractors in ${h.country}`}>
+                      <LuCalendar size={11} strokeWidth={2} />
+                      {h.country} · {h.name} · {formatDayLabel(arizonaDateOf(h))}
+                    </span>
+                  ))}
+                </p>
+              )}
               {isLoadingWorksnap && (
                 <p className={`mt-1 inline-flex items-center gap-1.5 text-xs font-medium ${dark ? "text-teal-400" : "text-teal-600"}`}>
                   <LuRefreshCw size={12} className="animate-spin" /> Loading Worksnap entries…
@@ -3754,18 +3805,18 @@ export default function AttendancePage() {
                 <p className="mt-1 text-xs font-medium text-slate-500">No Worksnap entries found.</p>
               )}
             </div>
-            <div className={`flex items-center gap-1.5 rounded-xl border p-1.5 shadow-sm w-full md:w-auto overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+            <div className={`flex items-center gap-1 rounded-xl border p-[clamp(0.25rem,0.5vw,0.375rem)] shadow-sm w-full sm:w-auto min-w-0 overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
               <div className="flex gap-1">
                 {weeks.slice(0, 4).map((w) => (
                   <button key={w} onClick={() => setWeek(w)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
+                    className={`px-[clamp(0.375rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.8vw,0.75rem)] font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
                 ))}
               </div>
               <div className={`h-6 w-px mx-0.5 shrink-0 ${dark ? "bg-white/15" : "bg-slate-200"}`} />
               <div className="relative shrink-0">
                 <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
-                  <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
+                  className={`flex items-center gap-[clamp(0.25rem,0.5vw,0.5rem)] px-[clamp(0.375rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
+                  <LuCalendar size={15} strokeWidth={2} className="shrink-0" /><span className="text-[clamp(0.625rem,0.8vw,0.75rem)] font-bold">Jump to Week</span>
                 </button>
                 {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
@@ -3774,7 +3825,7 @@ export default function AttendancePage() {
                 value={week}
                 onChange={(e) => setWeek(e.target.value)}
                 title="Select any week from the last few months, including previous months"
-                className={`h-8 shrink-0 rounded-lg border px-2 text-xs font-bold outline-none focus:ring-2 focus:ring-teal-500 ${dark ? "bg-white/5 border-white/10 text-white/70" : "bg-white border-slate-200 text-slate-600"}`}
+                className={`h-[clamp(1.75rem,2.1vw,2rem)] w-full sm:w-auto shrink-0 rounded-lg border px-2 text-[clamp(0.625rem,0.8vw,0.75rem)] font-bold outline-none focus:ring-2 focus:ring-teal-500 ${dark ? "bg-white/5 border-white/10 text-white/70" : "bg-white border-slate-200 text-slate-600"}`}
               >
                 {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
               </select>
@@ -3782,15 +3833,15 @@ export default function AttendancePage() {
           </div>
 
           {/* Row 2: search + filters (single wrapping row) */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-64">
-              <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="flex flex-wrap items-center gap-[clamp(0.375rem,0.8vw,0.5rem)]">
+            <div className="relative w-full sm:w-[clamp(8.5rem,13.9vw,13rem)]">
+              <LuSearch size={14} className="absolute left-[clamp(0.4375rem,0.7vw,0.5625rem)] top-1/2 -translate-y-1/2 shrink-0 text-slate-400" />
               <input
                 type="text"
                 value={nameSearch}
                 onChange={(event) => setNameSearch(event.target.value)}
                 placeholder="Search by name or email…"
-                className={`h-10 w-full rounded-lg border pl-9 pr-8 text-sm outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
+                className={`h-[clamp(1.75rem,2.13vw,2rem)] w-full rounded-lg border pl-[clamp(1.5rem,1.9vw,1.75rem)] pr-[clamp(1.375rem,1.8vw,1.625rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
               />
               {nameSearch && (
                 <button
@@ -3803,23 +3854,23 @@ export default function AttendancePage() {
               )}
             </div>
 
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-48" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
               <option value="All">All Pay Categories</option>
               {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={countryFilter} onChange={setCountryFilter} label="Filter by country">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={countryFilter} onChange={setCountryFilter} label="Filter by country">
               <option value="All">All Countries</option>
               {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
               <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={statusFilter} onChange={setStatusFilter} label="Filter by status">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={statusFilter} onChange={setStatusFilter} label="Filter by status">
               <option value="All">All Statuses</option>
               <option value="For Review">For Review</option>
               <option value="Need Attention">Need Attention</option>
@@ -3832,12 +3883,12 @@ export default function AttendancePage() {
               {filtersActive && (
                 <button
                   onClick={clearFilters}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  className="inline-flex items-center gap-1.5 h-[clamp(1.75rem,2.13vw,2rem)] px-[clamp(0.375rem,0.7vw,0.625rem)] rounded-lg text-[clamp(0.625rem,0.73vw,0.6875rem)] font-semibold whitespace-nowrap text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <LuX size={14} strokeWidth={2.5} /> Clear
                 </button>
               )}
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
+              <span className={`inline-flex items-center gap-1 rounded-full px-[clamp(0.4375rem,0.7vw,0.625rem)] py-0.5 text-[clamp(0.625rem,0.73vw,0.6875rem)] font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
                 <span className={`font-bold ${dark ? "text-white" : "text-[#003527]"}`}>{filteredAttendanceRows.length}</span> shown
               </span>
             </div>
@@ -3845,7 +3896,9 @@ export default function AttendancePage() {
         </div>
 
         {/* Table */}
-        <div className="overflow-auto" style={{ maxHeight: "60vh" }}>
+        {/* Taller on a small screen, where the compacted header leaves room and
+            the table is the reason for the page. */}
+        <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]">
           <table className="w-full text-left" style={{ minWidth: "720px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30" style={{ background: "#003527" }}>
               <tr>

@@ -9,7 +9,7 @@ import {
   type ContractorVoucher, type ContractorVoucherProfile,
 } from "./actions";
 import { DAY_LABELS, REST_DAY_TO_LABEL, fmtVoucherDate } from "@/lib/payrollVoucher";
-import { datesBetween } from "@/lib/weekUtils";
+import { datesBetween, weekLabel } from "@/lib/weekUtils";
 import { PageHeader } from "../_components/portal";
 import { Logo } from "@/components/Logo";
 import {
@@ -44,8 +44,32 @@ function voucherTotals(v: ContractorVoucher) {
     regPay: v.regPay, regOtPay: v.regOtPay, rdOtPay: v.rdOtPay,
     usHolidayPay: v.usHolidayPay, hoOtPay: v.hoOtPay, localHolidayPay: v.localHolidayPay,
     ptoPay: v.ptoPay,
+    // Part of v.gross, so they have to appear in the earnings lines or the
+    // voucher shows a Gross its own lines don't reach.
+    sickPay: v.sickPay, specialPay: v.specialPay, advancePay: v.advancePay,
+    timeOffPay: v.ptoPay + v.sickPay + v.specialPay + v.advancePay,
     grossPay: v.gross, totalDeductions: v.deductions, netPay: v.net,
   };
+}
+
+/**
+ * Rates are shown unrounded, unlike money totals. A rate is multiplied by every
+ * hour worked, so presenting it rounded hides the precision the figures were
+ * actually calculated from — see calcWeekly/calcHourly in AddContractorModal.
+ * 20 is the most Intl allows and exceeds what a double carries, so every
+ * available digit is shown.
+ */
+function fmtRate(n: number) {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 20 });
+}
+
+/**
+ * Weekly Contract Rate, shown to 2 decimals. Display only — v.weeklyRate is
+ * still the unrounded monthlyRate x 12 / 52, and every pay figure on the
+ * voucher continues to derive from the unrounded hourly rate, not from this.
+ */
+function fmtRate2(n: number) {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export default function ContractorPayVouchersPage() {
@@ -123,7 +147,7 @@ export default function ContractorPayVouchersPage() {
           <p className="text-xs text-slate-400 mt-1">Vouchers appear here once a pay cycle has been reviewed and finalised.</p>
         </div>
       ) : (
-        <Voucher profile={profile} v={main} onDownload={handleDownload} />
+        <Voucher profile={profile} v={main} vouchers={vouchers} onSelect={setSelected} onDownload={handleDownload} />
       )}
 
       {vouchers.length > 0 && (
@@ -151,7 +175,13 @@ export default function ContractorPayVouchersPage() {
 }
 
 // ── The main voucher (mirrors the reference design) ─────────────────────────
-function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile; v: ContractorVoucher; onDownload: (weekStart: string) => void }) {
+function Voucher({ profile, v, vouchers, onSelect, onDownload }: {
+  profile: ContractorVoucherProfile;
+  v: ContractorVoucher;
+  vouchers: ContractorVoucher[];
+  onSelect: (weekStart: string) => void;
+  onDownload: (weekStart: string) => void;
+}) {
   const t = voucherTotals(v);
   const restDayLabels = new Set(
     profile.restDay.split(",").map((d) => REST_DAY_TO_LABEL[d.trim()]).filter(Boolean)
@@ -165,6 +195,45 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
 
   return (
     <div className="space-y-8">
+      {/* Week range selection. Offers only cycles that actually have a
+          voucher — unlike the admin picker, which can browse any week — so a
+          choice can never land on an empty statement. Hidden when there is
+          just the one cycle to show. */}
+      {vouchers.length > 1 && (
+        <div className="flex items-center gap-3">
+          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.18em] whitespace-nowrap">Pay Cycle</p>
+          <div className="ml-auto flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm overflow-x-auto">
+            <div className="flex gap-0.5">
+              {vouchers.slice(0, 4).map((w) => (
+                <button
+                  key={w.weekStart}
+                  onClick={() => onSelect(w.weekStart)}
+                  className={`px-2 py-1 text-[10px] font-bold rounded-md whitespace-nowrap transition-all ${
+                    v.weekStart === w.weekStart
+                      ? "bg-[#003527] text-white shadow-sm"
+                      : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"
+                  }`}
+                >
+                  {weekLabel(w.weekStart)}
+                </button>
+              ))}
+            </div>
+            <div className="h-4 w-px mx-0.5 shrink-0 bg-slate-200" />
+            <select
+              value={v.weekStart}
+              onChange={(e) => onSelect(e.target.value)}
+              aria-label="Select pay cycle"
+              title="Every pay cycle you have a voucher for"
+              className="h-6 shrink-0 rounded-md border border-slate-200 bg-white px-1.5 text-[10px] font-bold text-slate-600 outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              {vouchers.map((w) => (
+                <option key={w.weekStart} value={w.weekStart}>{fmtRange(w.rangeFrom, w.rangeTo)}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Employee summary + rates */}
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
         <div className="space-y-1">
@@ -186,11 +255,11 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
         <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex justify-between md:justify-end md:gap-12">
           <div>
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Monthly Contract Rate</p>
-            <p className="text-2xl font-bold text-[#003527] mt-1 tabular-nums">{money(v.monthlyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
+            <p className="text-2xl font-bold text-[#003527] mt-1 tabular-nums">{fmtRate(v.monthlyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
           </div>
           <div className="text-right">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weekly Contract Rate</p>
-            <p className="text-2xl font-bold text-slate-700 mt-1 tabular-nums">{money(v.weeklyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
+            <p className="text-2xl font-bold text-slate-700 mt-1 tabular-nums">{fmtRate2(v.weeklyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
           </div>
         </div>
       </section>
@@ -211,10 +280,19 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
                   const label = DAY_LABELS[i];
                   const isOff = restDayLabels.has(label);
                   const hours = (v.evaluatedDailyMinutes[date] ?? 0) / 60;
+                  const otHours = (v.regularOtDailyMinutes[date] ?? 0) / 60;
+                  const otInPlaceOfZero = !isOff && hours === 0 && otHours > 0;
                   return (
                     <div key={date} className={`p-2 text-center border-b border-r border-slate-100 last:border-r-0 ${isOff ? "bg-slate-50" : "bg-white"}`}>
                       <p className="text-[10px] font-bold text-slate-400">{label}</p>
-                      <p className={`text-xs font-bold tabular-nums mt-0.5 ${isOff ? "text-slate-400" : "text-emerald-900"}`}>{isOff ? "OFF" : hours.toFixed(2)}</p>
+                      <p className={`text-xs font-bold tabular-nums mt-0.5 ${isOff ? "text-slate-400" : otInPlaceOfZero ? "text-amber-600" : "text-emerald-900"}`}
+                        title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours` : undefined}>
+                        {isOff ? "OFF" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                      </p>
+                      {!otInPlaceOfZero && otHours > 0 && (
+                        <p className="text-[9px] font-semibold leading-tight text-amber-600 tabular-nums"
+                          title={`Regular OT earned this day — counted in REG OT HRS, not REG Hours`}>+{otHours.toFixed(2)}</p>
+                      )}
                     </div>
                   );
                 })}
@@ -224,8 +302,7 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
               {[
                 ["REG Hours", t.regHours, true],
                 ["PTO HRS", v.ptoHours, false],
-                ["US HO HRS", t.usHolidayHours, false],
-                ["LOCAL HO HRS", t.localHolidayHours, false],
+                ["HO HRS", t.usHolidayHours + t.localHolidayHours, false],
                 ["REG OT / RD OT / HO OT", otHours, false],
               ].map(([label, value, strong]) => (
                 <div key={label as string} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
@@ -248,7 +325,7 @@ function Voucher({ profile, v, onDownload }: { profile: ContractorVoucherProfile
                 {[
                   ["Overtime (REG/RD/HO)", overtimePay],
                   ["Holiday Pay (US/Local)", holidayPay],
-                  ["Paid Time Off (PTO)", t.ptoPay],
+                  ["Time Off Pay", t.timeOffPay],
                   ["Bonus & Miscellaneous", bonus + misc],
                   ["Retroactive Pay & REIM", retroPay + reim],
                 ].map(([label, value]) => (
@@ -409,8 +486,11 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
   // gross/deductions/net included, rather than re-summed from the components.
   const {
     ptoHours, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
-    ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
+    ptoPay, sickPay, specialPay, advancePay,
+    regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
   } = v;
+  // Every paid-leave kind on the frozen row, on one line.
+  const timeOffPay = ptoPay + sickPay + specialPay + advancePay;
   const { bonus, misc, retroPay, reim, cashAdvance, hmo } = v.adjustment;
   const grossPay = v.gross;
   const totalDeductions = v.deductions;
@@ -439,9 +519,9 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
       {/* Contractor info */}
       <div className="grid grid-cols-2 gap-x-8 gap-y-1.5 text-xs mb-5">
         <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{profile.name}</span></p>
-        <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{money(v.monthlyRate)}</span></p>
+        <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(v.monthlyRate)}</span></p>
         <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{profile.role}</span></p>
-        <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{money(v.weeklyRate)}</span></p>
+        <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate2(v.weeklyRate)}</span></p>
       </div>
 
       {/* Gross Pay */}
@@ -459,9 +539,20 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
                 const label = DAY_LABELS[i];
                 const isOff = restDayLabels.has(label);
                 const hours = (v.evaluatedDailyMinutes[date] ?? 0) / 60;
+                const otHours = (v.regularOtDailyMinutes[date] ?? 0) / 60;
+                const otInPlaceOfZero = !isOff && hours === 0 && otHours > 0;
                 return (
                   <td key={date} className="border border-slate-200 px-1 py-1.5 text-center tabular-nums">
-                    {isOff ? "OFF" : hours.toFixed(2)}
+                    <div className={otInPlaceOfZero ? "font-semibold text-amber-600" : undefined}
+                      title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours` : undefined}>
+                      {isOff ? "OFF" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                    </div>
+                    {!otInPlaceOfZero && otHours > 0 && (
+                      <div className="text-[9px] font-semibold leading-tight text-amber-600"
+                        title={`Regular OT earned this day — counted in REG OT HRS, not REG Hours`}>
+                        +{otHours.toFixed(2)}
+                      </div>
+                    )}
                   </td>
                 );
               })}</tr>
@@ -471,8 +562,8 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
             {[
               ["REG Hours", regHours],
               ["PTO HRS", ptoHours],
-              ["US HO HRS", usHolidayHours],
-              ["LOCAL HO HRS", localHolidayHours],
+              // Same combined line as the admin voucher.
+              ["HO HRS", usHolidayHours + localHolidayHours],
             ].map(([label, value]) => (
               <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-1">
                 <span className="text-slate-500">{label}</span>
@@ -497,10 +588,12 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
             ["REG HRS Pay", regPay],
             ["REG OT", regOtPay],
             ["RD OT", rdOtPay],
-            ["US HOLIDAY PAY", usHolidayPay],
+            // Same combined line as the admin voucher — it's the same document,
+            // so it must read identically whoever opens it.
+            ["Holiday Pay", usHolidayPay + localHolidayPay],
             ["HO OT", hoOtPay],
-            ["LOCAL HOLIDAY PAY", localHolidayPay],
-            ["PTO", ptoPay],
+            // Same combined line as the admin voucher.
+            ["Time Off Pay", timeOffPay],
             ["Bonus", bonus],
             ["MISC", misc],
             ["Retro Pay", retroPay],

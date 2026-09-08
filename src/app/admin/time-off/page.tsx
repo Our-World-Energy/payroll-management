@@ -806,7 +806,7 @@ export default function TimeOffPage() {
   }
 
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
+    <div className="p-[clamp(0.75rem,2.2vw,2rem)] max-w-full overflow-x-hidden">
 
       {/* ── Detail Modal ── */}
       {selectedRow && (() => {
@@ -1771,37 +1771,37 @@ export default function TimeOffPage() {
       )}
 
       {/* ── Page header ── */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between mb-3 gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-[clamp(0.5rem,1.2vw,1rem)] gap-[clamp(0.5rem,1vw,0.75rem)]">
         <div>
           <nav className="flex mb-1">
-            <ol className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+            <ol className="flex items-center gap-1.5 text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 font-medium">
               <li>Management</li>
               <li><LuChevronRight size={14} className="text-slate-400" /></li>
               <li className="text-teal-600">Time Away Management</li>
             </ol>
           </nav>
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+          <div className="flex items-center gap-[clamp(0.5rem,1vw,0.75rem)]">
+            <div className="grid size-[clamp(1.75rem,2.4vw,2.25rem)] shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
               <LuCalendarDays size={18} strokeWidth={2} />
             </div>
             <div>
-              <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">Time Away Management</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
+              <h2 className="text-[clamp(1rem,1.45vw,1.25rem)] font-bold text-[#003527] tracking-tight">Time Away Management</h2>
+              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-[clamp(0.375rem,0.8vw,0.75rem)] shrink-0">
           <button
             onClick={() => setShowProcessTimeOffModal(true)}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <LuLoader size={13} strokeWidth={2} className="animate-spin" /> : <LuListChecks size={13} strokeWidth={2} />}
             Process Time Away
           </button>
           <button
             onClick={() => setShowUsedImportModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors"
+            className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors"
           >
             <LuUpload size={13} strokeWidth={2} /> PTO / SICK Used Import
           </button>
@@ -1826,48 +1826,42 @@ export default function TimeOffPage() {
       )}
 
       {/* ── Stat cards ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4 mb-3">
-        <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-2.5 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-wider">Pending</p>
-            <p className="text-xl font-black text-amber-600 leading-tight">{pendingCount}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-[clamp(0.375rem,0.7vw,0.625rem)] mb-[clamp(0.5rem,0.9vw,0.75rem)]">
+        <div className="bg-amber-50 rounded-lg border border-amber-200 shadow-sm p-[clamp(0.375rem,0.55vw,0.5rem)] flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)]">
+          <div className="size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md bg-amber-100 flex items-center justify-center shrink-0">
+            <LuClock size={12} className="text-amber-600" />
           </div>
-          <div className="size-7 rounded-lg bg-amber-100 flex items-center justify-center shrink-0">
-            <LuClock size={14} className="text-amber-600" />
-          </div>
+          <p className="min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide text-amber-600">Pending</p>
+          <p className="shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums text-amber-600">{pendingCount}</p>
         </div>
-        <div className="bg-emerald-50 rounded-xl border border-emerald-200 shadow-sm p-2.5 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-semibold text-emerald-700 uppercase tracking-wider">Approved</p>
-            <p className="text-xl font-black text-emerald-700 leading-tight">{approvedCount}</p>
+        <div className="bg-emerald-50 rounded-lg border border-emerald-200 shadow-sm p-[clamp(0.375rem,0.55vw,0.5rem)] flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)]">
+          <div className="size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md bg-emerald-100 flex items-center justify-center shrink-0">
+            <LuCircleCheck size={12} className="text-emerald-600" />
           </div>
-          <div className="size-7 rounded-lg bg-emerald-100 flex items-center justify-center shrink-0">
-            <LuCircleCheck size={14} className="text-emerald-600" />
-          </div>
+          <p className="min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide text-emerald-700">Approved</p>
+          <p className="shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums text-emerald-700">{approvedCount}</p>
         </div>
-        <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-2.5 flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-semibold text-red-600 uppercase tracking-wider">Declined</p>
-            <p className="text-xl font-black text-red-600 leading-tight">{rejectedCount}</p>
+        <div className="bg-red-50 rounded-lg border border-red-200 shadow-sm p-[clamp(0.375rem,0.55vw,0.5rem)] flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)]">
+          <div className="size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md bg-red-100 flex items-center justify-center shrink-0">
+            <LuCircleX size={12} className="text-red-500" />
           </div>
-          <div className="size-7 rounded-lg bg-red-100 flex items-center justify-center shrink-0">
-            <LuCircleX size={14} className="text-red-500" />
-          </div>
+          <p className="min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide text-red-600">Declined</p>
+          <p className="shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums text-red-600">{rejectedCount}</p>
         </div>
       </div>
 
       {/* ── Filters ── */}
-      <div className="mb-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center">
-        <span className="text-sm font-semibold text-slate-500 mr-1">Quick Filters:</span>
-        <div className="relative w-full sm:w-64">
-          <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+      <div className="mb-[clamp(0.5rem,0.9vw,0.75rem)] bg-white p-[clamp(0.5rem,0.9vw,0.75rem)] rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-[clamp(0.375rem,0.8vw,0.5rem)] items-center">
+        <span className="text-[clamp(0.6875rem,0.87vw,0.8125rem)] font-semibold text-slate-500 whitespace-nowrap mr-1">Quick Filters:</span>
+        <div className="relative w-full sm:w-[clamp(8.5rem,13.9vw,13rem)]">
+          <LuSearch size={14} className="absolute left-[clamp(0.4375rem,0.7vw,0.5625rem)] top-1/2 -translate-y-1/2 shrink-0 text-slate-400" />
           <input
             type="text"
             value={nameSearch}
             onChange={(e) => setNameSearch(e.target.value)}
             placeholder="Search by name…"
             disabled={loading}
-            className="h-9 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-8 text-sm text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 disabled:opacity-60"
+            className="h-[clamp(1.75rem,2.13vw,2rem)] w-full rounded-lg border border-slate-200 bg-slate-50 pl-[clamp(1.5rem,1.9vw,1.75rem)] pr-[clamp(1.375rem,1.8vw,1.625rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] text-slate-700 outline-none transition-all hover:border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 disabled:opacity-60"
           />
           {nameSearch && (
             <button
@@ -1880,22 +1874,22 @@ export default function TimeOffPage() {
           )}
         </div>
         <select value={payCategoryFilter} onChange={(e) => setPayCategoryFilter(e.target.value)} disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(5.5rem,10.6vw,10rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Categories</option>
           {PAY_CATEGORIES.map((c) => <option key={c}>{c}</option>)}
         </select>
         <select value={countryFilter} onChange={(e) => setCountryFilter(e.target.value)} disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(5.5rem,10.6vw,10rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Countries</option>
           {countryOptions.map((c) => <option key={c}>{c}</option>)}
         </select>
         <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(5.5rem,10.6vw,10rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option>All Assigned Teams</option>
           {departmentOptions.map((d) => <option key={d}>{d}</option>)}
         </select>
         <select value={reviewStatusFilter} onChange={(e) => setReviewStatusFilter(e.target.value)} disabled={loading}
-          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(5.5rem,10.6vw,10rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
           <option value="All Statuses">All Statuses</option>
           <option value="Pending">Pending</option>
           <option value="Approved">Approved</option>
@@ -1903,17 +1897,17 @@ export default function TimeOffPage() {
         </select>
         {filtersActive && (
           <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); }}
-            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
-            <LuX size={16} strokeWidth={2} />
+            className="grid size-[clamp(1.75rem,2.13vw,2rem)] shrink-0 place-items-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
+            <LuX size={14} strokeWidth={2} />
           </button>
         )}
-        <div className="ml-auto flex items-center gap-3">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <LuShieldCheck size={14} className="text-teal-500" />
+        <div className="ml-auto flex items-center gap-[clamp(0.375rem,0.8vw,0.75rem)]">
+          <div className="flex items-center gap-1.5 text-[clamp(0.625rem,0.73vw,0.6875rem)] whitespace-nowrap text-slate-400">
+            <LuShieldCheck size={13} className="shrink-0 text-teal-500" />
             <span>{filteredRows.length} contractors shown</span>
           </div>
           <button onClick={exportCSV} disabled={loading || filteredRows.length === 0}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#003527] border border-[#003527]/30 bg-white hover:bg-[#003527] hover:text-white rounded-lg transition-colors disabled:opacity-40">
+            className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-[#003527] border border-[#003527]/30 bg-white hover:bg-[#003527] hover:text-white rounded-lg transition-colors disabled:opacity-40">
             <LuDownload size={13} strokeWidth={2} /> Export CSV
           </button>
         </div>
@@ -1921,7 +1915,7 @@ export default function TimeOffPage() {
 
       {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-auto" style={{ scrollbarWidth: "thin", maxHeight: "60vh" }}>
+        <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]" style={{ scrollbarWidth: "thin" }}>
           <table className="w-full text-left" style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>

@@ -188,7 +188,7 @@ export default function ContractorProfilePage() {
               </div>
               <div className="flex justify-between items-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Weekly Contract Rate</p>
-                <p className="text-base font-semibold text-slate-800 tabular-nums">{fmtMoney(weeklyNum)}</p>
+                <p className="text-base font-semibold text-slate-800 tabular-nums">{fmtMoney2(weeklyNum)}</p>
               </div>
               <div className="flex justify-between items-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Hourly Rate</p>

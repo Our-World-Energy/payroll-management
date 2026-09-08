@@ -12,7 +12,7 @@ import {
   processWeeklyPayroll, fetchProcessedWeeklyPayroll, type ProcessedPayrollRow, type ProcessedSnapshot,
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
-import { payComponentsFor, leaveHoursFor } from "@/lib/payrollVoucher";
+import { payComponentsFor, leaveHoursFor, weeklyRateFrom, hourlyRateFrom } from "@/lib/payrollVoucher";
 import { fetchFixedTimeForWeek } from "../attendance/actions";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -72,6 +72,13 @@ type PayrollRow = {
   // Saved per-day Evaluated Time (not raw Worksnap minutes) — feeds the
   // voucher's Sun→Sat grid only; all other voucher figures are unaffected.
   evaluatedDailyMinutes: Record<string, number>;
+  // Saved per-day Regular OT Time, for the voucher Day View grid only. The
+  // paid OT total stays totalRegularOtMinutes/regOtHours — this attributes
+  // that same OT to the day it was earned and feeds no calculation.
+  regularOtDailyMinutes: Record<string, number>;
+  // Saved per-day US HO Time, for the voucher Day View grid only. Not part of
+  // the snapshot (no column) — the paid total stays totalUsHoMinutes.
+  usHolidayDailyMinutes: Record<string, number>;
   bonus: number;
   misc: number;
   retroPay: number;
@@ -165,6 +172,17 @@ function fixedIndTotalHours(hours: number, percentage: number) {
 
 function fixedIndHoursPay(hours: number, percentage: number, hourlyRate: number) {
   return fixedIndTotalHours(hours, percentage) * hourlyRate;
+}
+
+/**
+ * Rates are shown unrounded, unlike money totals. A rate is multiplied by every
+ * hour worked, so presenting it rounded hides the precision the figures were
+ * actually calculated from — see calcWeekly/calcHourly in AddContractorModal.
+ * 20 is the most Intl allows and exceeds what a double carries, so every
+ * available digit is shown.
+ */
+function fmtRate(n: number) {
+  return n.toLocaleString(undefined, { maximumFractionDigits: 20 });
 }
 
 function fmtMoney(n: number, currency: string) {
@@ -274,13 +292,21 @@ export default function PayrollPage() {
         // All other payroll figures still come from the week-level totals
         // below (totalEvaluatedRegularMinutes, etc.), unaffected by this.
         const evaluatedDailyMinutesByEmail = new Map<string, Record<string, number>>();
-        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; evaluatedMinutes?: number }>) {
+        const regularOtDailyMinutesByEmail = new Map<string, Record<string, number>>();
+        const usHolidayDailyMinutesByEmail = new Map<string, Record<string, number>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; evaluatedMinutes?: number; regularOtMinutes?: number; holidayMinutes?: number }>) {
           const email = String(d.email ?? "").trim().toLowerCase();
           const date = String(d.date ?? "").slice(0, 10);
           if (!email || !date) continue;
           const days = evaluatedDailyMinutesByEmail.get(email) ?? {};
           days[date] = (days[date] ?? 0) + (d.evaluatedMinutes ?? 0);
           evaluatedDailyMinutesByEmail.set(email, days);
+          const otDays = regularOtDailyMinutesByEmail.get(email) ?? {};
+          otDays[date] = (otDays[date] ?? 0) + (d.regularOtMinutes ?? 0);
+          regularOtDailyMinutesByEmail.set(email, otDays);
+          const hoDays = usHolidayDailyMinutesByEmail.get(email) ?? {};
+          hoDays[date] = (hoDays[date] ?? 0) + (d.holidayMinutes ?? 0);
+          usHolidayDailyMinutesByEmail.set(email, hoDays);
         }
 
         type SavedWeekStatus = {
@@ -314,7 +340,14 @@ export default function PayrollPage() {
             const actualMinutes = minutesByEmail.get(email) ?? 0;
             const saved = weekStatusByEmail.get(email);
             const isReviewed = saved?.requestStatus === "APPROVED" && saved.completionMinutes != null;
-            const hourlyRate = parseFloat(c.hourlyRate) || 0;
+            // Derived from the monthly rate rather than read from the stored
+            // hourlyRate, which older saves wrote rounded to 2dp — so payroll
+            // pays from the same unrounded figure Contractor Details shows.
+            // Falls back to the stored value when there's no usable monthly rate.
+            const monthlyRateNum = parseFloat(c.monthlyRate) || 0;
+            const hourlyRate = monthlyRateNum > 0
+              ? hourlyRateFrom(monthlyRateNum)
+              : (parseFloat(c.hourlyRate) || 0);
             // Fixed-Mex: the admin-entered Regular Time from the "Fixed Time"
             // button on Attendance Management (fixed_time table) is this
             // contractor's Completion Time for the week, taking priority over
@@ -443,8 +476,9 @@ export default function PayrollPage() {
               shiftType: c.shiftType || "-",
               currency: c.currency || "USD",
               hourlyRate,
-              monthlyRate: parseFloat(c.monthlyRate) || 0,
-              weeklyRate: parseFloat(c.weeklyRate) || 0,
+              monthlyRate: monthlyRateNum,
+              // Same reasoning as hourlyRate above.
+              weeklyRate: monthlyRateNum > 0 ? weeklyRateFrom(monthlyRateNum) : (parseFloat(c.weeklyRate) || 0),
               actualMinutes,
               completionMinutes,
               hours,
@@ -461,6 +495,8 @@ export default function PayrollPage() {
                 : isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
               hasChangedSinceProcessed,
               evaluatedDailyMinutes: evaluatedDailyMinutesByEmail.get(email) ?? {},
+              regularOtDailyMinutes: regularOtDailyMinutesByEmail.get(email) ?? {},
+              usHolidayDailyMinutes: usHolidayDailyMinutesByEmail.get(email) ?? {},
               bonus,
               misc,
               retroPay,
@@ -524,7 +560,7 @@ export default function PayrollPage() {
         r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "",
         r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
         r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
-        `${r.currency} ${r.hourlyRate.toFixed(2)}`, r.hourlyRate.toFixed(2),
+        `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
         r.earnings != null ? fmtMoney(r.earnings, r.currency) : "",
         r.ptoPay ? fmtMoney(r.ptoPay, r.currency) : "",
         r.sickPay ? fmtMoney(r.sickPay, r.currency) : "",
@@ -636,68 +672,74 @@ export default function PayrollPage() {
     setReloadKey((key) => key + 1);
   }
 
+  // Same fluid scale as Attendance Management: every clamp() maxes out at its
+  // intended desktop size (reached around 1500px) and shrinks from there, so a
+  // narrow screen gets a scaled-down copy of this layout rather than a
+  // rearranged one. Control height clamp(1.75rem,2.13vw,2rem), control text
+  // clamp(0.6875rem,0.87vw,0.8125rem), headings clamp(1rem,1.45vw,1.25rem).
   return (
-    <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
-      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-3 mb-3 md:mb-4">
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:grid size-9 shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
+    <div className="p-[clamp(0.75rem,2.2vw,2rem)] max-w-full overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-end gap-[clamp(0.5rem,1vw,0.75rem)] mb-[clamp(0.5rem,1.2vw,1rem)]">
+        <div className="flex items-center gap-[clamp(0.5rem,1vw,0.75rem)]">
+          <div className="grid size-[clamp(1.75rem,2.4vw,2.25rem)] shrink-0 place-items-center rounded-xl bg-[#003527] text-white shadow-sm">
             <LuBanknote size={18} strokeWidth={2} />
           </div>
           <div>
-            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Payroll</h2>
-            <p className={`text-xs md:text-sm mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
+            <h2 className={`text-[clamp(1rem,1.45vw,1.25rem)] font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Payroll</h2>
+            <p className={`text-[clamp(0.6875rem,0.95vw,0.875rem)] mt-0.5 ${dark ? "text-white/60" : "text-slate-600"}`}>
               Pay cycle: <span className={`font-semibold ${dark ? "text-white/80" : "text-slate-600"}`}>{week ? weekLabel(week) : "—"}</span> · based on reviewed Attendance data
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center justify-end gap-[clamp(0.375rem,0.8vw,0.75rem)] self-start sm:self-auto">
           <button
             onClick={() => setShowProcessModal(true)}
             disabled={!isSelectedWeekEnded}
             title={!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined}
-            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            className="flex items-center justify-center gap-[clamp(0.25rem,0.5vw,0.375rem)] w-[clamp(5.25rem,9.5vw,9rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] bg-blue-600 hover:bg-blue-700 text-white text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             <LuListChecks size={14} strokeWidth={2} />
-            <span className="hidden sm:inline">Process Payroll</span>
-            <span className="sm:hidden">Process</span>
+            Process Payroll
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center justify-center gap-1.5 w-28 sm:w-52 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            className="flex items-center justify-center gap-[clamp(0.25rem,0.5vw,0.375rem)] w-[clamp(10.5rem,13.9vw,13rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap transition-colors"
           >
             <LuUpload size={14} strokeWidth={2} />
-            <span className="hidden sm:inline">Import Earning/Deduction</span>
-            <span className="sm:hidden">Import</span>
+            Import Earning/Deduction
           </button>
           <button
             onClick={handleExportCSV}
             disabled={filteredRows.length === 0}
-            className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center justify-center gap-[clamp(0.25rem,0.5vw,0.375rem)] w-[clamp(5.25rem,9.5vw,9rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] bg-white border border-slate-200 text-[#003527] rounded-lg text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <LuDownload size={14} strokeWidth={2} />
-            <span className="hidden sm:inline">Export CSV</span>
-            <span className="sm:hidden">Export</span>
+            Export CSV
           </button>
         </div>
       </div>
 
       {/* Scorecards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-[clamp(0.375rem,0.7vw,0.625rem)] mb-[clamp(0.5rem,0.9vw,0.75rem)]">
         {STATS.map(({ label, value, color, iconBg, iconColor, Icon }) => (
-          <div key={label} className={`p-2.5 rounded-xl border shadow-sm hover:shadow-md transition-all flex items-center gap-2.5 ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
-            <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${dark ? "bg-white/8" : iconBg} ${dark ? "text-white/60" : iconColor}`}><Icon size={14} strokeWidth={1.75} /></div>
-            <div><p className={`text-[10px] font-bold uppercase tracking-wider ${dark ? "text-white/40" : "text-slate-500"}`}>{label}</p><p className={`text-xl font-bold leading-tight tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p></div>
+          <div key={label} className={`p-[clamp(0.375rem,0.55vw,0.5rem)] rounded-lg border shadow-sm hover:shadow-md transition-all flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)] ${dark ? "bg-[#1c2320] border-white/10 hover:border-white/20" : "bg-white border-slate-200 hover:border-slate-300"}`}>
+            <div className={`size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md flex items-center justify-center shrink-0 ${dark ? "bg-white/8" : iconBg} ${dark ? "text-white/60" : iconColor}`}><Icon size={12} strokeWidth={1.75} /></div>
+            {/* Label and figure share one line, so the card is a single row
+                tall. The label absorbs any shortfall in width; the figure is
+                the point of the card and never truncates. */}
+            <p className={`min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide ${dark ? "text-white/40" : "text-slate-600"}`}>{label}</p>
+            <p className={`shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums ${dark ? "text-white/90" : color}`}>{value}</p>
           </div>
         ))}
       </div>
 
       <div className={`rounded-xl border shadow-sm overflow-hidden ${dark ? "bg-[#1c2320] border-white/10" : "bg-white border-slate-200"}`}>
         {/* Toolbar */}
-        <div className={`px-4 md:px-6 py-3 border-b border-slate-100 flex flex-col gap-3 ${dark ? "bg-[#1c2320]" : "bg-linear-to-b from-slate-50/80 to-white"}`}>
+        <div className={`px-[clamp(0.75rem,1.6vw,1.5rem)] py-[clamp(0.5rem,0.9vw,0.75rem)] border-b border-slate-100 flex flex-col gap-[clamp(0.5rem,0.9vw,0.75rem)] ${dark ? "bg-[#1c2320]" : "bg-linear-to-b from-slate-50/80 to-white"}`}>
           {/* Week selector */}
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-            <div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Payroll</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-[clamp(0.5rem,0.9vw,0.75rem)]">
+            <div className="min-w-0">
+              <h3 className={`text-[clamp(1rem,1.45vw,1.25rem)] font-bold tracking-tight ${dark ? "text-white" : "text-[#003527]"}`}>Weekly Payroll</h3>
               {isLoading && (
                 <p className={`mt-0.5 inline-flex items-center gap-1.5 text-xs font-medium ${dark ? "text-teal-400" : "text-teal-600"}`}>
                   <LuRefreshCw size={12} className="animate-spin" /> Loading payroll data…
@@ -707,18 +749,18 @@ export default function PayrollPage() {
                 <p className="mt-0.5 text-xs font-medium text-red-600">{loadError}</p>
               )}
             </div>
-            <div className={`flex items-center gap-1.5 rounded-xl border p-1.5 shadow-sm w-full md:w-auto overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
+            <div className={`flex items-center gap-1 rounded-xl border p-[clamp(0.25rem,0.5vw,0.375rem)] shadow-sm w-full sm:w-auto min-w-0 overflow-x-auto ${dark ? "border-white/10 bg-white/5" : "border-slate-200 bg-white"}`}>
               <div className="flex gap-1">
                 {weeks.slice(0, 4).map((w) => (
                   <button key={w} onClick={() => setWeek(w)}
-                    className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
+                    className={`px-[clamp(0.375rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.8vw,0.75rem)] font-bold rounded-lg whitespace-nowrap transition-all ${week === w ? "bg-[#003527] text-white shadow-sm" : dark ? "text-white/50 hover:text-white hover:bg-white/10" : "text-slate-500 hover:text-[#003527] hover:bg-slate-100"}`}>{weekLabel(w)}</button>
                 ))}
               </div>
               <div className={`h-6 w-px mx-0.5 shrink-0 ${dark ? "bg-white/15" : "bg-slate-200"}`} />
               <div className="relative shrink-0">
                 <button ref={weekJumpButtonRef} onClick={() => setShowRangePicker((v) => !v)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
-                  <LuCalendar size={15} strokeWidth={2} /><span className="text-xs font-bold">Jump to Week</span>
+                  className={`flex items-center gap-[clamp(0.25rem,0.5vw,0.5rem)] px-[clamp(0.375rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] rounded-lg whitespace-nowrap transition-colors ${showRangePicker ? (dark ? "text-teal-300 bg-white/10" : "text-teal-700 bg-teal-50") : dark ? "text-white/60 hover:text-white hover:bg-white/10" : "text-slate-600 hover:text-teal-700 hover:bg-teal-50"}`}>
+                  <LuCalendar size={15} strokeWidth={2} className="shrink-0" /><span className="text-[clamp(0.625rem,0.8vw,0.75rem)] font-bold">Jump to Week</span>
                 </button>
                 {showRangePicker && <WeekJumpDropdown anchorRef={weekJumpButtonRef} onApply={(d) => setWeek(sundayOf(d))} onClose={() => setShowRangePicker(false)} />}
               </div>
@@ -726,15 +768,15 @@ export default function PayrollPage() {
           </div>
 
           {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative w-full sm:w-64">
-              <LuSearch size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="flex flex-wrap items-center gap-[clamp(0.375rem,0.8vw,0.5rem)]">
+            <div className="relative w-full sm:w-[clamp(8.5rem,13.9vw,13rem)]">
+              <LuSearch size={14} className="absolute left-[clamp(0.4375rem,0.7vw,0.5625rem)] top-1/2 -translate-y-1/2 shrink-0 text-slate-400" />
               <input
                 type="text"
                 value={nameSearch}
                 onChange={(event) => setNameSearch(event.target.value)}
                 placeholder="Search by name…"
-                className={`h-10 w-full rounded-lg border pl-9 pr-8 text-sm outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
+                className={`h-[clamp(1.75rem,2.13vw,2rem)] w-full rounded-lg border pl-[clamp(1.5rem,1.9vw,1.75rem)] pr-[clamp(1.375rem,1.8vw,1.625rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] outline-none transition-all focus:border-teal-500 focus:ring-2 focus:ring-teal-500/30 ${dark ? "bg-white/5 border-white/10 text-white placeholder:text-white/30 hover:border-white/20" : "bg-white border-slate-200 text-slate-800 hover:border-slate-300"}`}
               />
               {nameSearch && (
                 <button
@@ -747,19 +789,19 @@ export default function PayrollPage() {
               )}
             </div>
 
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-48" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(6rem,10.6vw,10rem)]" value={payCategoryFilter} onChange={setPayCategoryFilter} label="Filter by pay category">
               <option value="All">All Pay Categories</option>
               {payCategoryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={countryFilter} onChange={setCountryFilter} label="Filter by country">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={countryFilter} onChange={setCountryFilter} label="Filter by country">
               <option value="All">All Countries</option>
               {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={shiftTypeFilter} onChange={setShiftTypeFilter} label="Filter by shift type">
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-40" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
               <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </FilterSelect>
@@ -768,12 +810,12 @@ export default function PayrollPage() {
               {filtersActive && (
                 <button
                   onClick={clearFilters}
-                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-semibold text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
+                  className="inline-flex items-center gap-1.5 h-[clamp(1.75rem,2.13vw,2rem)] px-[clamp(0.375rem,0.7vw,0.625rem)] rounded-lg text-[clamp(0.625rem,0.73vw,0.6875rem)] font-semibold whitespace-nowrap text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <LuX size={14} strokeWidth={2.5} /> Clear
                 </button>
               )}
-              <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
+              <span className={`inline-flex items-center gap-1 rounded-full px-[clamp(0.4375rem,0.7vw,0.625rem)] py-0.5 text-[clamp(0.625rem,0.73vw,0.6875rem)] font-medium whitespace-nowrap ${dark ? "bg-white/10 text-white/70" : "bg-slate-100 text-slate-600"}`}>
                 <span className={`font-bold ${dark ? "text-white" : "text-[#003527]"}`}>{filteredRows.length}</span> shown
               </span>
             </div>
@@ -781,7 +823,7 @@ export default function PayrollPage() {
         </div>
 
         {/* Table */}
-        <div className="overflow-auto" style={{ maxHeight: "60vh" }}>
+        <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]">
           <table className="w-full text-left text-sm" style={{ minWidth: "2340px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
@@ -844,8 +886,8 @@ export default function PayrollPage() {
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.currency} {r.hourlyRate.toFixed(2)}</td>
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.hourlyRate.toFixed(2)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.currency} {fmtRate(r.hourlyRate)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{fmtRate(r.hourlyRate)}</td>
                   {/* Earnings is the time-derived pay; the four that follow are
                       this week's Manual Payroll Adjustments. Together they make
                       up Gross, so the breakdown reads left to right into it. */}
@@ -859,7 +901,7 @@ export default function PayrollPage() {
                     ["specialPay", r.specialPay, r.specialHours, "Special Leave"],
                     ["advancePay", r.advancePay, r.advanceHours, "Advance Leave"],
                   ] as [string, number, number, string][]).map(([key, amount, hours, label]) => (
-                    <td key={key} title={amount ? `${hours} hrs of ${label} at ${r.currency} ${r.hourlyRate.toFixed(2)}/hr` : undefined}
+                    <td key={key} title={amount ? `${hours} hrs of ${label} at ${r.currency} ${fmtRate(r.hourlyRate)}/hr` : undefined}
                       className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
                         amount ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
                       }`}>
@@ -1076,7 +1118,12 @@ function PayrollVoucherModal({
         gross: row.gross ?? 0,
         deductions: row.deductions ?? 0,
         net: row.net ?? 0,
-        status: row.status,
+        // Always "Processed": this column records that a snapshot exists, and
+        // the contractor portal keys its voucher list off it. Writing
+        // row.status stamped a first-time process as "Reviewed" (row.status is
+        // only "Processed" once a snapshot is already there), which hid the
+        // voucher until the week happened to be processed a second time.
+        status: "Processed",
         bonus: row.bonus,
         misc: row.misc,
         retroPay: row.retroPay,
@@ -1106,6 +1153,7 @@ function PayrollVoucherModal({
         hoOtPay: live.hoOtPay,
         localHolidayPay: live.localHolidayPay,
         evaluatedDailyMinutes: row.evaluatedDailyMinutes,
+        regularOtDailyMinutes: row.regularOtDailyMinutes,
       }]);
       if (!result.ok) {
         setSaveError(result.failed[0]?.error ?? "Failed to process. Please try again.");
@@ -1166,6 +1214,12 @@ function PayrollVoucherModal({
         currency: processedSnapshot!.currency,
         restDay: processedSnapshot!.restDay,
         evaluatedDailyMinutes: processedSnapshot!.evaluatedDailyMinutes,
+        // Snapshots taken before this map existed hold {}; fall back to the
+        // live per-day OT so their Day View still attributes OT to its day.
+        regularOtDailyMinutes: Object.keys(processedSnapshot!.regularOtDailyMinutes ?? {}).length > 0
+          ? processedSnapshot!.regularOtDailyMinutes
+          : row.regularOtDailyMinutes,
+        usHolidayDailyMinutes: row.usHolidayDailyMinutes,
       }
     : (() => {
         const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
@@ -1229,6 +1283,8 @@ function PayrollVoucherModal({
           currency: row.currency,
           restDay: row.restDay,
           evaluatedDailyMinutes: row.evaluatedDailyMinutes,
+          regularOtDailyMinutes: row.regularOtDailyMinutes,
+          usHolidayDailyMinutes: row.usHolidayDailyMinutes,
         };
       })();
 
@@ -1250,8 +1306,27 @@ function PayrollVoucherModal({
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
         <div className="p-4 md:p-5 text-sm text-slate-800">
-          <div className="flex justify-end mb-2">
-            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm overflow-x-auto">
+          <div className="flex items-center gap-3 mb-2.5">
+            {/* Process sits on the same line as the week selector it acts on,
+                rather than on a centred row of its own below it. */}
+            {canProcess && (
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  onClick={handleProcessClick}
+                  disabled={isSaving}
+                  className={`px-5 py-1.5 text-sm font-semibold rounded-lg transition-colors shadow-sm flex shrink-0 items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                    isReprocess
+                      ? "border border-blue-200 text-blue-700 hover:bg-blue-50"
+                      : "bg-blue-600 hover:bg-blue-700 text-white"
+                  }`}
+                >
+                  <LuListChecks size={15} strokeWidth={2} />
+                  {isSaving ? (isReprocess ? "Re-Processing…" : "Processing…") : (isReprocess ? "Re-Process" : "Process")}
+                </button>
+                {saveError && <p className="text-xs font-medium text-red-600">{saveError}</p>}
+              </div>
+            )}
+            <div className="ml-auto flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm overflow-x-auto">
               <div className="flex gap-0.5">
                 {weeks.slice(0, 4).map((w) => (
                   <button
@@ -1294,23 +1369,6 @@ function PayrollVoucherModal({
               </select>
             </div>
           </div>
-          {canProcess && (
-            <div className="flex items-center justify-center gap-3 mb-2.5">
-              <button
-                onClick={handleProcessClick}
-                disabled={isSaving}
-                className={`px-5 py-1.5 text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed ${
-                  isReprocess
-                    ? "border border-blue-200 text-blue-700 hover:bg-blue-50"
-                    : "bg-blue-600 hover:bg-blue-700 text-white"
-                }`}
-              >
-                <LuListChecks size={15} strokeWidth={2} />
-                {isSaving ? (isReprocess ? "Re-Processing…" : "Processing…") : (isReprocess ? "Re-Process" : "Process")}
-              </button>
-              {saveError && <p className="text-xs font-medium text-red-600">{saveError}</p>}
-            </div>
-          )}
 
           {/* Header */}
           <div className="grid grid-cols-3 items-start gap-4 pb-2.5 border-b-2 border-[#003527]">
@@ -1325,9 +1383,9 @@ function PayrollVoucherModal({
           {/* Contractor info */}
           <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-xs mt-2.5 mb-3">
             <p><span className="text-slate-500">Contractor</span> <span className="font-semibold ml-2">{figures.name}</span></p>
-            <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.monthlyRate)}</span></p>
+            <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{figures.role}</span></p>
-            <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.weeklyRate)}</span></p>
+            <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.weeklyRate)}</span></p>
           </div>
 
           {/* Gross Pay */}
@@ -1348,9 +1406,29 @@ function PayrollVoucherModal({
                       const label = DAY_LABELS[i];
                       const isOff = restDayLabels.has(label);
                       const hours = (figures.evaluatedDailyMinutes[date] ?? 0) / 60;
+                      const otHours = (figures.regularOtDailyMinutes[date] ?? 0) / 60;
+                      // A day whose whole time was approved as Regular OT has
+                      // no evaluated hours, so show the OT in place of the 0
+                      // rather than printing a blank-looking day.
+                      const otInPlaceOfZero = !isOff && hours === 0 && otHours > 0;
+                      // A US holiday with no worked time is credited HO rather
+                      // than reading as an empty day. OT takes precedence, so a
+                      // day that somehow has both still shows the worked time.
+                      const usHoHours = (figures.usHolidayDailyMinutes[date] ?? 0) / 60;
+                      const hoInPlaceOfZero = !isOff && !otInPlaceOfZero && hours === 0 && usHoHours > 0;
                       return (
                         <td key={date} className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                          {isOff ? "OFF" : hours.toFixed(2)}
+                          <div className={otInPlaceOfZero ? "font-semibold text-amber-600" : hoInPlaceOfZero ? "font-semibold text-blue-600" : undefined}
+                            title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours`
+                              : hoInPlaceOfZero ? `US Holiday — ${usHoHours.toFixed(2)} h credited, counted in HO HRS, not REG Hours` : undefined}>
+                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                          </div>
+                          {!otInPlaceOfZero && otHours > 0 && (
+                            <div className="text-[9px] font-semibold leading-tight text-amber-600"
+                              title={`Regular OT earned this day — counted in REG OT HRS, not REG Hours`}>
+                              +{otHours.toFixed(2)}
+                            </div>
+                          )}
                         </td>
                       );
                     })}
@@ -1362,8 +1440,10 @@ function PayrollVoucherModal({
                 {[
                   ["REG Hours", regHours],
                   ["PTO HRS", ptoHours],
-                  ["US HO HRS", usHolidayHours],
-                  ["LOCAL HO HRS", localHolidayHours],
+                  // Combined to match the single Holiday Pay line below. Kept
+                  // distinct from "HO OT HRS" in the next group — that's
+                  // overtime worked on a holiday, not holiday hours.
+                  ["HO HRS", usHolidayHours + localHolidayHours],
                 ].map(([label, value]) => (
                   <div key={label as string} className="flex items-center justify-between border-b border-dotted border-slate-300 pb-0.5">
                     <span className="text-slate-500">{label}</span>
@@ -1388,13 +1468,14 @@ function PayrollVoucherModal({
                 ["REG HRS Pay", regPay],
                 ["REG OT", regOtPay],
                 ["RD OT", rdOtPay],
-                ["US HOLIDAY PAY", usHolidayPay],
+                // US and local holiday pay on one line. HO OT stays separate
+                // below: it's overtime worked on a holiday, not holiday pay.
+                ["Holiday Pay", usHolidayPay + localHolidayPay],
                 ["HO OT", hoOtPay],
-                ["LOCAL HOLIDAY PAY", localHolidayPay],
-                ["PTO", ptoPay],
-                ["Medical Unavailability", sickPay],
-                ["Special Leave", specialPay],
-                ["Advance Leave", advancePay],
+                // Every paid-leave kind on one line. The Weekly Payroll table
+                // still breaks them out per kind for the admin view; the payslip
+                // only needs the amount.
+                ["Time Off Pay", ptoPay + sickPay + specialPay + advancePay],
                 ["Bonus", bonus],
                 ["MISC", misc],
                 ["Retro Pay", retroPay],
@@ -1685,7 +1766,7 @@ function FixedIndHoursModal({
           </div>
           <div className="mt-1.5 flex items-center justify-between border-t border-dotted border-slate-300 pt-1.5">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-              Added to Gross · {row.currency} {row.hourlyRate.toFixed(2)}/hr
+              Added to Gross · {row.currency} {fmtRate(row.hourlyRate)}/hr
             </span>
             <span className={`text-sm font-semibold tabular-nums ${totalPay > 0 ? "text-teal-700" : "text-slate-300"}`}>
               {fmtMoney(totalPay, row.currency)}
@@ -1958,7 +2039,12 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
         gross: r.gross ?? 0,
         deductions: r.deductions ?? 0,
         net: r.net ?? 0,
-        status: r.status,
+        // Always "Processed": this column records that a snapshot exists, and
+        // the contractor portal keys its voucher list off it. Writing
+        // row.status stamped a first-time process as "Reviewed" (row.status is
+        // only "Processed" once a snapshot is already there), which hid the
+        // voucher until the week happened to be processed a second time.
+        status: "Processed",
         bonus: r.bonus,
         misc: r.misc,
         retroPay: r.retroPay,
@@ -1988,6 +2074,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
         hoOtPay: live.hoOtPay,
         localHolidayPay: live.localHolidayPay,
         evaluatedDailyMinutes: r.evaluatedDailyMinutes,
+        regularOtDailyMinutes: r.regularOtDailyMinutes,
       };
     });
   }

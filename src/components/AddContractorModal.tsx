@@ -6,6 +6,7 @@ import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
 import { ShiftScheduleModal } from "@/components/ShiftScheduleModal";
 import { SHIFTING_SCHEDULE, CROSS_DAY_SHIFT, isCrossDayWindow, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
+import { weeklyRateFrom, hourlyRateFrom } from "@/lib/payrollVoucher";
 
 type Props = {
   onClose: () => void;
@@ -70,9 +71,15 @@ function getPayPeriod() {
   return `${fmt(sun)} – ${fmt(sat)}`;
 }
 
-// monthly → weekly (× 12 ÷ 52) and hourly (÷ 5 ÷ 8), rounded to 2dp
-function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52).toFixed(2); }
-function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : (m * 12 / 52 / 5 / 8).toFixed(2); }
+// monthly → weekly (× 12 ÷ 52) and hourly (÷ 5 ÷ 8).
+//
+// Deliberately not rounded. Both divisions recur — 115,500 × 12 ÷ 52 is
+// 26653.846153846152 — and the hourly rate is then multiplied by every hour
+// worked, so any rounding here is paid out again on each one. The full result is
+// stored and shown; money totals are still presented at 2dp, because an amount
+// and a rate are different kinds of number.
+function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(weeklyRateFrom(m)); }
+function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(hourlyRateFrom(m)); }
 
 const FIELD = ({ label, children, required, labelClassName }: { label: string; children: React.ReactNode; required?: boolean; labelClassName?: string }) => (
   <div className="flex flex-col gap-1">
@@ -572,12 +579,12 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               {/* Weekly & Hourly — auto-calculated */}
               <FIELD label="Weekly Contract Rate" labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 <input className={READONLY} readOnly
-                  value={form.weeklyRate ? Number(form.weeklyRate).toFixed(2) : ""}
+                  value={form.weeklyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
               <FIELD label="Hourly Rate (auto)">
                 <input className={READONLY} readOnly
-                  value={form.hourlyRate ? Number(form.hourlyRate).toFixed(2) : ""}
+                  value={form.hourlyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
             </div>

@@ -138,6 +138,25 @@ export function totalLeaveHours(hours: LeaveHours) {
   return hours.pto + hours.sick + hours.special + hours.advance;
 }
 
+/**
+ * Contract rate derivation: Weekly = Monthly × 12 ÷ 52, Hourly = Weekly ÷ 5 ÷ 8.
+ *
+ * Deliberately unrounded. Both divisions recur — 115,500 × 12 ÷ 52 is
+ * 26653.846153846152 — and the hourly rate is then multiplied by every hour
+ * worked, so rounding it means paying that error out again on each hour.
+ *
+ * Shared so Contractor Details and Payroll derive the rate identically. Payroll
+ * derives it rather than trusting contractor_profiles.hourlyRate, which was
+ * written rounded by older saves.
+ */
+export function weeklyRateFrom(monthlyRate: number) {
+  return monthlyRate * 12 / 52;
+}
+
+export function hourlyRateFrom(monthlyRate: number) {
+  return weeklyRateFrom(monthlyRate) / 5 / 8;
+}
+
 export const DAY_LABELS = ["SUN", "MON", "TUE", "WED", "THUR", "FRI", "SAT"];
 
 export const REST_DAY_TO_LABEL: Record<string, string> = {

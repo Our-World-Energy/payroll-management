@@ -34,6 +34,8 @@ export type ContractorVoucher = {
   deductions: number;
   net: number;
   evaluatedDailyMinutes: Record<string, number>;
+  /** Per-day Regular OT Time, for the Day View grid only. */
+  regularOtDailyMinutes: Record<string, number>;
   regHours: number;
   regOtHours: number;
   rdOtHours: number;
@@ -48,6 +50,12 @@ export type ContractorVoucher = {
   hoOtPay: number;
   localHolidayPay: number;
   ptoPay: number;
+  /** The other paid-leave kinds frozen on the snapshot. Shown combined with
+   *  ptoPay as "Time Off Pay" — they are part of gross, so leaving them out
+   *  made the voucher's earnings lines fall short of its own Gross. */
+  sickPay: number;
+  specialPay: number;
+  advancePay: number;
   adjustment: VoucherAdjustment;
 };
 
@@ -103,6 +111,7 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
         deductions: Number(r.deductions ?? 0),
         net: Number(r.net ?? 0),
         evaluatedDailyMinutes: (r.evaluatedDailyMinutes ?? {}) as Record<string, number>,
+        regularOtDailyMinutes: (r.regularOtDailyMinutes ?? {}) as Record<string, number>,
         regHours: Number(r.regHours ?? 0),
         regOtHours: Number(r.regOtHours ?? 0),
         rdOtHours: Number(r.rdOtHours ?? 0),
@@ -117,6 +126,9 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
         hoOtPay: Number(r.hoOtPay ?? 0),
         localHolidayPay: Number(r.localHolidayPay ?? 0),
         ptoPay: Number(r.ptoPay ?? 0),
+        sickPay: Number(r.sickPay ?? 0),
+        specialPay: Number(r.specialPay ?? 0),
+        advancePay: Number(r.advancePay ?? 0),
         adjustment: {
           bonus: Number(r.bonus ?? 0), misc: Number(r.misc ?? 0), retroPay: Number(r.retroPay ?? 0), reim: Number(r.reim ?? 0),
           cashAdvance: Number(r.cashAdvance ?? 0), hmo: Number(r.hmo ?? 0), tax: Number(r.tax ?? 0),
