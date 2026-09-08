@@ -15,6 +15,7 @@ import {
   fetchTimeAwayRequestsEnabled, saveTimeAwayRequestsEnabled,
   fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
+import { SalaryVisibilitySection } from "./SalaryVisibilitySection";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer";
@@ -842,6 +843,10 @@ export default function SettingsPage() {
           </div>
         )}
       </section>
+
+      {/* Salary Visibility — who may unlock salary figures, and encryption
+          status of the salary columns. */}
+      <SalaryVisibilitySection />
 
     </div>
   );

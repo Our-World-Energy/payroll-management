@@ -6,9 +6,42 @@ import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
 import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved, planSpecialLeaveGrantDeduction, roundBalance, type SpecialLeaveGrantDeduction } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
+import { canViewSalary } from "@/lib/salaryAccess";
+import { decryptSalary, encryptSalary } from "@/lib/salaryCrypto";
 
 const TABLE = "contractor_profiles";
 const LOG_TABLE = "time_off_request_logs";
+
+// Salary gate. The three contract-rate columns are stored encrypted (see
+// src/lib/salaryCrypto.ts). They're decrypted only for a caller holding a live
+// salary unlock (src/lib/salaryAccess.ts); everyone else gets "" back, and an
+// update from them leaves the stored rates untouched. Enforced here rather
+// than in the UI because these actions run with the service-role key.
+const RATE_COLUMNS = ["monthlyRate", "weeklyRate", "hourlyRate"] as const;
+
+function revealRates(rows: Contractor[], canView: boolean): Contractor[] {
+  return rows.map((c) => ({
+    ...c,
+    monthlyRate: canView ? decryptSalary(c.monthlyRate) : "",
+    weeklyRate:  canView ? decryptSalary(c.weeklyRate)  : "",
+    hourlyRate:  canView ? decryptSalary(c.hourlyRate)  : "",
+  }));
+}
+
+function encryptedRates(c: Contractor) {
+  return {
+    monthlyRate: encryptSalary(c.monthlyRate ?? ""),
+    weeklyRate:  encryptSalary(c.weeklyRate  ?? ""),
+    hourlyRate:  encryptSalary(c.hourlyRate  ?? ""),
+  };
+}
+
+// Advanced-filter rules on rate columns are evaluated client-side after
+// decryption (postFilterNumbers). A locked caller must not be able to probe
+// salaries by filtering, so their rate rules are dropped.
+function stripRateRules(rules: FilterRule[], canView: boolean): FilterRule[] {
+  return canView ? rules : rules.filter((r) => !(RATE_COLUMNS as readonly string[]).includes(r.column as string));
+}
 
 // Append-only audit trail — one row per decision (Approved/Rejected) a leave
 // request lands on, separate from contractor_leave_requests (which the
@@ -206,15 +239,17 @@ export async function fetchContractorsPage(params: FetchParams): Promise<{
   const sb = getSupabase();
   const from = (params.page - 1) * params.pageSize;
   const to = from + params.pageSize - 1;
+  const canView = await canViewSalary();
+  const rules = stripRateRules(params.rules, canView);
 
   let query = sb.from(TABLE).select("*", { count: "exact" });
-  query = applyFilters(query, params.country, params.status, params.rules, params.search, params.payCategory);
+  query = applyFilters(query, params.country, params.status, rules, params.search, params.payCategory);
   query = query.order("fullName", { ascending: true }).range(from, to);
 
   const { data, error, count } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = postFilterNumbers((data ?? []).map(toContractor), params.rules);
+  const rows = postFilterNumbers(revealRates((data ?? []).map(toContractor), canView), rules);
   return { rows, total: count ?? 0 };
 }
 
@@ -222,14 +257,16 @@ export async function fetchAllContractors(
   params: Omit<FetchParams, "page" | "pageSize">
 ): Promise<Contractor[]> {
   const sb = getSupabase();
+  const canView = await canViewSalary();
+  const rules = stripRateRules(params.rules, canView);
   let query = sb.from(TABLE).select("*");
-  query = applyFilters(query, params.country, params.status, params.rules, params.search, params.payCategory);
+  query = applyFilters(query, params.country, params.status, rules, params.search, params.payCategory);
   query = query.order("id", { ascending: false });
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  return postFilterNumbers((data ?? []).map(toContractor), params.rules);
+  return postFilterNumbers(revealRates((data ?? []).map(toContractor), canView), rules);
 }
 
 export async function createContractor(c: Contractor): Promise<void> {
@@ -258,9 +295,9 @@ export async function createContractor(c: Contractor): Promise<void> {
     hireDate:          c.hireDate,
     officeLocation:    c.officeLocation,
     currency:          c.currency,
-    monthlyRate:       c.monthlyRate,
-    weeklyRate:        c.weeklyRate,
-    hourlyRate:        c.hourlyRate,
+    // Rates typed at creation reveal nothing the creator didn't already know,
+    // so they're accepted from any admin — encrypted on the way in.
+    ...encryptedRates(c),
     email:             c.email,
     payCategory:       c.payCategory,
     shiftHours:        c.shiftHours,
@@ -314,6 +351,10 @@ export async function updateContractor(c: Contractor): Promise<void> {
   const birthdayLeave     = existing?.birthdayLeave     ?? (c.birthdayLeave     ?? 0);
   const birthdayLeaveUsed = existing?.birthdayLeaveUsed ?? (c.birthdayLeaveUsed ?? 0);
 
+  // A locked caller was served "" for the rates, so writing them back would
+  // wipe the real values — only an unlocked caller may change them.
+  const rateUpdate = (await canViewSalary()) ? encryptedRates(c) : {};
+
   const { error } = await sb.from(TABLE).update({
     firstName:         c.firstName,
     middleName:        c.middleName,
@@ -331,9 +372,7 @@ export async function updateContractor(c: Contractor): Promise<void> {
     hireDate:          c.hireDate,
     officeLocation:    c.officeLocation,
     currency:          c.currency,
-    monthlyRate:       c.monthlyRate,
-    weeklyRate:        c.weeklyRate,
-    hourlyRate:        c.hourlyRate,
+    ...rateUpdate,
     email:             c.email,
     payCategory:       c.payCategory,
     shiftHours:        c.shiftHours,

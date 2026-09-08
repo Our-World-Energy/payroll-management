@@ -14,6 +14,7 @@ import { fetchCutOffTime } from "../settings/actions";
 import { AddContractorModal, PAY_CATEGORIES } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
+import { useSalaryAccess, SALARY_MASK, SalaryLockedBanner } from "@/components/SalaryAccessContext";
 import {
   fetchContractorsPage,
   fetchAllContractors,
@@ -134,6 +135,11 @@ const COLS = [
 
 export default function ContractorsPage() {
   const searchParams = useSearchParams();
+  // Salary gate: the server blanks the three rate columns for a locked caller
+  // (see contractors/actions.ts); this only picks mask vs. figure in the cells
+  // and re-fetches when the unlock state changes.
+  const { canView: salaryVisible, loading: salaryLoading } = useSalaryAccess();
+  const rate = (value: string) => (salaryVisible ? value.replace(/^(\$|₹|₱|MX\$)/, "") : SALARY_MASK);
   const [rows, setRows]           = useState<Contractor[]>(pageCache?.rows ?? []);
   const [total, setTotal]         = useState(pageCache?.total ?? 0);
   const [loading, setLoading]     = useState(pageCache === null);
@@ -203,8 +209,19 @@ export default function ContractorsPage() {
   }, [nameSearchInput]);
 
   useEffect(() => {
+    if (salaryLoading) return;
     loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory);
-  }, [page, pageSize, country, status, activeRules, nameSearch, payCategory, loadPage]);
+  }, [page, pageSize, country, status, activeRules, nameSearch, payCategory, loadPage, salaryLoading]);
+
+  // Unlocking (or locking) salary changes what the server returns for the
+  // same query, so the cached page is stale — force a re-fetch.
+  const prevSalaryVisible = useRef(salaryVisible);
+  useEffect(() => {
+    if (salaryLoading || prevSalaryVisible.current === salaryVisible) return;
+    prevSalaryVisible.current = salaryVisible;
+    pageCache = null;
+    loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory, { force: true });
+  }, [salaryVisible, salaryLoading, page, pageSize, country, status, activeRules, nameSearch, payCategory, loadPage]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -370,6 +387,8 @@ export default function ContractorsPage() {
       {showImport && <ImportContractorsModal onClose={() => setShowImport(false)} onImport={handleImportContractors} />}
 
       <div className="p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden">
+
+        <SalaryLockedBanner dark={false} what="Contract rates" />
 
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between mb-6 md:mb-8 gap-4">
@@ -597,9 +616,9 @@ export default function ContractorsPage() {
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{fmtDate(c.hireDate)}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.officeLocation}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.currency}</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.monthlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.weeklyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
-                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{c.hourlyRate.replace(/^(\$|₹|₱|MX\$)/, "")}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{rate(c.monthlyRate)}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{rate(c.weeklyRate)}</td>
+                    <td className="px-4 py-2.5 text-sm text-slate-600 tabular-nums border-r border-slate-100">{rate(c.hourlyRate)}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.email}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 border-r border-slate-100">{c.payCategory}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{c.shiftHours}</td>

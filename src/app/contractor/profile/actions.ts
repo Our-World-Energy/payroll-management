@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { canViewSalaryOf } from "@/lib/salaryAccess";
+import { decryptSalary } from "@/lib/salaryCrypto";
 
 function getSupabase() {
   return createClient(
@@ -64,7 +66,15 @@ export async function fetchCurrentMonthBirthdays(): Promise<BirthdayEntry[]> {
     }));
 }
 
+// Requires a signed-in (2FA) session. Contract rates are stored encrypted and
+// are decrypted only for the profile's own contractor, or for an admin holding
+// a live salary unlock; any other signed-in caller gets the profile with the
+// three rate fields blanked, so non-salary pages (attendance, dashboard) keep
+// working while nothing about pay leaks.
 export async function fetchContractorProfileByEmail(email: string): Promise<ContractorProfile | null> {
+  const { allowed, identity } = await canViewSalaryOf(email);
+  if (!identity) return null;
+
   const sb = getSupabase();
   const { data, error } = await sb
     .from("contractor_profiles")
@@ -73,5 +83,11 @@ export async function fetchContractorProfileByEmail(email: string): Promise<Cont
     .single();
 
   if (error || !data) return null;
-  return data as ContractorProfile;
+  const profile = data as ContractorProfile;
+  return {
+    ...profile,
+    monthlyRate: allowed ? decryptSalary(profile.monthlyRate) : "",
+    weeklyRate:  allowed ? decryptSalary(profile.weeklyRate)  : "",
+    hourlyRate:  allowed ? decryptSalary(profile.hourlyRate)  : "",
+  };
 }

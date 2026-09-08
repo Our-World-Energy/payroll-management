@@ -3,6 +3,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { fetchContractorProfileByEmail } from "../profile/actions";
 import { addDaysIso, arizonaTodayIso } from "@/lib/weekUtils";
+import { canViewSalaryOf } from "@/lib/salaryAccess";
+import { decryptSalaryNumber } from "@/lib/salaryCrypto";
 
 function getSupabase() {
   return createClient(
@@ -69,7 +71,15 @@ export type ContractorVoucherResult = {
 // "Reviewed"-only row never surfaces in the portal. contractorId is the one
 // field this table doesn't carry, so that alone still comes from Contractor
 // Details (contractor_profiles).
+//
+// Salary gate: the pay figures are the contractor's own, so they're decrypted
+// for the contractor themself (session email must match) or for an admin
+// holding a live salary unlock. Anyone else gets null — the same as "no
+// vouchers", revealing nothing.
 export async function fetchContractorVouchers(email: string): Promise<ContractorVoucherResult> {
+  const { allowed } = await canViewSalaryOf(email);
+  if (!allowed) return null;
+
   const sb = getSupabase();
 
   const [pwpRes, profileRaw] = await Promise.all([
@@ -81,6 +91,7 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
   if (pwpRows.length === 0 && !profileRaw) return null;
 
   const today = arizonaTodayIso();
+  const money = decryptSalaryNumber;
 
   const vouchers: ContractorVoucher[] = pwpRows
     .filter((r) => String(r.status) === "Processed" && r.net != null)
@@ -96,12 +107,12 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
         checkDate,
         status: checkDate <= today ? "Paid" : "Processing",
         currency: String(r.currency ?? "USD"),
-        hourlyRate: Number(r.hourlyRate ?? 0),
-        monthlyRate: Number(r.monthlyRate ?? 0),
-        weeklyRate: Number(r.weeklyRate ?? 0),
-        gross: Number(r.gross ?? 0),
-        deductions: Number(r.deductions ?? 0),
-        net: Number(r.net ?? 0),
+        hourlyRate: money(r.hourlyRate),
+        monthlyRate: money(r.monthlyRate),
+        weeklyRate: money(r.weeklyRate),
+        gross: money(r.gross),
+        deductions: money(r.deductions),
+        net: money(r.net),
         evaluatedDailyMinutes: (r.evaluatedDailyMinutes ?? {}) as Record<string, number>,
         regHours: Number(r.regHours ?? 0),
         regOtHours: Number(r.regOtHours ?? 0),
@@ -110,16 +121,16 @@ export async function fetchContractorVouchers(email: string): Promise<Contractor
         hoOtHours: Number(r.hoOtHours ?? 0),
         localHolidayHours: Number(r.localHolidayHours ?? 0),
         ptoHours: Number(r.ptoHours ?? 0),
-        regPay: Number(r.regPay ?? 0),
-        regOtPay: Number(r.regOtPay ?? 0),
-        rdOtPay: Number(r.rdOtPay ?? 0),
-        usHolidayPay: Number(r.usHolidayPay ?? 0),
-        hoOtPay: Number(r.hoOtPay ?? 0),
-        localHolidayPay: Number(r.localHolidayPay ?? 0),
-        ptoPay: Number(r.ptoPay ?? 0),
+        regPay: money(r.regPay),
+        regOtPay: money(r.regOtPay),
+        rdOtPay: money(r.rdOtPay),
+        usHolidayPay: money(r.usHolidayPay),
+        hoOtPay: money(r.hoOtPay),
+        localHolidayPay: money(r.localHolidayPay),
+        ptoPay: money(r.ptoPay),
         adjustment: {
-          bonus: Number(r.bonus ?? 0), misc: Number(r.misc ?? 0), retroPay: Number(r.retroPay ?? 0), reim: Number(r.reim ?? 0),
-          cashAdvance: Number(r.cashAdvance ?? 0), hmo: Number(r.hmo ?? 0), tax: Number(r.tax ?? 0),
+          bonus: money(r.bonus), misc: money(r.misc), retroPay: money(r.retroPay), reim: money(r.reim),
+          cashAdvance: money(r.cashAdvance), hmo: money(r.hmo), tax: money(r.tax),
         },
       };
     });

@@ -16,6 +16,7 @@ import { payComponentsFor, leaveHoursFor } from "@/lib/payrollVoucher";
 import { fetchFixedTimeForWeek } from "../attendance/actions";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
+import { useSalaryAccess, SALARY_MASK, SalaryLockedBanner } from "@/components/SalaryAccessContext";
 
 function formatElapsedSeconds(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
@@ -175,6 +176,13 @@ export default function PayrollPage() {
   const { dark } = useAdminTheme();
   const router = useRouter();
   const searchParams = useSearchParams();
+  // Salary gate. The server already returns 0 for every money figure to a
+  // locked caller (see payroll/actions.ts); `salaryVisible` only decides
+  // whether a cell renders the figure or the mask, and disables the actions
+  // that would write money (adjustments, import, process) or export it.
+  const { canView: salaryVisible, loading: salaryLoading } = useSalaryAccess();
+  const m = (text: string) => (salaryVisible ? text : SALARY_MASK);
+  const lockedTitle = salaryVisible ? undefined : "Verify your identity to access salary data";
   const [weeks, setWeeks] = useState<string[]>([]);
   const [week, setWeek] = useState("");
   const [showRangePicker, setShowRangePicker] = useState(false);
@@ -242,7 +250,9 @@ export default function PayrollPage() {
     let isMounted = true;
 
     async function load() {
-      if (!rangeFrom) return;
+      // Wait until we know whether this user is unlocked, and re-fetch when
+      // that changes — the server decrypts only for an unlocked caller.
+      if (!rangeFrom || salaryLoading) return;
       setIsLoading(true);
       setLoadError("");
 
@@ -488,7 +498,7 @@ export default function PayrollPage() {
 
     load();
     return () => { isMounted = false; };
-  }, [rangeFrom, rangeTo, reloadKey]);
+  }, [rangeFrom, rangeTo, reloadKey, salaryLoading, salaryVisible]);
 
   const filteredRows = rows.filter((r) => {
     const query = nameSearch.trim().toLowerCase();
@@ -653,8 +663,8 @@ export default function PayrollPage() {
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
           <button
             onClick={() => setShowProcessModal(true)}
-            disabled={!isSelectedWeekEnded}
-            title={!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined}
+            disabled={!isSelectedWeekEnded || !salaryVisible}
+            title={lockedTitle ?? (!isSelectedWeekEnded ? "Process Payroll is only available once the selected week has ended" : undefined)}
             className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
           >
             <LuListChecks size={14} strokeWidth={2} />
@@ -663,7 +673,9 @@ export default function PayrollPage() {
           </button>
           <button
             onClick={() => setShowImportModal(true)}
-            className="flex items-center justify-center gap-1.5 w-28 sm:w-52 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors"
+            disabled={!salaryVisible}
+            title={lockedTitle}
+            className="flex items-center justify-center gap-1.5 w-28 sm:w-52 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600"
           >
             <LuUpload size={14} strokeWidth={2} />
             <span className="hidden sm:inline">Import Earning/Deduction</span>
@@ -671,7 +683,8 @@ export default function PayrollPage() {
           </button>
           <button
             onClick={handleExportCSV}
-            disabled={filteredRows.length === 0}
+            disabled={filteredRows.length === 0 || !salaryVisible}
+            title={lockedTitle}
             className="flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-200 text-[#003527] rounded-lg text-xs font-semibold hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <LuDownload size={14} strokeWidth={2} />
@@ -680,6 +693,8 @@ export default function PayrollPage() {
           </button>
         </div>
       </div>
+
+      <SalaryLockedBanner dark={dark} what="Rates, earnings, deductions and net pay" />
 
       {/* Scorecards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 mb-3 md:mb-4">
@@ -844,12 +859,12 @@ export default function PayrollPage() {
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.currency} {r.hourlyRate.toFixed(2)}</td>
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.hourlyRate.toFixed(2)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(`${r.currency} ${r.hourlyRate.toFixed(2)}`)}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(r.hourlyRate.toFixed(2))}</td>
                   {/* Earnings is the time-derived pay; the four that follow are
                       this week's Manual Payroll Adjustments. Together they make
                       up Gross, so the breakdown reads left to right into it. */}
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.earnings != null ? fmtMoney(r.earnings, r.currency) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(r.earnings != null ? fmtMoney(r.earnings, r.currency) : "—")}</td>
                   {/* Paid leave by kind. Each is money at Rate/hr; the hours
                       behind it are in the tooltip, since four extra hour columns
                       would double the width for a figure that's rarely read. */}
@@ -859,32 +874,32 @@ export default function PayrollPage() {
                     ["specialPay", r.specialPay, r.specialHours, "Special Leave"],
                     ["advancePay", r.advancePay, r.advanceHours, "Advance Leave"],
                   ] as [string, number, number, string][]).map(([key, amount, hours, label]) => (
-                    <td key={key} title={amount ? `${hours} hrs of ${label} at ${r.currency} ${r.hourlyRate.toFixed(2)}/hr` : undefined}
+                    <td key={key} title={salaryVisible && amount ? `${hours} hrs of ${label} at ${r.currency} ${r.hourlyRate.toFixed(2)}/hr` : undefined}
                       className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
-                        amount ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
+                        amount || !salaryVisible ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
                       }`}>
-                      {amount ? fmtMoney(amount, r.currency) : "—"}
+                      {m(amount ? fmtMoney(amount, r.currency) : "—")}
                     </td>
                   ))}
                   {([["bonus", r.bonus], ["misc", r.misc], ["retroPay", r.retroPay], ["reim", r.reim]] as [string, number][]).map(([key, amount]) => (
                     <td key={key} className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
-                      amount ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
+                      amount || !salaryVisible ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
                     }`}>
-                      {amount ? fmtMoney(amount, r.currency) : "—"}
+                      {m(amount ? fmtMoney(amount, r.currency) : "—")}
                     </td>
                   ))}
-                  <td className={`px-4 md:px-6 py-3 md:py-4 font-medium tabular-nums whitespace-nowrap border-r ${dark ? "text-white/80 border-white/8" : "text-slate-700 border-slate-100"}`}>{r.gross != null ? fmtMoney(r.gross, r.currency) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 font-medium tabular-nums whitespace-nowrap border-r ${dark ? "text-white/80 border-white/8" : "text-slate-700 border-slate-100"}`}>{m(r.gross != null ? fmtMoney(r.gross, r.currency) : "—")}</td>
                   {/* The two deduction components that make up the Deductions
                       total beside them. */}
                   {([["cashAdvance", r.cashAdvance], ["hmo", r.hmo]] as [string, number][]).map(([key, amount]) => (
                     <td key={key} className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "border-white/8" : "border-slate-100"} ${
-                      amount ? (dark ? "text-red-400" : "text-red-500") : (dark ? "text-white/25" : "text-slate-300")
+                      amount ? (dark ? "text-red-400" : "text-red-500") : !salaryVisible ? (dark ? "text-white/80" : "text-slate-700") : (dark ? "text-white/25" : "text-slate-300")
                     }`}>
-                      {amount ? `−${fmtMoney(amount, r.currency)}` : "—"}
+                      {m(amount ? `−${fmtMoney(amount, r.currency)}` : "—")}
                     </td>
                   ))}
-                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-red-400 border-white/8" : "text-red-500 border-slate-100"}`}>{r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—"}</td>
-                  <td className={`px-4 md:px-6 py-3 md:py-4 font-semibold tabular-nums whitespace-nowrap border-r ${dark ? "text-teal-300 border-white/8" : "text-teal-700 border-slate-100"}`}>{r.net != null ? fmtMoney(r.net, r.currency) : "—"}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-red-400 border-white/8" : "text-red-500 border-slate-100"}`}>{m(r.deductions != null ? `−${fmtMoney(r.deductions, r.currency)}` : "—")}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 font-semibold tabular-nums whitespace-nowrap border-r ${dark ? "text-teal-300 border-white/8" : "text-teal-700 border-slate-100"}`}>{m(r.net != null ? fmtMoney(r.net, r.currency) : "—")}</td>
                   <td
                     className={`text-center sticky right-[132px] z-10 border-l overflow-hidden px-4 md:px-6 py-3 md:py-4 ${dark ? "bg-[#1c2320] group-hover:bg-[#222e27] border-white/10" : "bg-white group-hover:bg-slate-50 border-slate-200"}`}
                     style={{ minWidth: 150, width: 150, maxWidth: 150 }}
@@ -899,17 +914,21 @@ export default function PayrollPage() {
                     style={{ minWidth: 132, width: 132, maxWidth: 132 }}
                   >
                     <div className="flex items-center justify-start gap-3">
+                      {/* Every action here reads or writes money, so all three
+                          are locked with the figures. */}
                       <button
                         onClick={() => setVoucherTarget(r)}
-                        title="View payroll voucher"
-                        className={`transition-colors ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
+                        disabled={!salaryVisible}
+                        title={lockedTitle ?? "View payroll voucher"}
+                        className={`transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                       >
                         <LuEye size={18} strokeWidth={1.75} />
                       </button>
                       <button
                         onClick={() => setReviewTarget(r)}
-                        title="Review — add Bonus, MISC, Retro Pay, REIM"
-                        className={`transition-colors ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
+                        disabled={!salaryVisible}
+                        title={lockedTitle ?? "Review — add Bonus, MISC, Retro Pay, REIM"}
+                        className={`transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]"}`}
                       >
                         <LuPencil size={16} strokeWidth={1.75} />
                       </button>
@@ -918,10 +937,11 @@ export default function PayrollPage() {
                       {isFixedIndCategory(r.payCategory) && (
                         <button
                           onClick={() => setHoursTarget(r)}
-                          title={r.indHours > 0
+                          disabled={!salaryVisible}
+                          title={lockedTitle ?? (r.indHours > 0
                             ? `Hours at percentage — ${r.indHours} hrs x ${r.indPercentage}%`
-                            : "Hours at percentage"}
-                          className={`transition-colors ${
+                            : "Hours at percentage")}
+                          className={`transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                             r.indHours > 0
                               ? (dark ? "text-teal-300 hover:text-teal-200" : "text-teal-600 hover:text-teal-800")
                               : (dark ? "text-white/30 hover:text-white" : "text-slate-400 hover:text-[#003527]")
