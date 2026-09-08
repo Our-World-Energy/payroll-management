@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { LuMail, LuKeyRound, LuMailCheck, LuLoaderCircle, LuArrowLeft } from "react-icons/lu";
@@ -12,7 +12,17 @@ import { createClient } from "@/lib/supabase/client";
 // the Supabase project's Auth → URL Configuration → Redirect URLs allowlist
 // (one entry per environment, e.g. http://localhost:3000/** and the
 // production origin) or Supabase silently falls back to the Site URL.
+// useSearchParams() forces a client-side bailout during prerender, so Next
+// requires it under a Suspense boundary — hence the thin wrapper.
 export default function ForgotPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ForgotPasswordForm />
+    </Suspense>
+  );
+}
+
+function ForgotPasswordForm() {
   const searchParams = useSearchParams();
   const linkError = searchParams.get("error");
 
