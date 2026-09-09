@@ -11,6 +11,7 @@ import {
   LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
+import { normalizeRole } from "@/lib/roles";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -44,11 +45,13 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal?.currentLevel !== "aal2") { router.replace("/two-factor"); return; }
 
-      const role     = session.user.user_metadata?.role ?? "admin";
+      const role     = normalizeRole(session.user.user_metadata?.role);
       const override = localStorage.getItem("role_override");
 
-      // Allow admins who clicked "Contractor View" to pass through
-      if (role !== "user" && override !== "contractor") {
+      // Allow admins who clicked "Contractor View" to pass through. Only a
+      // full admin gets that switch — HR and Managers belong in their own
+      // console, so a stale override in their browser must not let them in.
+      if (role !== "user" && !(role === "admin" && override === "contractor")) {
         router.replace("/admin");
         return;
       }
