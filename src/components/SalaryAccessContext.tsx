@@ -204,7 +204,7 @@ function SalaryVerifyModal({ email, mailConfigured, onClose, onVerified }: {
           <div className="space-y-3">
             {!mailConfigured && (
               <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Email sending isn&apos;t configured on this server (RESEND_API_KEY). In development the code is shown here and in the server log.
+                Email sending isn&apos;t configured on this server yet, so your code will be shown here instead of emailed.
               </p>
             )}
             {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">{error}</p>}
@@ -244,7 +244,7 @@ function SalaryVerifyModal({ email, mailConfigured, onClose, onVerified }: {
             </div>
             {devCode && (
               <p className="text-xs text-center text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                Development mode — your code is <span className="font-mono font-bold tracking-widest">{devCode}</span>
+                Your verification code is <span className="font-mono font-bold tracking-widest">{devCode}</span>
               </p>
             )}
             {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">{error}</p>}

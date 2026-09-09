@@ -103,10 +103,13 @@ export async function requestSalaryOtp(): Promise<
   const mail = salaryOtpEmail(code, OTP_TTL_MINUTES, SALARY_GRANT_DAYS);
   const sent = await sendEmail({ to: email, ...mail });
   if (!sent.ok) {
-    // Local development without an email provider: surface the code in the
-    // server log and to the UI so the flow can still be exercised. Never in
-    // production.
-    if (sent.notConfigured && process.env.NODE_ENV !== "production") {
+    // No email provider configured: surface the code in the server log and in
+    // the popup itself so the flow still works. Automatic in development; in
+    // production it must be switched on explicitly with
+    // SALARY_OTP_SHOW_ON_SCREEN=true — a stopgap until RESEND_API_KEY is set,
+    // since an on-screen code no longer proves the person owns the inbox.
+    const showOnScreen = process.env.NODE_ENV !== "production" || process.env.SALARY_OTP_SHOW_ON_SCREEN === "true";
+    if (sent.notConfigured && showOnScreen) {
       console.warn(`[salary-access] RESEND_API_KEY not set — OTP for ${email}: ${code}`);
       return { ok: true, maskedEmail: maskEmail(email), expiresInMinutes: OTP_TTL_MINUTES, devCode: code };
     }
