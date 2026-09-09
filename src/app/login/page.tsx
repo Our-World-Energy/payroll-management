@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   LuMail,
@@ -162,13 +163,13 @@ export default function LoginPage() {
                 >
                   Password
                 </label>
-                <a
-                  href="#"
+                <Link
+                  href="/forgot-password"
                   className="text-xs font-medium hover:underline"
                   style={{ color: "#006b5f" }}
                 >
                   Forgot Password?
-                </a>
+                </Link>
               </div>
               <div className="relative">
                 <LuLock

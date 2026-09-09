@@ -325,9 +325,17 @@ model WorksnapDailyLog {
   entryDate      DateTime @db.Date
   firstIn        DateTime @db.Timestamptz(3)
   lastOut        DateTime @db.Timestamptz(3)
-  /// Actual clock-in/out instants, as opposed to firstIn/lastOut which are the
-  /// rounded Worksnap time-entry bucket boundaries. Nullable — a small tail of
-  /// older rows was never backfilled, so read these with a firstIn/lastOut fallback.
+  /// Screenshot-upload instant of the first / last entry of the day — Worksnaps'
+  /// ONLY sub-bucket signal. `firstIn`/`lastOut` are clock-aligned 10-minute slot
+  /// boundaries (every from_timestamp is `mod 600 == 1`), so they cannot express a
+  /// real clock-in. The upload instant is randomised inside its slot (measured
+  /// 15s-582s after the boundary), which brackets the truth:
+  ///     actual clock-in  in [firstIn, firstInLogged]
+  ///     actual clock-out in [lastOutLogged, lastOut]
+  /// Null when there is no signal: rows synced before these columns existed, and
+  /// `offline` entries (manually added time), which carry no screenshot and
+  /// report logged_timestamp === from_timestamp. Null means "unknown", never
+  /// "started exactly on the boundary" — measured at ~0.7% of entries.
   firstInLogged  DateTime? @db.Timestamptz(3)
   lastOutLogged  DateTime? @db.Timestamptz(3)
   totalMins      Int      @default(0)
@@ -474,13 +482,15 @@ model PayrollAdjustment {
   id          String   @id @default(uuid()) @db.Uuid
   email       String
   weekStart   String   // "YYYY-MM-DD" (Sunday) — same week-key convention used across Attendance/Payroll
-  bonus       Float    @default(0)
-  misc        Float    @default(0)
-  retroPay    Float    @default(0)
-  reim        Float    @default(0)
-  cashAdvance Float    @default(0)
-  hmo         Float    @default(0)
-  tax         Float    @default(0)   // retired: no longer entered or shown, kept for legacy rows
+  // Money columns are AES-256-GCM ciphertext ("enc:v1:…", see src/lib/salaryCrypto.ts)
+  // stored as text; legacy rows may still hold the plain decimal until backfilled.
+  bonus       String    @default("0")
+  misc        String    @default("0")
+  retroPay    String    @default("0")
+  reim        String    @default("0")
+  cashAdvance String    @default("0")
+  hmo         String    @default("0")
+  tax         String    @default("0")   // retired: no longer entered or shown, kept for legacy rows
   // Fixed-Ind only. Hours worked at a percentage rate, entered via the clock
   // icon on the Payroll table's Action column. Total hours = indHours ×
   // indPercentage/100, and that × Rate/hr is added to Gross. The two inputs are
@@ -509,34 +519,36 @@ model ProcessWeeklyPayroll {
   payCategory        String
   shiftType          String
   currency           String
-  hourlyRate         Float
-  monthlyRate        Float
-  weeklyRate         Float
+  // Every money column below is AES-256-GCM ciphertext ("enc:v1:…", see
+  // src/lib/salaryCrypto.ts) stored as text; hours columns stay numeric.
+  hourlyRate         String
+  monthlyRate        String
+  weeklyRate         String
   actualMinutes      Int
   completionMinutes  Int?
   hours              Float?
-  gross              Float
-  deductions         Float
-  net                Float
+  gross              String
+  deductions         String
+  net                String
   status             String // status at the time of processing (always "Reviewed")
-  bonus              Float    @default(0)
-  misc               Float    @default(0)
-  retroPay           Float    @default(0)
-  reim               Float    @default(0)
-  cashAdvance        Float    @default(0)
-  hmo                Float    @default(0)
-  tax                Float    @default(0)   // retired: no longer entered or shown
+  bonus              String    @default("0")
+  misc               String    @default("0")
+  retroPay           String    @default("0")
+  reim               String    @default("0")
+  cashAdvance        String    @default("0")
+  hmo                String    @default("0")
+  tax                String    @default("0")   // retired: no longer entered or shown
   // Fixed-Ind hours-at-percentage, as the resolved amount rather than the two
   // inputs — a snapshot freezes outcomes, and this one is part of Gross.
-  indHoursPay        Float    @default(0)
+  indHoursPay        String    @default("0")
   // Paid leave, split by kind — each is its own voucher earnings line and part
   // of Gross. ptoHours/ptoPay below cover the PTO line; these cover the rest.
   sickHours          Float    @default(0)   // Medical Unavailability
-  sickPay            Float    @default(0)
+  sickPay            String    @default("0")
   specialHours       Float    @default(0)
-  specialPay         Float    @default(0)
+  specialPay         String    @default("0")
   advanceHours       Float    @default(0)   // Advance PTO/Birthday + Advance Sick
-  advancePay         Float    @default(0)
+  advancePay         String    @default("0")
   processedAt        DateTime @updatedAt
   restDay            String   @default("")
   ptoHours           Float    @default(0)
@@ -546,13 +558,13 @@ model ProcessWeeklyPayroll {
   usHolidayHours     Float    @default(0)
   hoOtHours          Float    @default(0)
   localHolidayHours  Float    @default(0)
-  ptoPay             Float    @default(0)
-  regPay             Float    @default(0)
-  regOtPay           Float    @default(0)
-  rdOtPay            Float    @default(0)
-  usHolidayPay       Float    @default(0)
-  hoOtPay            Float    @default(0)
-  localHolidayPay    Float    @default(0)
+  ptoPay             String    @default("0")
+  regPay             String    @default("0")
+  regOtPay           String    @default("0")
+  rdOtPay            String    @default("0")
+  usHolidayPay       String    @default("0")
+  hoOtPay            String    @default("0")
+  localHolidayPay    String    @default("0")
   // "date" -> minutes; freezes the voucher's Sun→Sat grid at process time
   evaluatedDailyMinutes Json  @default("{}")
 
@@ -708,6 +720,35 @@ model AppSetting {
   updatedAt DateTime @updatedAt @default(now())
 
   @@map("app_settings")
+}
+
+/// One row per admin who has completed the salary email-OTP check. Salary and
+/// payment figures are only decrypted for them while expiresAt is in the
+/// future (30 days from verification); afterwards they verify again. Who may
+/// verify at all is the allowlist in app_settings."salary_viewer_emails" plus
+/// the SALARY_VIEWER_EMAILS env var — see src/lib/salaryAccess.ts.
+model SalaryAccessGrant {
+  email      String   @id
+  verifiedAt DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@map("salary_access_grants")
+}
+
+/// Pending/used one-time codes for the salary unlock. Only an HMAC of the code
+/// is stored; the newest unconsumed row per email is the live one.
+model SalaryOtpChallenge {
+  id         String    @id @default(uuid()) @db.Uuid
+  email      String
+  codeHash   String
+  expiresAt  DateTime  @db.Timestamptz(3)
+  attempts   Int       @default(0)
+  consumedAt DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([email, createdAt])
+  @@map("salary_otp_challenges")
 }
 
 /// Admin override for the Attendance Tracker's NCNS (No Call No Show) column.

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { LuX, LuUserPlus, LuPencil, LuCalendarDays } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
+import { useSalaryAccess } from "@/components/SalaryAccessContext";
 import { ShiftScheduleModal } from "@/components/ShiftScheduleModal";
 import { SHIFTING_SCHEDULE, CROSS_DAY_SHIFT, isCrossDayWindow, scheduledMinutes } from "@/app/admin/contractors/shiftScheduleShared";
 import { weeklyRateFrom, hourlyRateFrom } from "@/lib/payrollVoucher";
@@ -97,6 +98,12 @@ const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm te
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
   const { officeLocations, deptTree, managers, countryLocations, currencies } = useContractorConfig();
+  // Salary gate: a locked admin was served blank rates, so on edit the rate
+  // inputs are disabled (the server ignores rate fields from a locked caller
+  // anyway — see updateContractor). Typing a rate for a NEW contractor reveals
+  // nothing the admin didn't already know, so Add stays open to everyone.
+  const { canView: salaryVisible } = useSalaryAccess();
+  const ratesLocked = isEdit && !salaryVisible;
   const DEPARTMENTS = Object.keys(deptTree);
   const COUNTRIES = countryLocations.length ? countryLocations : FALLBACK_COUNTRIES;
   const CURRENCIES = currencies.length ? currencies : FALLBACK_CURRENCIES;
@@ -571,24 +578,29 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
 
               {/* Monthly rate — main source */}
-              <FIELD label="Monthly Contract Rate" required labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                <input type="number" className={INPUT} value={form.monthlyRate}
+              <FIELD label="Monthly Contract Rate" required={!ratesLocked} labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                <input type={ratesLocked ? "text" : "number"} className={ratesLocked ? READONLY : INPUT} value={ratesLocked ? "••••••" : form.monthlyRate}
+                  disabled={ratesLocked}
                   onChange={(e) => set("monthlyRate", e.target.value)} placeholder="5200" />
               </FIELD>
 
               {/* Weekly & Hourly — auto-calculated */}
               <FIELD label="Weekly Contract Rate" labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
                 <input className={READONLY} readOnly
-                  value={form.weeklyRate}
+value={ratesLocked ? "••••••" : form.weeklyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
               <FIELD label="Hourly Rate (auto)">
                 <input className={READONLY} readOnly
-                  value={form.hourlyRate}
+value={ratesLocked ? "••••••" : form.hourlyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
             </div>
-            <p className="text-xs text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
+            {ratesLocked ? (
+              <p className="text-xs text-amber-700 mt-2">Contract rates are hidden — verify your identity (Salary locked · Verify in the top bar) to view or change them. Saving keeps the stored rates unchanged.</p>
+            ) : (
+              <p className="text-xs text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
+            )}
           </section>
         </form>
 

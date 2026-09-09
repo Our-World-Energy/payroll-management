@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { LuShieldCheck, LuLoaderCircle, LuKeyRound } from "react-icons/lu";
+import { normalizeRole, usesAdminConsole } from "@/lib/roles";
 
 type Mode = "loading" | "enroll" | "challenge";
 
@@ -102,10 +103,10 @@ export default function TwoFactorPage() {
       return;
     }
 
-    // Route by role: admins → /admin, contractors → /contractor
+    // Route by role: admin / HR / Manager → the console, contractors → /contractor
     const { data: { user } } = await supabase.auth.getUser();
-    const role = (user?.user_metadata?.role as string) ?? "admin";
-    router.replace(role === "user" ? "/contractor" : "/admin");
+    const role = normalizeRole(user?.user_metadata?.role);
+    router.replace(usesAdminConsole(role) ? "/admin" : "/contractor");
     router.refresh();
   }
 

@@ -9,13 +9,17 @@ import Image from "next/image";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { createClient } from "@/lib/supabase/client";
-import { NAV_ITEMS } from "@/lib/adminNav";
+import { matchesPath, navItemsForRole } from "@/lib/adminNav";
+import { CONSOLE_LABEL } from "@/lib/roles";
+import { useRole } from "./RoleContext";
 
 export function AdminSidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { open, close } = useSidebar();
   const { dark, collapsed, toggleDark, toggleCollapsed } = useAdminTheme();
+  const role = useRole();
+  const navItems = navItemsForRole(role);
 
   async function handleLogout() {
     const supabase = createClient();
@@ -23,17 +27,7 @@ export function AdminSidebar() {
     router.replace("/login");
   }
 
-  // Matches the item's own route and its sub-routes (so /admin/time-off/[id]
-  // still lights Time Away Management), but only on a path-segment boundary. A
-  // bare startsWith made "/admin/attendance-tracker" match "/admin/attendance"
-  // too, highlighting both items at once. Trailing slashes are normalised away
-  // because next.config sets trailingSlash: true.
-  const isActive = (href: string) => {
-    const path = pathname.replace(/\/+$/, "") || "/";
-    const target = href.replace(/\/+$/, "") || "/";
-    if (target === "/admin") return path === "/admin";
-    return path === target || path.startsWith(`${target}/`);
-  };
+  const isActive = (href: string) => matchesPath(pathname, href);
 
   const s = dark
     ? {
@@ -82,7 +76,7 @@ export function AdminSidebar() {
                 priority
               />
               <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 text-center ${s.label}`}>
-                Admin Console
+                {CONSOLE_LABEL[role]}
               </p>
             </div>
           )}
@@ -100,7 +94,7 @@ export function AdminSidebar() {
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {NAV_ITEMS.map(({ href, label, Icon }) => {
+          {navItems.map(({ href, label, Icon }) => {
             const active = isActive(href);
             return (
               <Link

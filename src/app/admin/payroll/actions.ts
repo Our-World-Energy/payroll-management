@@ -1,6 +1,22 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { canViewSalary, SALARY_ACCESS_ERROR } from "@/lib/salaryAccess";
+import { decryptSalaryNumber, encryptNumberFields, encryptSalaryNumber } from "@/lib/salaryCrypto";
+
+// Salary gate: every money column in both tables is stored encrypted (see
+// src/lib/salaryCrypto.ts) and is only decrypted for a caller with a live
+// salary unlock (src/lib/salaryAccess.ts). Anyone else gets 0 for money and a
+// rejected write — the check runs here, not in the UI, because these actions
+// use the service-role key and can be called directly.
+
+const ADJUSTMENT_MONEY = ["bonus", "misc", "retroPay", "reim", "cashAdvance", "hmo", "tax"] as const;
+const PROCESSED_MONEY = [
+  "hourlyRate", "monthlyRate", "weeklyRate", "gross", "deductions", "net",
+  "bonus", "misc", "retroPay", "reim", "cashAdvance", "hmo", "tax", "indHoursPay",
+  "sickPay", "specialPay", "advancePay", "ptoPay",
+  "regPay", "regOtPay", "rdOtPay", "usHolidayPay", "hoOtPay", "localHolidayPay",
+] as const;
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -35,16 +51,19 @@ export async function fetchPayrollAdjustments(weekStart: string): Promise<Payrol
     .eq("weekStart", weekStart);
 
   if (error || !data) return [];
+  const canView = await canViewSalary();
+  const money = (v: unknown) => (canView ? decryptSalaryNumber(v) : 0);
   return data.map((r) => ({
     email: String(r.email),
     weekStart: String(r.weekStart),
-    bonus: Number(r.bonus ?? 0),
-    misc: Number(r.misc ?? 0),
-    retroPay: Number(r.retroPay ?? 0),
-    reim: Number(r.reim ?? 0),
-    cashAdvance: Number(r.cashAdvance ?? 0),
-    hmo: Number(r.hmo ?? 0),
-    tax: Number(r.tax ?? 0),
+    bonus: money(r.bonus),
+    misc: money(r.misc),
+    retroPay: money(r.retroPay),
+    reim: money(r.reim),
+    cashAdvance: money(r.cashAdvance),
+    hmo: money(r.hmo),
+    tax: money(r.tax),
+    // Hours, not money — always visible.
     indHours: Number(r.indHours ?? 0),
     indPercentage: Number(r.indPercentage ?? 0),
   }));
@@ -63,6 +82,7 @@ export async function savePayrollAdjustment(params: {
   indHours: number;
   indPercentage: number;
 }): Promise<{ ok: boolean; error?: string }> {
+  if (!(await canViewSalary())) return { ok: false, error: SALARY_ACCESS_ERROR };
   const sb = getSupabase();
   const email = params.email.trim().toLowerCase();
 
@@ -77,13 +97,7 @@ export async function savePayrollAdjustment(params: {
   const payload = {
     email,
     weekStart: params.weekStart,
-    bonus: params.bonus,
-    misc: params.misc,
-    retroPay: params.retroPay,
-    reim: params.reim,
-    cashAdvance: params.cashAdvance,
-    hmo: params.hmo,
-    tax: params.tax,
+    ...encryptNumberFields(params, ADJUSTMENT_MONEY),
     indHours: params.indHours,
     indPercentage: params.indPercentage,
     updatedAt: new Date().toISOString(),
@@ -122,8 +136,12 @@ export async function bulkImportPayrollAdjustments(
   if (!ADJUSTMENT_FIELDS.includes(field)) {
     return { ok: false, updated: 0, failed: [{ email: "", error: "Invalid field" }] };
   }
+  if (!(await canViewSalary())) {
+    return { ok: false, updated: 0, failed: [{ email: "", error: SALARY_ACCESS_ERROR }] };
+  }
 
   const sb = getSupabase();
+  const zero = () => encryptSalaryNumber(0);
 
   const results: ImportRowResult[] = await Promise.all(rows.map(async (row): Promise<ImportRowResult> => {
     const email = row.email.trim().toLowerCase();
@@ -139,11 +157,11 @@ export async function bulkImportPayrollAdjustments(
 
     const now = new Date().toISOString();
     const { error } = existing
-      ? await sb.from(TABLE).update({ [field]: row.value, updatedAt: now }).eq("id", existing.id)
+      ? await sb.from(TABLE).update({ [field]: encryptSalaryNumber(row.value), updatedAt: now }).eq("id", existing.id)
       : await sb.from(TABLE).insert({
           id: crypto.randomUUID(), email, weekStart,
-          bonus: 0, misc: 0, retroPay: 0, reim: 0, cashAdvance: 0, hmo: 0, tax: 0,
-          [field]: row.value, updatedAt: now,
+          bonus: zero(), misc: zero(), retroPay: zero(), reim: zero(), cashAdvance: zero(), hmo: zero(), tax: zero(),
+          [field]: encryptSalaryNumber(row.value), updatedAt: now,
         });
 
     if (error) return { email, ok: false, error: error.message };
@@ -229,6 +247,11 @@ type ProcessRowResult = { email: string; ok: true } | { email: string; ok: false
 export async function processWeeklyPayroll(
   rows: ProcessedPayrollRow[]
 ): Promise<{ ok: boolean; processed: number; failed: Array<{ email: string; error: string }> }> {
+  // The figures arrive computed client-side from rates the caller could only
+  // have seen while unlocked — a locked caller would freeze zeros.
+  if (!(await canViewSalary())) {
+    return { ok: false, processed: 0, failed: rows.map((r) => ({ email: r.email, error: SALARY_ACCESS_ERROR })) };
+  }
   const sb = getSupabase();
 
   const results: ProcessRowResult[] = await Promise.all(rows.map(async (row): Promise<ProcessRowResult> => {
@@ -242,7 +265,7 @@ export async function processWeeklyPayroll(
       .maybeSingle();
     if (lookupErr) return { email, ok: false, error: lookupErr.message };
 
-    const payload = { ...row, email, processedAt: new Date().toISOString() };
+    const payload = { ...row, ...encryptNumberFields(row, PROCESSED_MONEY), email, processedAt: new Date().toISOString() };
     const { error } = existing
       ? await sb.from(PROCESS_TABLE).update(payload).eq("id", existing.id)
       : await sb.from(PROCESS_TABLE).insert({ id: crypto.randomUUID(), ...payload });
@@ -324,6 +347,8 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
     .select("email, processedAt, name, department, role, restDay, country, payCategory, shiftType, currency, hourlyRate, monthlyRate, weeklyRate, actualMinutes, completionMinutes, gross, deductions, net, bonus, misc, retroPay, reim, cashAdvance, hmo, tax, indHoursPay, ptoHours, sickHours, sickPay, specialHours, specialPay, advanceHours, advancePay, regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours, ptoPay, regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay, evaluatedDailyMinutes, regularOtDailyMinutes")
     .eq("weekStart", weekStart);
   if (error || !data) return {};
+  const canView = await canViewSalary();
+  const money = (v: unknown) => (canView ? decryptSalaryNumber(v) : 0);
   return Object.fromEntries(data.map((r) => [String(r.email), {
     processedAt: String(r.processedAt),
     name: String(r.name),
@@ -334,42 +359,42 @@ export async function fetchProcessedWeeklyPayroll(weekStart: string): Promise<Re
     payCategory: String(r.payCategory),
     shiftType: String(r.shiftType),
     currency: String(r.currency),
-    hourlyRate: Number(r.hourlyRate),
-    monthlyRate: Number(r.monthlyRate),
-    weeklyRate: Number(r.weeklyRate),
+    hourlyRate: money(r.hourlyRate),
+    monthlyRate: money(r.monthlyRate),
+    weeklyRate: money(r.weeklyRate),
     actualMinutes: Number(r.actualMinutes),
     completionMinutes: r.completionMinutes == null ? null : Number(r.completionMinutes),
-    gross: Number(r.gross),
-    deductions: Number(r.deductions),
-    net: Number(r.net),
-    bonus: Number(r.bonus ?? 0),
-    misc: Number(r.misc ?? 0),
-    retroPay: Number(r.retroPay ?? 0),
-    reim: Number(r.reim ?? 0),
-    cashAdvance: Number(r.cashAdvance ?? 0),
-    hmo: Number(r.hmo ?? 0),
-    tax: Number(r.tax ?? 0),
-    indHoursPay: Number(r.indHoursPay ?? 0),
+    gross: money(r.gross),
+    deductions: money(r.deductions),
+    net: money(r.net),
+    bonus: money(r.bonus),
+    misc: money(r.misc),
+    retroPay: money(r.retroPay),
+    reim: money(r.reim),
+    cashAdvance: money(r.cashAdvance),
+    hmo: money(r.hmo),
+    tax: money(r.tax),
+    indHoursPay: money(r.indHoursPay),
     ptoHours: Number(r.ptoHours ?? 0),
     sickHours: Number(r.sickHours ?? 0),
-    sickPay: Number(r.sickPay ?? 0),
+    sickPay: money(r.sickPay),
     specialHours: Number(r.specialHours ?? 0),
-    specialPay: Number(r.specialPay ?? 0),
+    specialPay: money(r.specialPay),
     advanceHours: Number(r.advanceHours ?? 0),
-    advancePay: Number(r.advancePay ?? 0),
+    advancePay: money(r.advancePay),
     regHours: Number(r.regHours ?? 0),
     regOtHours: Number(r.regOtHours ?? 0),
     rdOtHours: Number(r.rdOtHours ?? 0),
     usHolidayHours: Number(r.usHolidayHours ?? 0),
     hoOtHours: Number(r.hoOtHours ?? 0),
     localHolidayHours: Number(r.localHolidayHours ?? 0),
-    ptoPay: Number(r.ptoPay ?? 0),
-    regPay: Number(r.regPay ?? 0),
-    regOtPay: Number(r.regOtPay ?? 0),
-    rdOtPay: Number(r.rdOtPay ?? 0),
-    usHolidayPay: Number(r.usHolidayPay ?? 0),
-    hoOtPay: Number(r.hoOtPay ?? 0),
-    localHolidayPay: Number(r.localHolidayPay ?? 0),
+    ptoPay: money(r.ptoPay),
+    regPay: money(r.regPay),
+    regOtPay: money(r.regOtPay),
+    rdOtPay: money(r.rdOtPay),
+    usHolidayPay: money(r.usHolidayPay),
+    hoOtPay: money(r.hoOtPay),
+    localHolidayPay: money(r.localHolidayPay),
     evaluatedDailyMinutes: (r.evaluatedDailyMinutes ?? {}) as Record<string, number>,
     regularOtDailyMinutes: (r.regularOtDailyMinutes ?? {}) as Record<string, number>,
   }]));

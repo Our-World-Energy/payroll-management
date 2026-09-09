@@ -44,12 +44,17 @@ export async function GET(request: Request) {
 
   const logs = await prisma.worksnapDailyLog.findMany({
     where,
+    // firstInLogged/lastOutLogged are Worksnaps' screenshot-upload instants — the
+    // only sub-slot signal available, since firstIn/lastOut are clock-aligned
+    // 10-minute boundaries. Null on days synced before the column existed.
     select: {
-      worksnapUserId: true, email: true, entryDate: true,
-      firstIn: true, lastOut: true,
-      // Real clock-in/out instants — firstIn/lastOut are the rounded Worksnap
-      // bucket boundaries. Null on a small tail of un-backfilled rows.
-      firstInLogged: true, lastOutLogged: true,
+      worksnapUserId: true,
+      email: true,
+      entryDate: true,
+      firstIn: true,
+      lastOut: true,
+      firstInLogged: true,
+      lastOutLogged: true,
       totalMins: true,
     },
   });
