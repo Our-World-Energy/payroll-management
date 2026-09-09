@@ -6,12 +6,15 @@ import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { NotificationBell } from "./NotificationBell";
-import { NAV_ITEMS } from "@/lib/adminNav";
+import { navItemsForRole } from "@/lib/adminNav";
+import { ROLE_TITLE } from "@/lib/roles";
+import { useAccount } from "./RoleContext";
 
 export function AdminTopbar() {
   const { toggle } = useSidebar();
   const { dark } = useAdminTheme();
   const router = useRouter();
+  const { role, email } = useAccount();
   const [switching, setSwitching] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -21,9 +24,23 @@ export function AdminTopbar() {
   const [highlighted, setHighlighted] = useState(0);
   const searchRef = useRef<HTMLDivElement>(null);
 
+  // Only a full admin has a contractor account view to switch into, so for HR
+  // and Managers the account chip has no menu behind it.
+  const canSwitchView = role === "admin";
+  const displayName = email.split("@")[0] || ROLE_TITLE[role];
+  const initials =
+    displayName
+      .split(/[.\-_]/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("") || "U";
+
+  // Search only offers what this role can actually open.
+  const navItems = navItemsForRole(role);
   const matches = query.trim()
-    ? NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()))
-    : NAV_ITEMS;
+    ? navItems.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()))
+    : navItems;
 
   function goTo(href: string) {
     router.push(href);
@@ -132,24 +149,26 @@ export function AdminTopbar() {
 
         <div ref={menuRef} className="relative">
           <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className={`flex items-center gap-2.5 pl-3 border-l cursor-pointer ${dark ? "border-white/10" : "border-slate-200"}`}
+            onClick={() => { if (canSwitchView) setMenuOpen((v) => !v); }}
+            className={`flex items-center gap-2.5 pl-3 border-l ${canSwitchView ? "cursor-pointer" : "cursor-default"} ${dark ? "border-white/10" : "border-slate-200"}`}
           >
             <div className="text-right hidden sm:block">
-              <p className={`text-sm font-semibold leading-tight ${dark ? "text-white" : "text-emerald-900"}`}>Admin User</p>
-              <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>System Administrator</p>
+              <p className={`text-sm font-semibold leading-tight truncate max-w-40 ${dark ? "text-white" : "text-emerald-900"}`}>{displayName}</p>
+              <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{ROLE_TITLE[role]}</p>
             </div>
             <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
-              AU
+              {initials}
             </div>
-            <LuChevronDown
-              size={14}
-              strokeWidth={2}
-              className={`hidden sm:block transition-transform ${menuOpen ? "rotate-180" : ""} ${dark ? "text-white/40" : "text-slate-400"}`}
-            />
+            {canSwitchView && (
+              <LuChevronDown
+                size={14}
+                strokeWidth={2}
+                className={`hidden sm:block transition-transform ${menuOpen ? "rotate-180" : ""} ${dark ? "text-white/40" : "text-slate-400"}`}
+              />
+            )}
           </button>
 
-          {menuOpen && (
+          {menuOpen && canSwitchView && (
             <div className={`absolute right-0 top-full mt-2 z-50 w-56 rounded-xl shadow-xl border overflow-hidden ${
               dark ? "bg-[#0f1a15] border-white/10" : "bg-white border-slate-200"
             }`}>

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { type AppRole, normalizeRole } from "@/lib/roles";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -12,7 +13,7 @@ export type AppUser = {
   id: string;
   email: string;
   fullName: string;
-  role: "admin" | "user";
+  role: AppRole;
   createdAt: string;
   lastSignIn: string | null;
   confirmed: boolean;
@@ -24,7 +25,7 @@ function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
     id:          String(u.id          ?? ""),
     email:       String(u.email       ?? ""),
     fullName:    fullName || String(metadata?.fullName ?? ""),
-    role:        metadata?.role === "user" ? "user" : "admin",
+    role:        normalizeRole(metadata?.role),
     createdAt:   String(u.created_at  ?? ""),
     lastSignIn:  u.last_sign_in_at ? String(u.last_sign_in_at) : null,
     confirmed:   Boolean(u.email_confirmed_at),
@@ -81,7 +82,7 @@ export async function fetchUsers(): Promise<AppUser[]> {
     });
 }
 
-export async function createUser(email: string, password: string, role: "admin" | "user"): Promise<AppUser> {
+export async function createUser(email: string, password: string, role: AppRole): Promise<AppUser> {
   const sb = getSupabase();
   const { data, error } = await sb.auth.admin.createUser({
     email,
@@ -99,7 +100,7 @@ export async function deleteUser(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function updateUserRole(id: string, role: "admin" | "user"): Promise<void> {
+export async function updateUserRole(id: string, role: AppRole): Promise<void> {
   const sb = getSupabase();
   const { error } = await sb.auth.admin.updateUserById(id, {
     user_metadata: { role },

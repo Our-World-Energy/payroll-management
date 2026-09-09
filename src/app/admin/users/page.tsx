@@ -4,11 +4,13 @@ import { useEffect, useState, useTransition } from "react";
 import {
   LuUsers, LuPlus, LuTrash2, LuX, LuLoader, LuShieldCheck, LuUser,
   LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
+  LuHeartHandshake, LuBriefcaseBusiness,
 } from "react-icons/lu";
 import {
   fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword,
   backfillContractorAccounts, type AppUser,
 } from "./actions";
+import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL } from "@/lib/roles";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 
@@ -38,11 +40,46 @@ function avatarColor(id: string) {
   return AVATAR_COLORS[n % AVATAR_COLORS.length];
 }
 
+const ROLE_BADGE: Record<AppRole, { chip: string; tint: string; Icon: React.ElementType }> = {
+  admin:   { chip: "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100",     tint: "bg-purple-50 text-purple-600",   Icon: LuShieldCheck       },
+  hr:      { chip: "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100",         tint: "bg-amber-50 text-amber-600",     Icon: LuHeartHandshake    },
+  manager: { chip: "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100", tint: "bg-emerald-50 text-emerald-600", Icon: LuBriefcaseBusiness },
+  user:    { chip: "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100",             tint: "bg-blue-50 text-blue-600",       Icon: LuUser              },
+};
+
+function RoleIcon({ role, size }: { role: AppRole; size: number }) {
+  const { Icon } = ROLE_BADGE[role];
+  return <Icon size={size} />;
+}
+
+function RoleChip({ role }: { role: AppRole }) {
+  const { chip, Icon } = ROLE_BADGE[role];
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${chip}`}>
+      <Icon size={11} /> {ROLE_LABEL[role]}
+    </span>
+  );
+}
+
+function StatCard({ label, value, Icon, tint }: { label: string; value: number; Icon: React.ElementType; tint: string }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
+      <div>
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
+        <p className="text-3xl font-black text-[#003527] mt-1">{value}</p>
+      </div>
+      <div className={`size-10 rounded-xl flex items-center justify-center shrink-0 ${tint}`}>
+        <Icon size={20} />
+      </div>
+    </div>
+  );
+}
+
 type Modal =
   | { type: "create" }
   | { type: "delete"; user: AppUser }
   | { type: "reset"; user: AppUser }
-  | { type: "role"; user: AppUser; newRole: "admin" | "user" }
+  | { type: "role"; user: AppUser; newRole: AppRole }
   | null;
 
 export default function UserManagementPage() {
@@ -56,12 +93,12 @@ export default function UserManagementPage() {
 
   // Table filters
   const [searchTerm, setSearchTerm] = useState("");
-  const [roleFilter, setRoleFilter] = useState<"All" | "admin" | "user">("All");
+  const [roleFilter, setRoleFilter] = useState<"All" | AppRole>("All");
 
   // Create form
   const [newEmail,    setNewEmail]    = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [newRole,     setNewRole]     = useState<"admin" | "user">("user");
+  const [newRole,     setNewRole]     = useState<AppRole>("user");
   const [formError,   setFormError]   = useState("");
 
   // Reset password form
@@ -128,14 +165,14 @@ export default function UserManagementPage() {
     });
   }
 
-  function handleRoleToggle(user: AppUser) {
-    const newRole = user.role === "admin" ? "user" : "admin";
-    setModal({ type: "role", user, newRole });
+  function handleRolePick(user: AppUser) {
+    setModal({ type: "role", user, newRole: user.role });
   }
 
   function handleConfirmRoleChange() {
     if (modal?.type !== "role") return;
     const { user, newRole } = modal;
+    if (newRole === user.role) { closeModal(); return; }
     startTransition(async () => {
       try {
         await updateUserRole(user.id, newRole);
@@ -162,8 +199,7 @@ export default function UserManagementPage() {
     });
   }
 
-  const admins = users.filter((u) => u.role === "admin").length;
-  const normalUsers = users.filter((u) => u.role === "user").length;
+  const countByRole = (role: AppRole) => users.filter((u) => u.role === role).length;
 
   // Sorted alphabetically by the name actually shown in the row, falling back to
   // the email for accounts with no name — otherwise nameless rows would sort
@@ -196,7 +232,7 @@ export default function UserManagementPage() {
             </div>
             <div>
               <h2 className="text-lg md:text-xl font-bold text-[#003527] tracking-tight">User Management</h2>
-              <p className="text-xs md:text-sm text-slate-600 mt-0.5">Create and manage admin and user accounts for portal access.</p>
+              <p className="text-xs md:text-sm text-slate-600 mt-0.5">Create accounts and set the role that decides what each person sees.</p>
             </div>
           </div>
         </div>
@@ -230,34 +266,17 @@ export default function UserManagementPage() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Users</p>
-            <p className="text-3xl font-black text-[#003527] mt-1">{users.length}</p>
-          </div>
-          <div className="size-10 rounded-xl bg-teal-50 flex items-center justify-center">
-            <LuUsers size={20} className="text-teal-600" />
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Admins</p>
-            <p className="text-3xl font-black text-[#003527] mt-1">{admins}</p>
-          </div>
-          <div className="size-10 rounded-xl bg-purple-50 flex items-center justify-center">
-            <LuShieldCheck size={20} className="text-purple-600" />
-          </div>
-        </div>
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Normal Users</p>
-            <p className="text-3xl font-black text-[#003527] mt-1">{normalUsers}</p>
-          </div>
-          <div className="size-10 rounded-xl bg-blue-50 flex items-center justify-center">
-            <LuUser size={20} className="text-blue-600" />
-          </div>
-        </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+        <StatCard label="Total Users" value={users.length} Icon={LuUsers} tint="bg-teal-50 text-teal-600" />
+        {APP_ROLES.map((role) => (
+          <StatCard
+            key={role}
+            label={role === "user" ? "Contractors" : `${ROLE_LABEL[role]}s`}
+            value={countByRole(role)}
+            Icon={ROLE_BADGE[role].Icon}
+            tint={ROLE_BADGE[role].tint}
+          />
+        ))}
       </div>
 
       {error && (
@@ -291,12 +310,13 @@ export default function UserManagementPage() {
         </div>
         <select
           value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value as "All" | "admin" | "user")}
+          onChange={(e) => setRoleFilter(e.target.value as "All" | AppRole)}
           className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
         >
           <option value="All">All Roles</option>
-          <option value="admin">Admin</option>
-          <option value="user">Contractor</option>
+          {APP_ROLES.map((role) => (
+            <option key={role} value={role}>{ROLE_LABEL[role]}</option>
+          ))}
         </select>
         {(searchTerm !== "" || roleFilter !== "All") && (
           <button
@@ -349,17 +369,12 @@ export default function UserManagementPage() {
                   <td className="px-5 py-4 text-sm text-slate-500 truncate max-w-xs">{user.email}</td>
                   <td className="px-5 py-4">
                     <button
-                      onClick={() => handleRoleToggle(user)}
+                      onClick={() => handleRolePick(user)}
                       disabled={isPending}
-                      title="Click to toggle role"
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors cursor-pointer disabled:opacity-50 ${
-                        user.role === "admin"
-                          ? "bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100"
-                          : "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
-                      }`}
+                      title="Click to change role"
+                      className="cursor-pointer disabled:opacity-50"
                     >
-                      {user.role === "admin" ? <LuShieldCheck size={11} /> : <LuUser size={11} />}
-                      {user.role === "admin" ? "Admin" : "Contractor"}
+                      <RoleChip role={user.role} />
                     </button>
                   </td>
                   <td className="px-5 py-4">
@@ -435,9 +450,10 @@ export default function UserManagementPage() {
               </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</label>
-                <select className={INPUT + " cursor-pointer"} value={newRole} onChange={(e) => setNewRole(e.target.value as "admin" | "user")}>
-                  <option value="user">Contractor — normal access</option>
-                  <option value="admin">Admin — full access</option>
+                <select className={INPUT + " cursor-pointer"} value={newRole} onChange={(e) => setNewRole(e.target.value as AppRole)}>
+                  {APP_ROLES.map((role) => (
+                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                  ))}
                 </select>
               </div>
               {formError && <p className="text-xs text-red-500">{formError}</p>}
@@ -492,24 +508,38 @@ export default function UserManagementPage() {
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm">
             <div className="px-6 py-5">
-              <div className={`size-12 rounded-full flex items-center justify-center mx-auto mb-4 ${modal.newRole === "admin" ? "bg-purple-100" : "bg-blue-100"}`}>
-                {modal.newRole === "admin" ? <LuShieldCheck size={22} className="text-purple-600" /> : <LuUser size={22} className="text-blue-600" />}
+              <div className={`size-12 rounded-full flex items-center justify-center mx-auto mb-4 ${ROLE_BADGE[modal.newRole].tint}`}>
+                <RoleIcon role={modal.newRole} size={22} />
               </div>
               <h3 className="text-base font-bold text-slate-800 text-center">Change Role?</h3>
               <p className="text-sm text-slate-500 text-center mt-1">
-                <span className="font-semibold text-slate-700">{modal.user.email}</span> will be changed from{" "}
-                <span className="font-semibold text-slate-700">{modal.user.role === "admin" ? "Admin" : "Contractor"}</span> to{" "}
-                <span className="font-semibold text-slate-700">{modal.newRole === "admin" ? "Admin" : "Contractor"}</span>.
+                <span className="font-semibold text-slate-700">{modal.user.email}</span> is currently{" "}
+                <span className="font-semibold text-slate-700">{ROLE_LABEL[modal.user.role]}</span>. Pick the role
+                they should have — it decides which menus they see when they sign in.
               </p>
+              <div className="space-y-1 mt-4">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</label>
+                <select
+                  className={INPUT + " cursor-pointer"}
+                  value={modal.newRole}
+                  onChange={(e) => setModal({ ...modal, newRole: e.target.value as AppRole })}
+                >
+                  {APP_ROLES.map((role) => (
+                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                  ))}
+                </select>
+              </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">
               <button onClick={closeModal} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
               <button
                 onClick={handleConfirmRoleChange}
-                disabled={isPending}
-                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60"
+                disabled={isPending || modal.newRole === modal.user.role}
+                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {isPending ? <LuLoader size={15} className="animate-spin" /> : (modal.newRole === "admin" ? <LuShieldCheck size={15} /> : <LuUser size={15} />)}
+                {isPending
+                  ? <LuLoader size={15} className="animate-spin" />
+                  : <RoleIcon role={modal.newRole} size={15} />}
                 {isPending ? "Updating…" : "Change Role"}
               </button>
             </div>
