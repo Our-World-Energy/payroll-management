@@ -1,20 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   LuEye, LuX, LuClock, LuCircleCheck, LuCircleX, LuCalendarDays, LuTrendingUp,
-  LuShieldCheck, LuChevronLeft, LuChevronRight, LuChevronDown, LuChevronUp, LuDownload, LuUpload, LuCalendarPlus,
-  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote,
+  LuShieldCheck, LuChevronRight, LuChevronDown, LuChevronUp, LuDownload, LuUpload, LuCalendarPlus,
+  LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote, LuUsers,
 } from "react-icons/lu";
 import {
   fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
   fetchAllLeaveRequestsAdmin, createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
   fetchAllSpecialLeaveGrantsAdmin, addSpecialLeaveGrant, type SpecialLeaveGrant,
+  updateLeaveRequestStatus,
 } from "../contractors/actions";
 import { fetchCutOffTime, fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
+import { CalendarDateInput, parseDate, toDateStr } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
@@ -30,175 +31,6 @@ function fmtDate(date: string) {
   return year && month && day ? `${month}-${day}-${year}` : date;
 }
 
-function parseDate(date: string) {
-  const [year, month, day] = date.split("-").map(Number);
-  return year && month && day ? new Date(year, month - 1, day) : null;
-}
-
-function pad2(n: number) { return String(n).padStart(2, "0"); }
-function toDateStr(d: Date) { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; }
-
-const CALENDAR_DAY_HEADERS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
-const CALENDAR_MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
-
-function buildMonthCells(year: number, month: number) {
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const cells: (number | null)[] = [];
-  for (let i = 0; i < firstDay; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  while (cells.length % 7 !== 0) cells.push(null);
-  return cells;
-}
-
-// Calendar-popup date input for Leave Override's Start/End Date fields — a
-// plain <input type="date"> can't render arbitrary individual dates in red,
-// only a single continuous min/max range, so this renders its own month grid
-// instead. Dates before `minDate` and dates in `blockedDates` (already
-// covered by an existing request for this contractor, Current or Historical,
-// any status) show red/disabled and can't be picked.
-function CalendarDateInput({ value, onChange, minDate, blockedDates }: {
-  value: string;
-  onChange: (date: string) => void;
-  minDate?: string;
-  blockedDates: Set<string>;
-}) {
-  const [open, setOpen] = useState(false);
-  const anchor = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
-  const [viewYear, setViewYear] = useState(anchor.getFullYear());
-  const [viewMonth, setViewMonth] = useState(anchor.getMonth());
-  // Popup coordinates in viewport space (for the fixed-position portal below).
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const popupRef = useRef<HTMLDivElement>(null);
-
-  // The popup is portaled to document.body (fixed-positioned) instead of
-  // rendered inline — an inline absolutely-positioned popup still counts
-  // toward the scrollable modal body's content height, which can grow the
-  // modal (up to its max-h cap) and re-center it on open, making everything
-  // above — including the balance scorecards — visibly jump. Portaling keeps
-  // it completely outside that layout.
-  useEffect(() => {
-    if (!open) return;
-    function onOutsideClick(e: MouseEvent) {
-      const target = e.target as Node;
-      if (buttonRef.current?.contains(target) || popupRef.current?.contains(target)) return;
-      setOpen(false);
-    }
-    // Closes on scroll (capture catches scroll from any ancestor, including
-    // the modal body) rather than repositioning — simpler and avoids a
-    // stale-position popup left floating after the page moves under it.
-    function onScroll() { setOpen(false); }
-    document.addEventListener("mousedown", onOutsideClick);
-    window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      document.removeEventListener("mousedown", onOutsideClick);
-      window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [open]);
-
-  // The popup itself is a fixed w-52 (208px), roughly 240px tall — on a narrow
-  // phone viewport, anchoring it straight to the button's own left/bottom
-  // (with no clamping) can push it partly off-screen to the right, or below
-  // the bottom edge when the button sits low in a scrollable modal. Clamp
-  // left to the viewport width and flip above the button when there isn't
-  // room below, so the whole calendar always stays reachable.
-  function openPicker() {
-    const target = parseDate(value) ?? (minDate ? parseDate(minDate) : null) ?? new Date();
-    setViewYear(target.getFullYear());
-    setViewMonth(target.getMonth());
-    const rect = buttonRef.current?.getBoundingClientRect();
-    if (rect) {
-      const POPUP_WIDTH = 208;
-      const POPUP_HEIGHT = 240;
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - POPUP_WIDTH - 8));
-      const top = rect.bottom + POPUP_HEIGHT <= window.innerHeight
-        ? rect.bottom + 4
-        : Math.max(8, rect.top - POPUP_HEIGHT - 4);
-      setCoords({ top, left });
-    }
-    setOpen(true);
-  }
-
-  function prevMonth() {
-    if (viewMonth === 0) { setViewYear((y) => y - 1); setViewMonth(11); }
-    else setViewMonth((m) => m - 1);
-  }
-  function nextMonth() {
-    if (viewMonth === 11) { setViewYear((y) => y + 1); setViewMonth(0); }
-    else setViewMonth((m) => m + 1);
-  }
-
-  const cells = buildMonthCells(viewYear, viewMonth);
-
-  return (
-    <>
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => (open ? setOpen(false) : openPicker())}
-        className="w-full text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-500 text-left"
-      >
-        {value ? fmtDate(value) : <span className="text-slate-400">Select date</span>}
-      </button>
-      {open && coords && createPortal(
-        <div
-          ref={popupRef}
-          className="fixed z-[60] bg-white border border-slate-200 rounded-lg shadow-lg p-2 w-52"
-          style={{ top: coords.top, left: coords.left }}
-        >
-          <div className="flex items-center justify-between mb-1.5">
-            <button type="button" onClick={prevMonth} className="p-0.5 rounded hover:bg-slate-100 text-slate-500">
-              <LuChevronLeft size={12} />
-            </button>
-            <span className="text-[11px] font-bold text-[#003527]">{CALENDAR_MONTH_NAMES[viewMonth]} {viewYear}</span>
-            <button type="button" onClick={nextMonth} className="p-0.5 rounded hover:bg-slate-100 text-slate-500">
-              <LuChevronRight size={12} />
-            </button>
-          </div>
-          <div className="grid grid-cols-7 mb-0.5">
-            {CALENDAR_DAY_HEADERS.map((d) => (
-              <div key={d} className="text-center text-[9px] font-semibold text-slate-400">{d}</div>
-            ))}
-          </div>
-          <div className="grid grid-cols-7 gap-0.5">
-            {cells.map((day, i) => {
-              if (!day) return <div key={i} className="h-6" />;
-              const dateStr = `${viewYear}-${pad2(viewMonth + 1)}-${pad2(day)}`;
-              const isSelected = dateStr === value;
-              const isBeforeMin = !!minDate && dateStr < minDate;
-              const isBlocked = !isSelected && blockedDates.has(dateStr);
-              const isDisabled = isBeforeMin || isBlocked;
-              return (
-                <button
-                  type="button"
-                  key={i}
-                  disabled={isDisabled}
-                  title={isBlocked ? "Already requested for this contractor" : undefined}
-                  onClick={() => { onChange(dateStr); setOpen(false); }}
-                  className={`h-6 rounded text-[10px] font-medium transition-colors ${
-                    isSelected ? "bg-[#003527] text-white"
-                    : isBlocked ? "bg-red-100 text-red-500 cursor-not-allowed"
-                    : isBeforeMin ? "text-slate-300 cursor-not-allowed"
-                    : "text-slate-700 hover:bg-teal-50"
-                  }`}
-                >
-                  {day}
-                </button>
-              );
-            })}
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
-  );
-}
 
 function addMonths(date: Date, months: number) {
   const result = new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
@@ -330,6 +162,8 @@ type TimeOffRow = {
   outstandingMedicalBalance: number;
   unusedSickLeave: number;
   latestRequest: AdminLeaveRequest | null;
+  /** Newest request still awaiting a decision, if any. */
+  pendingRequest: AdminLeaveRequest | null;
 };
 
 // Summarizes current PTO/Sick Leave usage, and offers "Reset PTO Used / Sick
@@ -638,6 +472,18 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     return map;
   }, [leaveRequests]);
 
+  // Map email → newest request still awaiting a decision. Distinct from
+  // latestByEmail, which is the newest request of any status — a contractor
+  // whose most recent request was already approved still has a pending one
+  // worth showing on Time Away Request.
+  const pendingByEmail = useMemo<Record<string, AdminLeaveRequest>>(() => {
+    const map: Record<string, AdminLeaveRequest> = {};
+    for (const r of leaveRequests) {
+      if (r.status === "Pending" && !map[r.email]) map[r.email] = r;
+    }
+    return map;
+  }, [leaveRequests]);
+
   // Map email → every Special Leave grant (Hourly/Fixed-Ind only — see specialLeaveAvailableForGrants).
   const grantsByEmail = useMemo<Record<string, SpecialLeaveGrant[]>>(() => {
     const map: Record<string, SpecialLeaveGrant[]> = {};
@@ -716,28 +562,60 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
       outstandingMedicalBalance: c.outstandingMedicalBalance,
       unusedSickLeave:  calculateUnusedSickLeave(c.hireDate, sickLeaveUsed, cutoff),
       latestRequest:    latestByEmail[c.email] ?? null,
+      pendingRequest:   pendingByEmail[c.email] ?? null,
     };
-  }), [contractors, latestByEmail, grantsByEmail, cutoff]);
+  }), [contractors, latestByEmail, pendingByEmail, grantsByEmail, cutoff]);
 
-  const countryOptions    = Array.from(new Set(rows.map((r) => r.country))).sort();
-  const departmentOptions = Array.from(new Set(rows.map((r) => r.department || "Unassigned"))).sort();
+  const scopedRows = scoped ? rows.filter((r) => !!assignedTo && r.manager === assignedTo) : rows;
+
+  // Read-only Review popup: the contractor's standing balances beside the
+  // request awaiting a decision. Read-only like the rest of this view — it
+  // reports, it does not approve.
+  const [reviewRowId, setReviewRowId] = useState<string | null>(null);
+  const reviewRow = scopedRows.find((r) => r.id === reviewRowId) ?? null;
+  const [reviewTab, setReviewTab] = useState<"new" | "history">("new");
+  const [decisionBusy, setDecisionBusy] = useState<"Approved" | "Rejected" | null>(null);
+  const [decisionError, setDecisionError] = useState("");
+
+  // Approve / decline the request open in the Review popup.
+  // updateLeaveRequestStatus owns the balance side effects (deducting from the
+  // right pool, and putting hours back when a prior decision is reversed), so
+  // this only reloads afterwards rather than adjusting anything itself.
+  async function handleReviewDecision(requestId: string, status: "Approved" | "Rejected") {
+    setDecisionBusy(status);
+    setDecisionError("");
+    const res = await updateLeaveRequestStatus(requestId, status);
+    setDecisionBusy(null);
+    if (!res.ok) {
+      setDecisionError(res.error ?? "Could not save the decision. Please try again.");
+      return;
+    }
+    setReviewRowId(null);
+    await reloadData();
+  }
+
+  const countryOptions    = Array.from(new Set(scopedRows.map((r) => r.country))).sort();
+  const departmentOptions = Array.from(new Set(scopedRows.map((r) => r.department || "Unassigned"))).sort();
   const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses";
 
-  const filteredRows = rows.filter((r) => {
+  const filteredRows = scopedRows.filter((r) => {
     const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
     const cm = countryFilter    === "All Countries"   || r.country === countryFilter;
     const dm = departmentFilter === "All Assigned Teams" || (r.department || "Unassigned") === departmentFilter;
     const pm = payCategoryFilter === "All Categories" || r.payCategory === payCategoryFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
-    // Assigned-contractor scope, applied before the visible filters so the
-    // counts and CSV export cover only this manager's people.
-    const am = !scoped || (!!assignedTo && r.manager === assignedTo);
-    return nm && cm && dm && pm && sm && am;
+    return nm && cm && dm && pm && sm;
   });
 
   const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
   const approvedCount = leaveRequests.filter((r) => r.status === "Approved").length;
   const rejectedCount = leaveRequests.filter((r) => r.status === "Rejected").length;
+
+  const scopedEmails = new Set(scopedRows.map((r) => r.email.trim().toLowerCase()));
+  const scopedRequests = leaveRequests.filter((r) => scopedEmails.has(r.email.trim().toLowerCase()));
+  const scopedPendingCount = scopedRequests.filter((r) => r.status === "Pending").length;
+  const scopedApprovedCount = scopedRequests.filter((r) => r.status === "Approved").length;
+  const scopedDeclinedCount = scopedRequests.filter((r) => r.status === "Rejected").length;
 
   const selectedRow = rows.find((r) => r.id === selectedRowId) ?? null;
 
@@ -778,16 +656,20 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   const isIndia = countryFilter === "India";
 
   const COLS = [
-    "Contractor", "Country", "Assigned Team", "Engagement Start Date",
+    "Contractor",
+    ...(readOnly ? [] : ["Country", "Assigned Team", "Engagement Start Date"]),
     // The two "Used Import" columns are hidden from the table — the imported
     // baseline still drives the Used figures (see the row build above) and is
     // surfaced/clearable from the Used cells themselves. Both values remain in
     // the CSV export.
-    ...(!isIndia ? [...(readOnly ? [] : ["PTO Accrual", "PTO Used"]), "PTO Accrual Available"] : []),
-    ...(readOnly ? [] : ["Medical Unavailability Accrual", "Medical Unavailability Used"]),
-    "Medical Unavailability Accrual Available",
-    ...(!isIndia ? ["Advance PTO/Birthday Leave"] : []),
-    "Advance Medical Unavailability", "Status", "Action",
+    ...(!isIndia && !readOnly ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
+    ...(readOnly ? [] : [
+      "Medical Unavailability Accrual", "Medical Unavailability Used", "Medical Unavailability Accrual Available",
+    ]),
+    ...(!isIndia && !readOnly ? ["Advance PTO/Birthday Leave"] : []),
+    ...(readOnly ? [] : ["Advance Medical Unavailability"]),
+    ...(readOnly ? ["Pending Request", "Request Dates"] : []),
+    "Status", "Action",
   ];
 
   function exportCSV() {
@@ -1843,6 +1725,25 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
         />
       )}
 
+      {readOnly && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-[clamp(0.375rem,0.7vw,0.625rem)] mb-[clamp(0.5rem,0.9vw,0.75rem)]">
+          {([
+            { label: "My Contractors", value: scopedRows.length, Icon: LuUsers, tint: "bg-white border-slate-200", chip: "bg-slate-100 text-slate-500", text: "text-[#003527]" },
+            { label: "Pending", value: scopedPendingCount, Icon: LuClock, tint: "bg-amber-50 border-amber-200", chip: "bg-amber-100 text-amber-600", text: "text-amber-600" },
+            { label: "Approved", value: scopedApprovedCount, Icon: LuCircleCheck, tint: "bg-emerald-50 border-emerald-200", chip: "bg-emerald-100 text-emerald-600", text: "text-emerald-700" },
+            { label: "Declined", value: scopedDeclinedCount, Icon: LuCircleX, tint: "bg-red-50 border-red-200", chip: "bg-red-100 text-red-600", text: "text-red-600" },
+          ]).map(({ label, value, Icon, tint, chip, text }) => (
+            <div key={label} className={`rounded-lg border shadow-sm p-[clamp(0.375rem,0.55vw,0.5rem)] flex items-center gap-[clamp(0.3125rem,0.55vw,0.5rem)] ${tint}`}>
+              <div className={`size-[clamp(1.25rem,1.6vw,1.5rem)] rounded-md flex items-center justify-center shrink-0 ${chip}`}>
+                <Icon size={12} strokeWidth={1.75} />
+              </div>
+              <p className="min-w-0 truncate text-[clamp(0.5rem,0.6vw,0.5625rem)] font-bold uppercase tracking-wide text-slate-600">{label}</p>
+              <p className={`shrink-0 text-[clamp(0.6875rem,0.93vw,0.875rem)] font-bold leading-none tabular-nums ${text}`}>{value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Stat cards ── */}
       {!readOnly && (
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-[clamp(0.375rem,0.7vw,0.625rem)] mb-[clamp(0.5rem,0.9vw,0.75rem)]">
@@ -1938,25 +1839,24 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
       {/* ── Table ── */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]" style={{ scrollbarWidth: "thin" }}>
-          <table className="w-full text-left" style={{ minWidth: "1840px", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left" style={{ minWidth: readOnly ? "44rem" : "1840px", borderCollapse: "separate", borderSpacing: 0, tableLayout: readOnly ? "fixed" : "auto" }}>
             <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                  style={{ minWidth: 210, background: "#003527" }}>Contractor</th>
+                  style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined, background: "#003527" }}>Contractor</th>
                 {COLS.slice(1, -1).map((h) => (
-                  <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20">{h}</th>
+                  <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20"
+                    style={readOnly ? { width: `${60 / Math.max(1, COLS.length - 2)}%` } : undefined}>{h}</th>
                 ))}
-                {!readOnly && (
-                  <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 border-l border-white/20"
-                    style={{ background: "#003527" }}>Action</th>
-                )}
+                <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 border-l border-white/20"
+                  style={readOnly ? { width: "10%", background: "#003527" } : { background: "#003527" }}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: 210 }}>
+                    <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined }}>
                       <div className="flex items-center gap-3">
                         <div className="size-8 rounded-full bg-slate-100 shrink-0" />
                         <div className="space-y-1.5"><div className="h-3 bg-slate-100 rounded w-28" /><div className="h-2 bg-slate-100 rounded w-20" /></div>
@@ -1965,13 +1865,13 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                     {COLS.slice(1, -1).map((h) => (
                       <td key={h} className="px-4 py-3 border-r border-slate-100"><div className="h-3 bg-slate-100 rounded w-16" /></td>
                     ))}
-                    {!readOnly && <td className="px-4 py-3 sticky right-0 bg-white border-l border-slate-200"><div className="h-3 bg-slate-100 rounded w-12" /></td>}
+                    <td className="px-4 py-3 sticky right-0 bg-white border-l border-slate-200"><div className="h-3 bg-slate-100 rounded w-12" /></td>
                   </tr>
                 ))
               ) : loadError ? (
-                <tr><td colSpan={COLS.length - (readOnly ? 1 : 0)} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td></tr>
+                <tr><td colSpan={COLS.length} className="px-4 py-16 text-center text-sm text-red-500">{loadError}</td></tr>
               ) : filteredRows.length === 0 ? (
-                <tr><td colSpan={COLS.length - (readOnly ? 1 : 0)} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>
+                <tr><td colSpan={COLS.length} className="px-4 text-center text-slate-400 text-sm" style={{ height: 200 }}>
                   {scoped && !assignedTo
                     ? "Your account is not linked to an OWE Contact yet, so no contractors are assigned to you. Add your email to your OWE Contact in Settings."
                     : scoped
@@ -1983,7 +1883,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                 const reviewStatus: RequestDecision | "-" = (latest?.status as RequestDecision) ?? "-";
                 return (
                   <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
-                    <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: 210 }}>
+                    <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined }}>
                       <div className="flex items-center gap-3">
                         <div className="relative shrink-0">
                           <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
@@ -1999,14 +1899,25 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-[#003527] truncate">{row.fullName}</p>
                           <p className="text-xs text-slate-400 truncate">{row.role || "—"}</p>
+                          {/* Country, Assigned Team and Engagement Start Date
+                              have no columns of their own in read-only mode. */}
+                          {readOnly && (
+                            <p className="text-[11px] text-slate-400 truncate"
+                              title={`${row.country} · ${row.department || "Unassigned"} · started ${fmtDate(row.hireDate)}`}>
+                              {row.country} · {row.department || "Unassigned"}
+                              <span className="text-slate-300"> · </span>
+                              <span className="font-mono">{fmtDate(row.hireDate)}</span>
+                            </p>
+                          )}
                         </div>
                       </div>
                     </td>
+                    {!readOnly && <>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap border-r border-slate-100">{row.country}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-700 whitespace-nowrap border-r border-slate-100">{row.department || "Unassigned"}</td>
                     <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap font-mono text-xs border-r border-slate-100">{fmtDate(row.hireDate)}</td>
-                    {!isIndia && <>
-                      {!readOnly && <>
+                    </>}
+                    {!isIndia && !readOnly && <>
                       <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : `${fmtBalance(row.ptoBalance)}h`}
                       </td>
@@ -2036,7 +1947,6 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           <p className="text-[10px] text-red-500 mt-0.5">{clearImportError.message}</p>
                         )}
                       </td>
-                      </>}
                       <td className="px-4 py-2.5 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : (
                           <div className="flex items-center gap-2">
@@ -2071,14 +1981,14 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         <p className="text-[10px] text-red-500 mt-0.5">{clearImportError.message}</p>
                       )}
                     </td>
-                    </>}
                     <td className="px-4 py-2.5 border-r border-slate-100">
                       <div className="flex items-center gap-2">
                         <span className={`text-sm font-semibold tabular-nums ${row.sickLeaveAvailable < 0 ? "text-red-600" : "text-orange-600"}`}>{fmtBalance(row.sickLeaveAvailable)}h</span>
                         <div className="w-12"><BalanceBar used={row.sickLeaveUsed} total={row.sickLeaveBalance} color={row.sickLeaveAvailable < 0 ? "bg-red-500" : "bg-orange-400"} /></div>
                       </div>
                     </td>
-                    {!isIndia && (
+                    </>}
+                    {!isIndia && !readOnly && (
                       <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                         {row.country === "India" ? <span className="text-slate-300">—</span> : (
                           row.birthdayLeave > 0
@@ -2087,11 +1997,41 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         )}
                       </td>
                     )}
+                    {!readOnly && (
                     <td className="px-4 py-2.5 text-sm tabular-nums text-slate-500 border-r border-slate-100">
                       {row.advanceSickLeave > 0
                         ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">{fmtBalance(row.advanceSickLeave)}h</span>
                         : <span className="text-slate-300">—</span>}
                     </td>
+                    )}
+                    {readOnly && (() => {
+                      const pending = row.pendingRequest;
+                      return (<>
+                        <td className="px-4 py-2.5 whitespace-nowrap border-r border-slate-100">
+                          {pending ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border bg-amber-50 text-amber-700 border-amber-200">
+                              <LuClock size={11} />
+                              {leaveTypeDisplayLabel(pending.type)}
+                            </span>
+                          ) : <span className="text-slate-300 text-sm">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 border-r border-slate-100 text-sm text-slate-600">
+                          {pending ? (
+                            <span className="flex flex-col leading-tight">
+                              <span className="font-mono text-xs">
+                                {fmtDate(pending.startDate)}
+                                {pending.endDate && pending.endDate !== pending.startDate && ` – ${fmtDate(pending.endDate)}`}
+                              </span>
+                              <span className="text-[11px] text-slate-400">
+                                {pending.type.endsWith("Half Day")
+                                  ? "Half day"
+                                  : `${pending.durationDays} day${pending.durationDays !== 1 ? "s" : ""}`}
+                              </span>
+                            </span>
+                          ) : <span className="text-slate-300">—</span>}
+                        </td>
+                      </>);
+                    })()}
                     {/* Status */}
                     <td className="px-4 py-2.5 whitespace-nowrap border-r border-slate-100">
                       {latest ? (
@@ -2107,24 +2047,225 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         <span className="text-slate-300 text-sm">—</span>
                       )}
                     </td>
-                    {!readOnly && (
-                    <td className="px-4 py-2.5 text-right sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200">
+                    <td className={`px-4 py-2.5 sticky right-0 z-10 bg-white group-hover:bg-slate-50 border-l border-slate-200 ${readOnly ? "text-left" : "text-right"}`}>
+                      {readOnly ? (
+                        <button
+                          onClick={() => { setReviewRowId(row.id); setReviewTab("new"); setDecisionError(""); }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          <LuEye size={14} strokeWidth={1.75} /> Review
+                        </button>
+                      ) : (
                       <button
                         onClick={() => { setSelectedRowId(row.id); setModalTab("info"); setEditLeaveType("Advance Sick Leave"); setEditHours(""); const rowIsIndia = countryFromLocation(row.country) === "India" || row.country === "India"; setOverrideType(rowIsIndia ? "Sick Leave" : "PTO"); setOverrideStartDate(""); setOverrideEndDate(""); setOverrideReason(""); setOverrideError(""); setSpecialGrantDate(arizonaTodayIso()); }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
                       >
                         <LuEye size={14} strokeWidth={1.75} /> View
                       </button>
+                      )}
                     </td>
-                    )}
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      {/* Review popup: what the contractor has now, beside what they are
+          asking for. Read-only, like the rest of this view. */}
+      {reviewRow && (() => {
+        const req = reviewRow.pendingRequest ?? reviewRow.latestRequest;
+        const isPending = !!reviewRow.pendingRequest;
+        const requestedHours = req ? leaveTypeHours(req.type) * (req.type.endsWith("Half Day") ? 1 : req.durationDays) : 0;
+        // leaveRequests arrives newest-first, so this preserves that order.
+        // The request shown on the New tab is excluded so the two tabs never
+        // show the same row twice.
+        const history = leaveRequests.filter((r) => r.email === reviewRow.email && r.id !== req?.id);
+        const Line = ({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) => (
+          <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-dotted border-slate-200 last:border-b-0">
+            <span className="text-xs text-slate-500">{label}</span>
+            <span className={`text-sm tabular-nums text-right ${strong ? "font-bold text-[#003527]" : "font-medium text-slate-700"}`}>{value}</span>
+          </div>
+        );
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReviewRowId(null)} />
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-100">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold text-[#003527] truncate">{reviewRow.fullName}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">
+                    {reviewRow.role || "—"} · {reviewRow.country} · {reviewRow.department || "Unassigned"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setReviewRowId(null)}
+                  aria-label="Close"
+                  className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  <LuX size={16} strokeWidth={2.5} />
+                </button>
+              </div>
+
+              <div className="flex items-center gap-1 px-6 pt-3 border-b border-slate-100">
+                {([
+                  { key: "new" as const, label: isPending ? "New" : "Latest", count: req ? 1 : 0 },
+                  { key: "history" as const, label: "Historical", count: history.length },
+                ]).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setReviewTab(t.key)}
+                    className={`relative px-3 py-2 text-xs font-semibold transition-colors ${
+                      reviewTab === t.key ? "text-[#003527]" : "text-slate-400 hover:text-slate-600"
+                    }`}
+                  >
+                    {t.label}
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] px-1 py-0.5 rounded-full text-[10px] font-bold ${
+                      reviewTab === t.key ? "bg-[#003527] text-white" : "bg-slate-100 text-slate-400"
+                    }`}>{t.count}</span>
+                    {reviewTab === t.key && <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[#003527] rounded-t" />}
+                  </button>
+                ))}
+              </div>
+
+              {reviewTab === "history" ? (
+                <div className="px-6 py-5">
+                  {history.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-slate-400">No previous time away requests.</p>
+                  ) : (
+                    <ul className="space-y-2.5">
+                      {history.map((h) => (
+                        <li key={h.id} className="rounded-xl border border-slate-200 px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-[#003527]">{leaveTypeDisplayLabel(h.type)}</p>
+                              <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                                {h.endDate && h.endDate !== h.startDate
+                                  ? `${fmtDate(h.startDate)} – ${fmtDate(h.endDate)}`
+                                  : fmtDate(h.startDate)}
+                              </p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {h.type.endsWith("Half Day") ? "Half day" : `${h.durationDays} day${h.durationDays !== 1 ? "s" : ""}`}
+                                <span className="text-slate-300"> · </span>
+                                filed {fmtDate(String(h.createdAt).slice(0, 10))}
+                              </p>
+                            </div>
+                            <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                              h.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                              h.status === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
+                              h.status === "Pending" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                              "bg-slate-50 text-slate-500 border-slate-200"
+                            }`}>
+                              {h.status === "Approved" ? <LuCircleCheck size={11} /> : h.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
+                              {h.status}
+                            </span>
+                          </div>
+                          {h.reason?.trim() && (
+                            <p className="mt-2 pt-2 border-t border-dotted border-slate-200 text-xs text-slate-600 whitespace-pre-wrap break-words">
+                              {h.reason}
+                            </p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ) : (
+              <div className="px-6 py-5 space-y-4">
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-2">
+                    {isPending ? "New Request" : "Last Request"}
+                  </p>
+                  <div className="rounded-xl border border-slate-200 px-4 py-3">
+                    {req ? (<>
+                      <Line label="Type" value={leaveTypeDisplayLabel(req.type)} />
+                      <Line label="Dates" value={
+                        req.endDate && req.endDate !== req.startDate
+                          ? `${fmtDate(req.startDate)} – ${fmtDate(req.endDate)}`
+                          : fmtDate(req.startDate)
+                      } />
+                      <Line label="Duration" value={req.type.endsWith("Half Day") ? "Half day" : `${req.durationDays} day${req.durationDays !== 1 ? "s" : ""}`} />
+                      <Line label="Hours Requested" value={`${fmtBalance(requestedHours)}h`} strong />
+                      <Line label="Status" value={
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                          req.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                          req.status === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
+                          "bg-amber-50 text-amber-700 border-amber-200"
+                        }`}>
+                          {req.status === "Approved" ? <LuCircleCheck size={11} /> : req.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
+                          {req.status}
+                        </span>
+                      } />
+                      <Line label="Filed" value={fmtDate(String(req.createdAt).slice(0, 10))} />
+                    </>) : (
+                      <p className="py-6 text-center text-sm text-slate-400">No time away request on file.</p>
+                    )}
+                  </div>
+                </section>
+
+                <section>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-2">Reason</p>
+                  <div className="rounded-xl border border-slate-200 px-4 py-3 min-h-[5.5rem]">
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+                      {req?.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
+                    </p>
+                  </div>
+                </section>
+              </div>
+              )}
+
+              <div className="px-6 py-3 border-t border-slate-100 bg-slate-50">
+                {decisionError && (
+                  <p className="mb-2 text-xs font-medium text-red-600">{decisionError}</p>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    onClick={() => setReviewRowId(null)}
+                    disabled={decisionBusy !== null}
+                    className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+                  >
+                    Close
+                  </button>
+                  {/* Only a request still awaiting a decision can be decided
+                      here; an already-approved or declined one is read-only. */}
+                  {req && isPending && reviewTab === "new" ? (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleReviewDecision(req.id, "Rejected")}
+                        disabled={decisionBusy !== null}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {decisionBusy === "Rejected"
+                          ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+                          : <LuCircleX size={13} strokeWidth={2} />}
+                        {decisionBusy === "Rejected" ? "Declining…" : "Decline"}
+                      </button>
+                      <button
+                        onClick={() => handleReviewDecision(req.id, "Approved")}
+                        disabled={decisionBusy !== null}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {decisionBusy === "Approved"
+                          ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+                          : <LuCircleCheck size={13} strokeWidth={2} />}
+                        {decisionBusy === "Approved" ? "Approving…" : "Approve"}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-slate-400">
+                      {reviewTab === "history" ? "Past requests are read-only."
+                        : req ? `Already ${req.status.toLowerCase()} — nothing to decide.`
+                        : "No request to decide."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
         <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
-          <p className="text-xs text-slate-400 font-medium">{filteredRows.length} of {rows.length} contractors</p>
+          <p className="text-xs text-slate-400 font-medium">{filteredRows.length} of {scopedRows.length} contractor{scopedRows.length === 1 ? "" : "s"}</p>
           <div className="flex items-center gap-1.5 text-xs text-slate-400">
             <LuTrendingUp size={13} className="text-teal-500" />
             Balances calculated from engagement start date

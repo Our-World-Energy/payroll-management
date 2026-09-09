@@ -26,8 +26,8 @@ function Field({ label, value }: { label: string; value: string | boolean | unde
 // Section-card heading: an emerald icon chip + uppercase title.
 function CardTitle({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
   return (
-    <h3 className="text-xs font-bold text-[#003527] uppercase tracking-[0.14em] mb-6 flex items-center gap-2.5">
-      <span className="grid place-items-center w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600">{icon}</span>
+    <h3 className="text-xs font-bold text-[#003527] uppercase tracking-[0.14em] mb-3.5 flex items-center gap-2.5">
+      <span className="grid place-items-center size-7 rounded-lg bg-emerald-50 text-emerald-600">{icon}</span>
       {children}
     </h3>
   );
@@ -85,7 +85,7 @@ export default function ContractorProfilePage() {
   const isActive = (profile.status ?? "Active") === "Active";
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-5">
       {/* Page header — sized 20% smaller than the shared PageHeader (this
           page only; PageHeader itself is shared across the whole Contractor
           Portal, so its sizing isn't touched). */}
@@ -145,12 +145,12 @@ export default function ContractorProfilePage() {
       </div>
 
       {/* ── Detail grid ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
         {/* Left: Employment + Operational */}
-        <div className="md:col-span-2 space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+        <div className="md:col-span-2 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
             <CardTitle icon={<LuBriefcase size={16} strokeWidth={1.75} />}>Contractor Details</CardTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5">
               <Field label="Assigned Team"     value={profile.department} />
               <Field label="Functional Team"   value={profile.subDepartment} />
               <Field label="Engagement Start Date" value={profile.hireDate} />
@@ -158,9 +158,9 @@ export default function ContractorProfilePage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
             <CardTitle icon={<LuClock size={16} strokeWidth={1.75} />}>Operational Details</CardTitle>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3.5">
               <Field label="Work Location"      value={profile.officeLocation} />
               <Field label="Agreed Schedule"    value={profile.shiftHours} />
               <Field label="Typical Non-Working Days" value={profile.restDay} />
@@ -169,19 +169,19 @@ export default function ContractorProfilePage() {
         </div>
 
         {/* Right: Personal Info + Contract Rate */}
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6">
+        <div className="space-y-3">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-5">
             <CardTitle icon={<LuUser size={16} strokeWidth={1.75} />}>Personal Info</CardTitle>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <Field label="Birthday" value={profile.dob} />
               <Field label="Gender"   value={profile.gender} />
               <Field label="Email"    value={profile.email} />
             </div>
           </div>
 
-          <div className="bg-emerald-50 rounded-2xl border border-emerald-100 shadow-sm p-6">
+          <div className="bg-emerald-50 rounded-2xl border border-emerald-100 shadow-sm p-5">
             <CardTitle icon={<LuBanknote size={16} strokeWidth={1.75} />}>Contract Rate</CardTitle>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div className="flex justify-between items-center">
                 <p className="text-[10px] text-slate-500 uppercase font-bold tracking-[0.1em]">Monthly Contract Rate</p>
                 <p className="text-lg font-bold text-[#003527] tabular-nums">{fmtMoney(monthlyNum)}</p>

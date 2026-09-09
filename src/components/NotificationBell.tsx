@@ -12,6 +12,8 @@ import { fetchAlerts } from "@/app/admin/settings/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "@/app/admin/contractors/shiftScheduleShared";
+import { useAccount } from "./RoleContext";
+import { useContractorConfig } from "./ContractorConfigContext";
 
 type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
 type AlertRow = { name: string; department: string };
@@ -50,6 +52,20 @@ function fmtLeaveDates(startDate: string, endDate: string): string {
 }
 
 export function NotificationBell({ dark = false }: { dark?: boolean }) {
+  // A manager's bell covers only their own contractors, and drops Late Today
+  // entirely. The link is the same one Time Away Request uses: the signed-in
+  // email matches an OWE Contact, whose name is what contractor_profiles.manager
+  // stores.
+  const { role, email: signedInEmail } = useAccount();
+  const { managers: oweContacts } = useContractorConfig();
+  const isManager = role === "manager";
+  const myContactName = (() => {
+    if (!isManager) return null;
+    const mine = signedInEmail.trim().toLowerCase();
+    if (!mine) return null;
+    return oweContacts.find((m) => m.email.trim().toLowerCase() === mine)?.name ?? null;
+  })();
+
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pendingApprovals, setPendingApprovals] = useState<PendingApprovalRow[]>([]);
@@ -164,7 +180,10 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
           if (email && logged) firstInByEmail.set(email, new Date(logged));
         }
 
-        const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
+        // A lookup miss leaves a manager with nothing rather than everyone.
+        const activeContractors = contractors
+          .filter((c) => c.status === "Active" && c.email)
+          .filter((c) => !isManager || (!!myContactName && c.manager === myContactName));
 
         // Absent = no actual Worksnap time logged today at all — same
         // definition as the Dashboard's Absent Today count.
@@ -173,6 +192,9 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
             .filter((c) => (minutesByEmail.get(c.email.trim().toLowerCase()) ?? 0) === 0)
             .map((c) => ({ name: c.fullName, department: c.department }))
         );
+
+        // Managers do not get Late Today at all.
+        if (isManager) { setLateRows([]); return; }
 
         // Late Today applies to Fixed and Shifting Schedule contractors — same
         // check as the Dashboard's Late Today widget (firstInLogged vs that
@@ -206,7 +228,7 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
     }
     load();
     return () => { active = false; };
-  }, []);
+  }, [isManager, myContactName]);
 
   const totalCount = pendingApprovals.length + absentRows.length + lateRows.length + birthdaysToday.length + announcementsToday.length + alertsToday.length;
 
@@ -237,14 +259,14 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
         href: `/admin/attendance?search=${encodeURIComponent(r.name)}`,
       })),
     },
-    {
+    ...(isManager ? [] : [{
       key: "late", label: "Late Today", icon: LuClock, count: lateRows.length,
       color: "text-orange-600 bg-orange-50", href: "/admin/attendance",
       items: lateRows.map((r): NotificationItem => ({
         text: `${r.name} — ${r.department}`,
         href: `/admin/attendance?search=${encodeURIComponent(r.name)}`,
       })),
-    },
+    }]),
     {
       key: "birthday", label: "Birthdays Today", icon: LuCake, count: birthdaysToday.length,
       color: "text-pink-600 bg-pink-50", href: "/admin",

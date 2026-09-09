@@ -8,7 +8,7 @@ import {
   submitLeaveRequest, cancelLeaveRequest,
   type ContractorTimeOff, type LeaveRequest,
 } from "./actions";
-import { HOURS_PER_DAY, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType } from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
@@ -16,6 +16,57 @@ import {
   LuClipboardList, LuSend, LuCalendarDays,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
+import { CalendarDateInput } from "@/components/CalendarDateInput";
+
+// Every ISO date a request covers, inclusive of both ends.
+function datesCoveredBy(startDate: string, endDate: string): string[] {
+  if (!startDate) return [];
+  const out: string[] = [];
+  const end = endDate || startDate;
+  for (let d = new Date(`${startDate}T00:00:00`); ; d.setDate(d.getDate() + 1)) {
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    out.push(iso);
+    if (iso >= end || out.length > 400) break;
+  }
+  return out;
+}
+
+// Sits under the Start / End date field when that exact date is already
+// spoken for, colour-matched to the leave that booked it. Native date inputs
+// cannot mark their own days, so the signal lives beside the field instead.
+function BookedDateHint({ date, booked }: { date: string; booked: { kind: BookedKind; status: string; type: string } }) {
+  const tone = booked.kind === "pto" ? "text-teal-700 bg-teal-50 border-teal-200"
+    : booked.kind === "sick" ? "text-orange-700 bg-orange-50 border-orange-200"
+    : "text-purple-700 bg-purple-50 border-purple-200";
+  return (
+    <p className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${tone}`}>
+      <LuCircleAlert size={12} strokeWidth={2.5} className="shrink-0" />
+      {fmtDayAndDate(date)} — already requested {leaveTypeDisplayLabel(booked.type)} ({booked.status})
+    </p>
+  );
+}
+
+// "Mon, Aug 31, 2026" — naming the weekday matters over a range, since it
+// says which day of the week is already spoken for.
+type BookedKind = "pto" | "sick" | "other";
+
+// Tint for a date field whose value is already spoken for, matching the
+// BookedDateHint beneath it.
+function bookedFieldTone(kind: BookedKind): string {
+  return kind === "pto"
+    ? "text-teal-800 bg-teal-50 border-teal-300 focus:ring-teal-500/20 focus:border-teal-500"
+    : kind === "sick"
+      ? "text-orange-800 bg-orange-50 border-orange-300 focus:ring-orange-500/20 focus:border-orange-500"
+      : "text-purple-800 bg-purple-50 border-purple-300 focus:ring-purple-500/20 focus:border-purple-500";
+}
+
+function fmtDayAndDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+  });
+}
 
 function fmtNoticeDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -88,41 +139,41 @@ function BalanceCard({
   const availPct  = 100 - usedPct;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 hover:shadow-md transition-shadow">
-      <div className="flex items-center justify-between mb-6">
+    <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 hover:shadow-md transition-shadow">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
-          <div className={`grid place-items-center w-10 h-10 rounded-xl ${iconBg}`}>{icon}</div>
+          <div className={`grid place-items-center size-8 rounded-lg ${iconBg}`}>{icon}</div>
           <h3 className="text-sm font-bold text-[#003527]">{title}</h3>
         </div>
-        <span className={`px-3 py-1 rounded-full text-[11px] font-bold ${badgeBg} ${badgeText}`}>{badge}</span>
+        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${badgeBg} ${badgeText}`}>{badge}</span>
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
         <div className="relative grid place-items-center shrink-0">
-          <ProgressRing pct={availPct} size={96} stroke={8} />
+          <ProgressRing pct={availPct} size={68} stroke={6} />
           <div className="absolute text-center leading-none">
-            <span className={`block text-lg font-bold tabular-nums ${availColor}`}>{Math.round(availPct)}%</span>
-            <span className="block text-[9px] font-semibold text-slate-400 uppercase tracking-wide mt-0.5">left</span>
+            <span className={`block text-sm font-bold tabular-nums ${availColor}`}>{Math.round(availPct)}%</span>
+            <span className="block text-[8px] font-semibold text-slate-400 uppercase tracking-wide">left</span>
           </div>
         </div>
 
         <div className="flex-1 grid grid-cols-3 gap-3">
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Total</p>
-            <p className="text-xl font-bold text-[#003527] tabular-nums">{fmtHoursMinutes(total)}</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-0.5">Total</p>
+            <p className="text-base font-bold text-[#003527] tabular-nums">{fmtHoursMinutes(total)}</p>
           </div>
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Used</p>
-            <p className="text-xl font-bold text-slate-700 tabular-nums">{fmtHoursMinutes(used)}</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-0.5">Used</p>
+            <p className="text-base font-bold text-slate-700 tabular-nums">{fmtHoursMinutes(used)}</p>
           </div>
           <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-1">Available</p>
-            <p className={`text-xl font-bold tabular-nums ${availColor}`}>{fmtHoursMinutes(available)}</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-0.5">Available</p>
+            <p className={`text-base font-bold tabular-nums ${availColor}`}>{fmtHoursMinutes(available)}</p>
           </div>
         </div>
       </div>
 
-      <div className="mt-6 w-full h-2 rounded-full overflow-hidden flex bg-slate-100">
+      <div className="mt-3 w-full h-1.5 rounded-full overflow-hidden flex bg-slate-100">
         <div className={`h-full ${barUsed}`}  style={{ width: `${usedPct}%`  }} />
         <div className={`h-full ${barAvail}`} style={{ width: `${availPct}%` }} />
       </div>
@@ -153,6 +204,9 @@ export default function ContractorTimeOffPage() {
   const INDIA_LEAVE_TYPES  = ["Sick Leave", "Sick Leave Half Day"] as const;
 
   const [leaveType, setLeaveType] = useState<typeof ALL_LEAVE_TYPES[number]>("PTO");
+  const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [cancelError, setCancelError] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate,   setEndDate]   = useState("");
   const [reason,    setReason]    = useState("");
@@ -216,6 +270,32 @@ export default function ContractorTimeOffPage() {
   }
 
   const effectiveEndDate = isHalfDay ? startDate : endDate;
+
+  // Every date already spoken for by a live request, mapped to what booked it.
+  // Rejected and Archived requests free their dates back up.
+  const bookedDates = (() => {
+    const map = new Map<string, { kind: "pto" | "sick" | "other"; status: string; type: string }>();
+    for (const r of allRequests.length > 0 ? allRequests : requests) {
+      if (r.status === "Rejected" || r.status === "Archived") continue;
+      const kind = isPtoLeaveType(r.type) ? "pto" : r.type.includes("Sick") ? "sick" : "other";
+      for (const d of datesCoveredBy(r.startDate, r.endDate)) {
+        // A Pending marker should not overwrite an Approved one for the day.
+        if (!map.has(d) || map.get(d)!.status === "Pending") map.set(d, { kind, status: r.status, type: r.type });
+      }
+    }
+    return map;
+  })();
+
+  // Dates in the range being filled in that are already booked.
+  const clashingDates = datesCoveredBy(startDate, effectiveEndDate).filter((d) => bookedDates.has(d));
+  // The Start / End hints already speak for those two dates; this covers a
+  // clash buried in the middle of a range, which neither field would show.
+  const clashesInsideRange = clashingDates.filter((d) => d !== startDate && d !== effectiveEndDate);
+  // Same shape Leave Override passes its calendar: every date already covered
+  // by a live request, which the picker renders red and refuses to select.
+  const blockedDates = new Set(bookedDates.keys());
+  const startBooked = startDate ? bookedDates.get(startDate) : undefined;
+  const endBooked = effectiveEndDate && effectiveEndDate !== startDate ? bookedDates.get(effectiveEndDate) : undefined;
   const startTooSoon = isPto && Boolean(startDate) && startDate < earliestPtoDate;
   const endTooSoon = isPto && Boolean(effectiveEndDate) && effectiveEndDate < earliestPtoDate;
 
@@ -234,6 +314,14 @@ export default function ContractorTimeOffPage() {
     if (!startDate) { setFormError("Start date is required."); return; }
     if (!isHalfDay && !endDate) { setFormError("End date is required."); return; }
     if (!isHalfDay && new Date(endDate) < new Date(startDate)) { setFormError("End date must be on or after start date."); return; }
+    if (clashingDates.length > 0) {
+      setFormError(
+        clashingDates.length === 1
+          ? `You already have a time away request on ${fmtDayAndDate(clashingDates[0])}.`
+          : `You already have time away requests on ${clashingDates.length} of the selected dates, starting ${fmtDayAndDate(clashingDates[0])}.`
+      );
+      return;
+    }
     setFormError(""); setSuccess("");
 
     startTransition(async () => {
@@ -268,12 +356,62 @@ export default function ContractorTimeOffPage() {
     setHistoryLoading(false);
   }
 
+  // Cancelling deletes the request outright, so it goes through a confirm
+  // step rather than firing on a single click.
   async function handleCancel(id: string) {
+    setCancelBusy(true);
+    setCancelError("");
     const result = await cancelLeaveRequest(id, email);
-    if (result.ok) {
-      setRequests((prev) => prev.filter((r) => r.id !== id));
+    setCancelBusy(false);
+    if (!result.ok) {
+      setCancelError(result.error ?? "Could not cancel the request. Please try again.");
+      return;
     }
+    setRequests((prev) => prev.filter((r) => r.id !== id));
+    setAllRequests((prev) => prev.filter((r) => r.id !== id));
+    setCancelTarget(null);
   }
+
+  const cancelDialog = cancelTarget && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !cancelBusy && setCancelTarget(null)} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <h3 className="text-lg font-bold text-[#003527]">Cancel this request?</h3>
+        <p className="text-sm text-slate-500 mt-1.5">
+          {leaveTypeDisplayLabel(cancelTarget.type)} on{" "}
+          <span className="font-semibold text-slate-700">
+            {cancelTarget.endDate && cancelTarget.endDate !== cancelTarget.startDate
+              ? `${fmtNoticeDate(cancelTarget.startDate)} – ${fmtNoticeDate(cancelTarget.endDate)}`
+              : fmtNoticeDate(cancelTarget.startDate)}
+          </span>.
+        </p>
+        <p className="text-xs text-slate-400 mt-2">
+          The request will be deleted and those dates freed up. This cannot be undone
+          — you would need to submit a new request.
+        </p>
+        {cancelError && <p className="mt-3 text-xs font-medium text-red-600">{cancelError}</p>}
+        <div className="flex items-center justify-end gap-2 mt-5">
+          <button
+            onClick={() => setCancelTarget(null)}
+            disabled={cancelBusy}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-40"
+          >
+            Keep request
+          </button>
+          <button
+            onClick={() => handleCancel(cancelTarget.id)}
+            disabled={cancelBusy}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {cancelBusy
+              ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+              : <LuX size={13} strokeWidth={2.5} />}
+            {cancelBusy ? "Cancelling…" : "Cancel request"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -300,7 +438,8 @@ export default function ContractorTimeOffPage() {
   const isPtoHidden = country.toLowerCase() === "india";
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
+      {cancelDialog}
       {/* Page title */}
       <PageHeader
         title="Time Away Management"
@@ -313,7 +452,7 @@ export default function ContractorTimeOffPage() {
       />
 
       {/* Balance cards */}
-      <section className={isPtoHidden ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 lg:grid-cols-2 gap-6"}>
+      <section className={isPtoHidden ? "grid grid-cols-1 gap-4" : "grid grid-cols-1 lg:grid-cols-2 gap-4"}>
         {!isPtoHidden && (
           <BalanceCard
             icon={<LuUmbrella size={20} strokeWidth={1.75} />}
@@ -345,12 +484,13 @@ export default function ContractorTimeOffPage() {
         />
       </section>
 
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
       {/* Request form + policy */}
-      <section className="grid grid-cols-1 gap-8">
+      <section className="grid grid-cols-1 gap-8 min-w-0">
         {/* Form */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="border-b border-slate-100 px-6 py-5 flex items-center gap-3">
+          <div className="border-b border-slate-100 px-5 py-3.5 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center shrink-0">
               <LuClipboardList size={19} strokeWidth={1.75} />
             </div>
@@ -429,40 +569,62 @@ export default function ContractorTimeOffPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-2">2. Start Date</label>
-                <div className="relative">
-                  <LuCalendarDays size={16} strokeWidth={1.75} className={`absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${startTooSoon ? "text-red-500" : "text-emerald-600"}`} />
-                  <input
-                    type="date"
+                <div className={`rounded-lg border px-3 py-2 ${
+                  // A booked date blocks submission outright, so it takes
+                  // precedence over the short-notice warning.
+                  startBooked ? bookedFieldTone(startBooked.kind)
+                    : startTooSoon ? "bg-red-50 border-red-300"
+                    : "bg-white border-slate-200"
+                }`}>
+                  <CalendarDateInput
                     value={startDate}
-                    onChange={e => setStartDate(e.target.value)}
-                    className={`w-full text-sm font-medium rounded-lg pl-9 pr-3 py-2.5 border focus:outline-none focus:ring-2 ${
-                      startTooSoon
-                        ? "text-red-700 bg-red-50 border-red-300 focus:ring-red-500/20 focus:border-red-500"
-                        : "text-slate-700 bg-white border-slate-200 focus:ring-emerald-500/20 focus:border-emerald-500"
-                    }`}
+                    blockedDates={blockedDates}
+                    onChange={(next) => {
+                      setStartDate(next);
+                      // Don't leave an End Date sitting before the new start.
+                      if (endDate && endDate < next) setEndDate(next);
+                    }}
                   />
                 </div>
                 {startTooSoon && <ShortNoticeHint days={daysOfNotice(startDate)} />}
+                {startBooked && <BookedDateHint date={startDate} booked={startBooked} />}
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-2">3. End Date</label>
-                <div className="relative">
-                  <LuCalendarDays size={16} strokeWidth={1.75} className={`absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${endTooSoon ? "text-red-500" : "text-emerald-600"}`} />
-                  <input
-                    type="date"
+                <div className={`rounded-lg border px-3 py-2 ${
+                  isHalfDay ? "bg-slate-100 border-slate-200"
+                    : endBooked ? bookedFieldTone(endBooked.kind)
+                    : endTooSoon ? "bg-red-50 border-red-300"
+                    : "bg-white border-slate-200"
+                }`}>
+                  <CalendarDateInput
                     value={isHalfDay ? startDate : endDate}
-                    onChange={e => setEndDate(e.target.value)}
+                    minDate={startDate || undefined}
+                    blockedDates={blockedDates}
                     disabled={isHalfDay}
-                    className={`w-full text-sm font-medium rounded-lg pl-9 pr-3 py-2.5 border focus:outline-none focus:ring-2 disabled:bg-slate-100 disabled:text-slate-400 ${
-                      endTooSoon
-                        ? "text-red-700 bg-red-50 border-red-300 focus:ring-red-500/20 focus:border-red-500"
-                        : "text-slate-700 bg-white border-slate-200 focus:ring-emerald-500/20 focus:border-emerald-500"
-                    }`}
+                    onChange={setEndDate}
                   />
                 </div>
                 {endTooSoon && <ShortNoticeHint days={daysOfNotice(effectiveEndDate)} />}
+                {endBooked && <BookedDateHint date={effectiveEndDate} booked={endBooked} />}
               </div>
             </div>
+
+            {clashesInsideRange.length > 0 && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                <LuCircleAlert size={16} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">
+                    You already requested time away on {clashesInsideRange.length === 1 ? "a day" : `${clashesInsideRange.length} days`} inside this range.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-0.5">
+                    {clashesInsideRange.slice(0, 5).map((d) => fmtDayAndDate(d)).join(", ")}
+                    {clashesInsideRange.length > 5 && ` and ${clashesInsideRange.length - 5} more`}.
+                    {" "}Cancel the existing request first, or pick different dates.
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-bold text-slate-800 mb-2">4. Reason for Request</label>
@@ -509,9 +671,9 @@ export default function ContractorTimeOffPage() {
       </section>
 
       {/* Recent requests */}
-      <section className="space-y-4">
+      <section className="space-y-3 min-w-0">
         <div className="flex items-center justify-between">
-          <h3 className="text-2xl font-semibold text-[#003527]">Recent Requests</h3>
+          <h3 className="text-lg font-bold text-[#003527]">Recent Requests</h3>
           <button
             onClick={handleOpenHistory}
             className="text-emerald-700 text-sm font-semibold flex items-center gap-1 hover:underline"
@@ -521,14 +683,14 @@ export default function ContractorTimeOffPage() {
         </div>
 
         <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[26rem]">
             <table className="w-full text-left">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="bg-slate-50 border-b border-slate-100">
                   {["Type", "Dates", "Duration", "Reason", "Status"].map(h => (
-                    <th key={h} className="px-6 py-4 text-[10px] font-bold uppercase tracking-wider text-slate-400">{h}</th>
+                    <th key={h} className="bg-slate-50 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">{h}</th>
                   ))}
-                  <th className="px-6 py-4" />
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -543,7 +705,7 @@ export default function ContractorTimeOffPage() {
                     const isPto = row.type.startsWith("PTO");
                     return (
                       <tr key={row.id} className="hover:bg-slate-50/50 transition-colors group">
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-2.5">
                           <div className="flex items-center gap-3">
                             <div className={`p-2 rounded-lg ${isPto ? "bg-emerald-50 text-emerald-700" : "bg-teal-50 text-teal-700"}`}>
                               {isPto
@@ -554,28 +716,27 @@ export default function ContractorTimeOffPage() {
                             <span className="text-sm font-semibold text-slate-800">{leaveTypeDisplayLabel(row.type)}</span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-500 whitespace-nowrap">
+                        <td className="px-4 py-2.5 text-sm text-slate-500 whitespace-nowrap">
                           {fmtDateRange(row.startDate, row.endDate)}
                         </td>
-                        <td className="px-6 py-4 text-sm font-semibold text-slate-800 whitespace-nowrap">
+                        <td className="px-4 py-2.5 text-sm font-semibold text-slate-800 whitespace-nowrap">
                           {fmtRequestHours(row.type, row.durationDays)}
                         </td>
-                        <td className="px-6 py-4 text-sm text-slate-400 italic max-w-[180px] truncate">
+                        <td className="px-4 py-2.5 text-sm text-slate-400 italic max-w-[180px] truncate">
                           {row.reason || "—"}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 py-2.5">
                           <span className={`px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(row.status)}`}>
                             {row.status}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right opacity-0 group-hover:opacity-100 transition-opacity">
+                        <td className="px-4 py-2.5 text-right">
                           {row.status === "Pending" && (
                             <button
-                              onClick={() => handleCancel(row.id)}
-                              title="Cancel request"
-                              className="text-slate-300 hover:text-red-400 transition-colors"
+                              onClick={() => { setCancelTarget(row); setCancelError(""); }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors whitespace-nowrap"
                             >
-                              <LuX size={15} strokeWidth={2} />
+                              <LuX size={13} strokeWidth={2.5} /> Cancel Request
                             </button>
                           )}
                         </td>
@@ -588,6 +749,7 @@ export default function ContractorTimeOffPage() {
           </div>
         </div>
       </section>
+      </div>
 
       {/* ── History Modal ── */}
       {showHistory && (
@@ -679,7 +841,7 @@ export default function ContractorTimeOffPage() {
             </div>
 
             {/* Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 shrink-0 flex items-center justify-between bg-slate-50/50">
+            <div className="px-4 py-2.5 border-t border-slate-100 shrink-0 flex items-center justify-between bg-slate-50/50">
               <p className="text-xs text-slate-400">
                 {allRequests.length} request{allRequests.length !== 1 ? "s" : ""} total
               </p>

@@ -8,18 +8,22 @@ import { type AppRole, usesAdminConsole } from "./roles";
 export type NavItem = { href: string; label: string; Icon: IconType; roles: AppRole[] };
 
 // Which console roles see each menu. HR gets Dashboard, Contractor Details,
-// Time Away Management and Attendance Tracker; Manager gets Dashboard plus
-// Time Away Management (where they approve requests). Everything else stays
-// admin-only.
+// Time Away Management and Attendance Tracker; Manager gets Dashboard and
+// Time Away Request (scoped to their own contractors, where they approve or
+// decline). Everything else stays admin-only.
 const CONSOLE: AppRole[] = ["admin", "hr", "manager"];
+// Time Away Request is scoped to the signed-in manager's own contractors, so
+// it only makes sense for a manager — admins and HR get the full Time Away
+// Management view instead, which is now theirs alone.
+const MANAGER: AppRole[] = ["manager"];
 const ADMIN_HR: AppRole[] = ["admin", "hr"];
 const ADMIN: AppRole[] = ["admin"];
 
 export const NAV_ITEMS: NavItem[] = [
   { href: "/admin",              label: "Dashboard",          Icon: LuLayoutDashboard, roles: CONSOLE  },
   { href: "/admin/contractors",  label: "Contractor Details", Icon: LuHardHat,         roles: ADMIN_HR },
-  { href: "/admin/time-off",     label: "Time Away Management",Icon: LuCalendarX,      roles: CONSOLE  },
-  { href: "/admin/time-off-request", label: "Time Away Request", Icon: LuCalendarCheck,  roles: CONSOLE  },
+  { href: "/admin/time-off",     label: "Time Away Management",Icon: LuCalendarX,      roles: ADMIN_HR },
+  { href: "/admin/time-off-request", label: "Time Away Request", Icon: LuCalendarCheck,  roles: MANAGER  },
   { href: "/admin/attendance",   label: "Attendance",         Icon: LuFingerprint,     roles: ADMIN    },
   { href: "/admin/payroll",      label: "Payroll",            Icon: LuWallet,          roles: ADMIN    },
   { href: "/admin/attendance-tracker", label: "Attendance Tracker", Icon: LuClipboardList, roles: ADMIN_HR },

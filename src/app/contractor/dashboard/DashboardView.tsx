@@ -436,7 +436,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   ) : undefined;
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-5 max-w-7xl mx-auto">
 
       {calOpen && (
         <HolidayCalendarModal
@@ -503,11 +503,11 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       )}
 
       {/* ── Announcements + holidays ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 items-start">
         {/* Announcements — left 2/3 */}
         <div className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-[#003527]">Announcements</h3>
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-lg font-bold text-[#003527]">Announcements</h3>
             <button className="text-emerald-700 text-sm font-semibold flex items-center gap-1 hover:underline">
               View All <LuChevronRight size={16} strokeWidth={2} />
             </button>
@@ -517,9 +517,9 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
             {announcements.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-400">No announcements yet.</div>
             ) : (
-              <div className="divide-y divide-slate-100">
+              <div className="divide-y divide-slate-100 max-h-[24rem] overflow-y-auto">
                 {announcements.map((a, i) => (
-                  <div key={a.id} className="flex gap-4 p-5 hover:bg-slate-50 transition-colors">
+                  <div key={a.id} className="flex gap-3 p-4 hover:bg-slate-50 transition-colors">
                     <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
                       {ANNOUNCEMENT_ICONS[i % ANNOUNCEMENT_ICONS.length]}
                     </div>
@@ -538,12 +538,12 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
         </div>
 
         {/* Right panel */}
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* This Month's Holidays */}
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-[#003527]">{MONTHS[new Date().getMonth()]} Holidays</h3>
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-lg font-bold text-[#003527]">{MONTHS[new Date().getMonth()]} Holidays</h3>
           </div>
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-sm">
+          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
             {upcomingHols.length === 0 ? (
               <p className="text-sm text-slate-400">No holidays this month.</p>
             ) : (
@@ -626,14 +626,14 @@ function BirthdaySection({
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-xl font-bold text-[#003527]">Today&apos;s Birthdays</h3>
+      <div className="flex items-center justify-between mb-2.5">
+        <h3 className="text-lg font-bold text-[#003527]">Today&apos;s Birthdays</h3>
         <div className="flex items-center gap-2">
           <LuCake size={18} strokeWidth={1.75} className="text-teal-500" />
           <span className="text-xs font-semibold text-slate-400">{todayLabel}</span>
         </div>
       </div>
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-5 md:p-6 shadow-sm">
+      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 md:p-5 shadow-sm">
 
         {/* ── Wishes wall — the wishes I've received on my birthday ── */}
         {receivedWishes.length > 0 && (
@@ -663,7 +663,7 @@ function BirthdaySection({
         {items.length === 0 ? (
           <p className="text-sm text-slate-400 text-center py-6">No birthdays today.</p>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[18rem] overflow-y-auto pr-0.5">
             {items.map((c) => (
               <BirthdayCard
                 key={`${c.fullName}-${c.dd}`}
