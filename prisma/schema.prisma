@@ -581,10 +581,11 @@ model OrgOfficeLocation {
   @@map("org_office_locations")
 }
 
-/// Org-wide settings: manager names list
+/// Org-wide settings: OWE Contacts (name + optional email)
 model OrgManager {
   id        String   @id @default(uuid()) @db.Uuid
   name      String   @unique
+  email     String?
   createdAt DateTime @default(now())
 
   @@map("org_managers")

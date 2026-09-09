@@ -10,6 +10,9 @@ import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/a
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { useRole } from "@/components/RoleContext";
+import { CONSOLE_LABEL } from "@/lib/roles";
+import { DashboardView } from "@/app/contractor/dashboard/DashboardView";
 
 type AbsentRow = {
   name: string;
@@ -96,7 +99,7 @@ const EMPTY_COUNTRY_COUNTS: CountryCounts = {
   totalActive: 0, philippines: 0, mexico: 0, india: 0, guatemala: 0, colombia: 0,
 };
 
-export default function AdminPage() {
+function AdminDashboard() {
   // Computed client-side after mount (not during the SSR/first-paint render)
   // to avoid a server-vs-client time zone mismatch — starts as a neutral
   // greeting that's replaced within the same tick on real browsers.
@@ -720,4 +723,18 @@ export default function AdminPage() {
       )}
     </div>
   );
+}
+
+/**
+ * Managers see the contractor portal's dashboard instead of the admin one —
+ * their own attendance, holidays, birthdays and announcements. The admin
+ * dashboard reads org-wide contractor and payroll data that sits outside a
+ * manager's remit, and it is a heavy fetch besides. The rest of the Manager
+ * Portal (Time Away Management) is unaffected.
+ */
+export default function AdminPage() {
+  const role = useRole();
+  // Same label the sidebar shows, so renaming it in roles.ts carries here.
+  if (role === "manager") return <DashboardView eyebrow={CONSOLE_LABEL[role]} />;
+  return <AdminDashboard />;
 }

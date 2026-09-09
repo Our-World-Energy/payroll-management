@@ -44,7 +44,7 @@ export const ROLE_LABEL: Record<AppRole, string> = {
 export const CONSOLE_LABEL: Record<AppRole, string> = {
   admin:   "Admin Console",
   hr:      "HR Console",
-  manager: "Manager Console",
+  manager: "Manager Portal",
   user:    "Contractor Portal",
 };
 

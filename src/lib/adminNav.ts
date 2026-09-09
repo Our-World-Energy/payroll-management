@@ -1,6 +1,6 @@
 import {
   LuLayoutDashboard, LuHardHat, LuFingerprint, LuWallet,
-  LuCalendarX, LuChartBar, LuSettings, LuUsers, LuClipboardList,
+  LuCalendarX, LuCalendarCheck, LuChartBar, LuSettings, LuClipboardList,
 } from "react-icons/lu";
 import type { IconType } from "react-icons";
 import { type AppRole, usesAdminConsole } from "./roles";
@@ -19,11 +19,11 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/admin",              label: "Dashboard",          Icon: LuLayoutDashboard, roles: CONSOLE  },
   { href: "/admin/contractors",  label: "Contractor Details", Icon: LuHardHat,         roles: ADMIN_HR },
   { href: "/admin/time-off",     label: "Time Away Management",Icon: LuCalendarX,      roles: CONSOLE  },
+  { href: "/admin/time-off-request", label: "Time Away Request", Icon: LuCalendarCheck,  roles: CONSOLE  },
   { href: "/admin/attendance",   label: "Attendance",         Icon: LuFingerprint,     roles: ADMIN    },
   { href: "/admin/payroll",      label: "Payroll",            Icon: LuWallet,          roles: ADMIN    },
   { href: "/admin/attendance-tracker", label: "Attendance Tracker", Icon: LuClipboardList, roles: ADMIN_HR },
   { href: "/admin/reports",      label: "Reports",            Icon: LuChartBar,        roles: ADMIN    },
-  { href: "/admin/users",        label: "User Management",    Icon: LuUsers,           roles: ADMIN    },
   { href: "/admin/settings",     label: "Settings",           Icon: LuSettings,        roles: ADMIN    },
 ];
 

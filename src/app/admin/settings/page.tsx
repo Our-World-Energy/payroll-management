@@ -5,7 +5,7 @@ import { LuPlus, LuX, LuChevronDown, LuChevronUp, LuTriangle, LuLoader, LuSettin
 import { useContractorConfig, type DeptTree } from "@/components/ContractorConfigContext";
 import {
   addOfficeLocation, removeOfficeLocation,
-  addManager, removeManager,
+  addManager, removeManager, updateManager,
   addCountryLocation, removeCountryLocation,
   addCurrency, removeCurrency,
   addDepartment, removeDepartment,
@@ -16,6 +16,7 @@ import {
   fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
 import { SalaryVisibilitySection } from "./SalaryVisibilitySection";
+import { UserManagementSection } from "./UserManagementSection";
 
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 const SELECT = INPUT + " cursor-pointer";
@@ -246,21 +247,57 @@ export default function SettingsPage() {
   }
 
   // ── Manager handlers ──────────────────────────────────────────────────────
+  // An OWE Contact is a name plus an optional email. Name is still the key
+  // (contractor_profiles.manager stores it, and org_managers.name is unique),
+  // so a duplicate name is rejected while the email is free-form.
   const [newManager, setNewManager] = useState("");
+  const [newManagerEmail, setNewManagerEmail] = useState("");
 
   async function handleAddManager() {
     const v = newManager.trim();
-    if (!v || managers.includes(v)) return;
+    const email = newManagerEmail.trim();
+    if (!v || managers.some((m) => m.name === v)) return;
     const prev = managers;
-    setManagers([...managers, v]);
+    setManagers([...managers, { name: v, email }]);
     setNewManager("");
-    await run(() => addManager(v), () => setManagers(prev));
+    setNewManagerEmail("");
+    await run(() => addManager(v, email), () => setManagers(prev));
   }
 
-  async function handleRemoveManager(m: string) {
+  // Inline edit, keyed by the row's original name (org_managers.name is the
+  // unique key, so it identifies the row being edited).
+  const [editingManager, setEditingManager] = useState<string | null>(null);
+  const [editManagerName, setEditManagerName] = useState("");
+  const [editManagerEmail, setEditManagerEmail] = useState("");
+
+  function startEditManager(m: { name: string; email: string }) {
+    setEditingManager(m.name);
+    setEditManagerName(m.name);
+    setEditManagerEmail(m.email);
+  }
+
+  function cancelEditManager() {
+    setEditingManager(null);
+    setEditManagerName("");
+    setEditManagerEmail("");
+  }
+
+  async function handleSaveManager(oldName: string) {
+    const name = editManagerName.trim();
+    const email = editManagerEmail.trim();
+    if (!name) return;
+    // A rename onto another contact's name would collide with the unique key.
+    if (name !== oldName && managers.some((m) => m.name === name)) return;
     const prev = managers;
-    setManagers(managers.filter((x) => x !== m));
-    await run(() => removeManager(m), () => setManagers(prev));
+    setManagers(managers.map((m) => (m.name === oldName ? { name, email } : m)));
+    cancelEditManager();
+    await run(() => updateManager(oldName, name, email), () => setManagers(prev));
+  }
+
+  async function handleRemoveManager(name: string) {
+    const prev = managers;
+    setManagers(managers.filter((x) => x.name !== name));
+    await run(() => removeManager(name), () => setManagers(prev));
   }
 
   // ── Country location handlers ─────────────────────────────────────────────
@@ -423,6 +460,8 @@ export default function SettingsPage() {
         </div>
       )}
 
+      <UserManagementSection />
+
       {/* Work Locations */}
       <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -478,28 +517,90 @@ export default function SettingsPage() {
         </div>
         {openSections.managers && (
           <div className="px-6 py-5 space-y-4">
-            <div className="flex gap-2">
-              <input
-                value={newManager}
-                onChange={(e) => setNewManager(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
-                placeholder="e.g. Jane Smith"
-                className={INPUT}
-              />
-              <button onClick={handleAddManager} disabled={busy}
-                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Name</label>
+                <input
+                  value={newManager}
+                  onChange={(e) => setNewManager(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
+                  placeholder="e.g. Jane Smith"
+                  className={INPUT}
+                />
+              </div>
+              <div className="flex-1">
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Email <span className="font-normal text-slate-400">(optional)</span></label>
+                <input
+                  type="email"
+                  value={newManagerEmail}
+                  onChange={(e) => setNewManagerEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddManager()}
+                  placeholder="e.g. jane@ourworldenergy.com"
+                  className={INPUT}
+                />
+              </div>
+              <button onClick={handleAddManager} disabled={busy || !newManager.trim()}
+                className="shrink-0 self-end inline-flex items-center gap-1.5 px-4 py-2 bg-[#003527] text-white text-sm font-semibold rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50">
                 <LuPlus size={15} strokeWidth={2.5} />Add
               </button>
             </div>
-            <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
-              {managers.map((m) => (
-                <span key={m} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700">
-                  {m}
-                  <button onClick={() => askConfirm(m, () => handleRemoveManager(m))} className="text-slate-300 hover:text-red-500 transition-colors ml-0.5">
-                    <LuX size={13} strokeWidth={2.5} />
-                  </button>
-                </span>
-              ))}
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <div className="grid grid-cols-[1fr_1.4fr_5.5rem] gap-3 px-3 py-2 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                <span>Name</span>
+                <span>Email</span>
+                <span className="text-right">Actions</span>
+              </div>
+              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+                {managers.length === 0 && (
+                  <p className="px-3 py-6 text-center text-sm text-slate-400">No OWE Contacts yet.</p>
+                )}
+                {managers.map((m) => (
+                  editingManager === m.name ? (
+                    <div key={m.name} className="grid grid-cols-[1fr_1.4fr_5.5rem] gap-3 px-3 py-2 items-center bg-teal-50/40">
+                      <input
+                        value={editManagerName}
+                        onChange={(e) => setEditManagerName(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleSaveManager(m.name); if (e.key === "Escape") cancelEditManager(); }}
+                        className={INPUT}
+                        autoFocus
+                      />
+                      <input
+                        type="email"
+                        value={editManagerEmail}
+                        onChange={(e) => setEditManagerEmail(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleSaveManager(m.name); if (e.key === "Escape") cancelEditManager(); }}
+                        placeholder="No email"
+                        className={INPUT}
+                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => handleSaveManager(m.name)} disabled={busy || !editManagerName.trim()}
+                          title="Save" className="p-1.5 text-teal-600 hover:text-teal-700 hover:bg-teal-100 rounded-md transition-colors disabled:opacity-40">
+                          <LuSave size={14} strokeWidth={2} />
+                        </button>
+                        <button onClick={cancelEditManager} title="Cancel"
+                          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors">
+                          <LuX size={14} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={m.name} className="group grid grid-cols-[1fr_1.4fr_5.5rem] gap-3 px-3 py-2.5 items-center text-sm hover:bg-slate-50">
+                      <span className="text-slate-700 font-medium truncate" title={m.name}>{m.name}</span>
+                      <span className={`truncate ${m.email ? "text-slate-500" : "text-slate-300"}`} title={m.email || undefined}>{m.email || "—"}</span>
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => startEditManager(m)} title="Edit"
+                          className="p-1.5 text-slate-400 hover:text-[#003527] hover:bg-slate-100 rounded-md transition-colors">
+                          <LuPencil size={13} strokeWidth={2} />
+                        </button>
+                        <button onClick={() => askConfirm(m.name, () => handleRemoveManager(m.name))} title="Remove"
+                          className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors">
+                          <LuX size={13} strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
             </div>
           </div>
         )}

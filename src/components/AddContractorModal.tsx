@@ -139,7 +139,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     country:        initLoc.country,
     state:          initLoc.state,
     officeLocation: initial?.officeLocation ?? officeLocations[0],
-    manager:        initial?.manager        ?? managers[0] ?? "",
+    manager:        initial?.manager        ?? managers[0]?.name ?? "",
     hireDate:       initial?.hireDate       ?? "",
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
     payCategory:    initial?.payCategory    ?? PAY_CATEGORIES[0],
@@ -398,7 +398,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
               <FIELD label="OWE Contact">
                 <select className={SELECT} value={form.manager} onChange={(e) => set("manager", e.target.value)}>
-                  {managers.map((m) => <option key={m}>{m}</option>)}
+                  {managers.map((m) => <option key={m.name}>{m.name}</option>)}
                 </select>
               </FIELD>
             </div>

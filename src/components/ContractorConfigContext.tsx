@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { fetchOrgConfig, seedOrgDefaults, addCountryLocation, addCurrency } from "@/app/admin/settings/actions";
+import { fetchOrgConfig, seedOrgDefaults, addCountryLocation, addCurrency, type OweContact } from "@/app/admin/settings/actions";
 
 // ── Fallback defaults (used only on first seed) ───────────────────────────────
 const DEFAULT_OFFICE_LOCATIONS = [
@@ -58,7 +58,8 @@ const DEFAULT_DEPT_TREE: DeptTree = {
   },
 };
 
-const DEFAULT_MANAGERS = ["Colten Warnock", "Dillard Blanton"];
+const DEFAULT_MANAGER_NAMES = ["Colten Warnock", "Dillard Blanton"];
+const DEFAULT_MANAGERS: OweContact[] = DEFAULT_MANAGER_NAMES.map((name) => ({ name, email: "" }));
 
 const DEFAULT_COUNTRY_LOCATIONS = ["Philippines", "Mexico", "India", "USA"];
 
@@ -71,8 +72,8 @@ type ContractorConfig = {
   setOfficeLocations: (v: string[]) => void;
   deptTree: DeptTree;
   setDeptTree: (v: DeptTree) => void;
-  managers: string[];
-  setManagers: (v: string[]) => void;
+  managers: OweContact[];
+  setManagers: (v: OweContact[]) => void;
   countryLocations: string[];
   setCountryLocations: (v: string[]) => void;
   currencies: string[];
@@ -99,7 +100,7 @@ const ContractorConfigContext = createContext<ContractorConfig>({
 export function ContractorConfigProvider({ children }: { children: React.ReactNode }) {
   const [officeLocations, setOfficeLocations] = useState<string[]>([]);
   const [deptTree, setDeptTree]               = useState<DeptTree>({});
-  const [managers, setManagers]               = useState<string[]>([]);
+  const [managers, setManagers]               = useState<OweContact[]>([]);
   const [countryLocations, setCountryLocations] = useState<string[]>([]);
   const [currencies, setCurrencies]           = useState<string[]>([]);
   const [configLoaded, setConfigLoaded]       = useState(false);
@@ -110,7 +111,7 @@ export function ContractorConfigProvider({ children }: { children: React.ReactNo
 
       // If DB is empty (first run), seed from defaults then reload
       if (cfg.officeLocations.length === 0 && cfg.managers.length === 0 && Object.keys(cfg.deptTree).length === 0) {
-        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGERS, DEFAULT_DEPT_TREE, DEFAULT_COUNTRY_LOCATIONS, DEFAULT_CURRENCIES);
+        await seedOrgDefaults(DEFAULT_OFFICE_LOCATIONS, DEFAULT_MANAGER_NAMES, DEFAULT_DEPT_TREE, DEFAULT_COUNTRY_LOCATIONS, DEFAULT_CURRENCIES);
         const seeded = await fetchOrgConfig();
         setOfficeLocations(seeded.officeLocations);
         setManagers(seeded.managers);

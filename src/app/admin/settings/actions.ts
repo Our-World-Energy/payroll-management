@@ -15,7 +15,7 @@ function getSupabase() {
 
 export async function fetchOrgConfig(): Promise<{
   officeLocations: string[];
-  managers: string[];
+  managers: OweContact[];
   countryLocations: string[];
   currencies: string[];
   deptTree: DeptTree;
@@ -24,7 +24,7 @@ export async function fetchOrgConfig(): Promise<{
 
   const [locRes, mgrRes, countryRes, currencyRes, deptRes, subRes, roleRes] = await Promise.all([
     sb.from("org_office_locations").select("name").order("name"),
-    sb.from("org_managers").select("name").order("name"),
+    sb.from("org_managers").select("name, email").order("name"),
     sb.from("org_country").select("country").order("country"),
     sb.from("org_currency").select("currency").order("currency"),
     sb.from("org_departments").select("id, name").order("name"),
@@ -33,7 +33,8 @@ export async function fetchOrgConfig(): Promise<{
   ]);
 
   const officeLocations: string[] = (locRes.data ?? []).map((r: { name: string }) => r.name);
-  const managers: string[] = (mgrRes.data ?? []).map((r: { name: string }) => r.name);
+  const managers: OweContact[] = (mgrRes.data ?? [])
+    .map((r: { name: string; email: string | null }) => ({ name: r.name, email: r.email ?? "" }));
   const countryLocations: string[] = (countryRes.data ?? []).map((r: { country: string }) => r.country);
   const currencies: string[] = (currencyRes.data ?? []).map((r: { currency: string }) => r.currency);
 
@@ -110,13 +111,54 @@ export async function removeCurrency(name: string): Promise<{ ok: boolean; error
 
 // ── Managers ──────────────────────────────────────────────────────────────────
 
-export async function addManager(name: string): Promise<{ ok: boolean; error?: string }> {
+/** An OWE Contact. Email is optional — rows predating it have names only. */
+export type OweContact = { name: string; email: string };
+
+export async function addManager(name: string, email = ""): Promise<{ ok: boolean; error?: string }> {
   const sb = getSupabase();
   const now = new Date().toISOString();
+  const trimmedEmail = email.trim();
   const { error } = await sb
     .from("org_managers")
-    .insert({ id: crypto.randomUUID(), name: name.trim(), createdAt: now });
+    .insert({ id: crypto.randomUUID(), name: name.trim(), email: trimmedEmail || null, createdAt: now });
   if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * Renames an OWE Contact and/or changes its email.
+ *
+ * contractor_profiles.manager stores the contact's *name*, not an id, so a
+ * rename has to carry into those rows or every contractor pointing at the old
+ * name is left referencing a contact that no longer exists (and their OWE
+ * Contact dropdown would show a value with no matching option).
+ */
+export async function updateManager(
+  oldName: string,
+  name: string,
+  email = "",
+): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const nextName = name.trim();
+  const nextEmail = email.trim();
+  if (!nextName) return { ok: false, error: "Name is required." };
+
+  const { error } = await sb
+    .from("org_managers")
+    .update({ name: nextName, email: nextEmail || null })
+    .eq("name", oldName);
+  if (error) return { ok: false, error: error.message };
+
+  if (nextName !== oldName) {
+    const { error: refErr } = await sb
+      .from("contractor_profiles")
+      .update({ manager: nextName })
+      .eq("manager", oldName);
+    // The contact itself is already renamed; report the partial failure rather
+    // than pretending the cascade succeeded.
+    if (refErr) return { ok: false, error: `Renamed, but contractors still reference "${oldName}": ${refErr.message}` };
+  }
+
   return { ok: true };
 }
 
