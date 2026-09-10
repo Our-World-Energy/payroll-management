@@ -75,7 +75,7 @@ export async function GET(request: Request) {
   const { data: contractorProfiles, error: contractorError } = emails.length
     ? await supabase
       .from("contractor_profiles")
-      .select("email,department,restDay,location,shiftType,payCategory,hireDate")
+      .select("email,department,restDay,location,shiftType,shiftHours,payCategory,hireDate")
       .in("email", emails)
     : { data: [], error: null };
 
@@ -85,7 +85,7 @@ export async function GET(request: Request) {
 
   const profilesByEmail = new Map((contractorProfiles ?? []).map((profile) => [
     String(profile.email ?? "").trim().toLowerCase(),
-    { department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? ""), payCategory: String(profile.payCategory ?? ""), hireDate: String(profile.hireDate ?? "") },
+    { department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? ""), shiftHours: String(profile.shiftHours ?? ""), payCategory: String(profile.payCategory ?? ""), hireDate: String(profile.hireDate ?? "") },
   ]));
 
   const entries = data.map((entry) => {
@@ -96,6 +96,7 @@ export async function GET(request: Request) {
       restDay: profile?.restDay ?? "",
       location: profile?.location ?? "",
       shiftType: profile?.shiftType ?? "",
+      shiftHours: profile?.shiftHours ?? "",
       payCategory: profile?.payCategory ?? "",
       hireDate: profile?.hireDate ?? "",
       hasContractorProfile: profile != null,

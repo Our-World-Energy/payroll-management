@@ -4,13 +4,11 @@ import { useEffect, useState, useTransition } from "react";
 import {
   LuUsers, LuPlus, LuTrash2, LuX, LuLoader, LuShieldCheck, LuUser,
   LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
-  LuHeartHandshake, LuBriefcaseBusiness,
+  LuHeartHandshake, LuBriefcaseBusiness, LuPencil,
 } from "react-icons/lu";
-import {
-  fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword,
-  backfillContractorAccounts, type AppUser,
-} from "./actions";
+import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, updateUserPages, setUserEnabled } from "./actions";
 import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL } from "@/lib/roles";
+import { ACCOUNT_PAGES, ACCOUNT_PAGE_GROUPS } from "@/lib/accountPages";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 
@@ -80,6 +78,7 @@ type Modal =
   | { type: "delete"; user: AppUser }
   | { type: "reset"; user: AppUser }
   | { type: "role"; user: AppUser; newRole: AppRole }
+  | { type: "pages"; user: AppUser; pages: string[]; enabled: boolean }  // enabled = the account itself
   | null;
 
 export function UsersView({ embedded }: { embedded?: boolean }) {
@@ -181,6 +180,23 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to update role.");
         closeModal();
+      }
+    });
+  }
+
+  function handleSaveAccount(user: AppUser, pages: string[], enabled: boolean) {
+    startTransition(async () => {
+      try {
+        await updateUserPages(user.id, pages);
+        // Only touched when it actually changed, so a menu edit doesn't
+        // re-ban or unban the account as a side effect.
+        if (enabled !== user.enabled) await setUserEnabled(user.id, enabled);
+        closeModal();
+        // Re-read rather than patch locally, so the row shows exactly what
+        // was stored on the account.
+        await load();
+      } catch {
+        /* the modal stays open; the row is unchanged */
       }
     });
   }
@@ -395,6 +411,13 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-2">
                       <button
+                          onClick={() => setModal({ type: "pages", user, pages: user.pages, enabled: user.enabled })}
+                          title="Edit the pages this account can open"
+                          className="p-1.5 text-slate-300 hover:text-[#003527] hover:bg-slate-100 rounded-lg transition-colors"
+                        >
+                          <LuPencil size={15} strokeWidth={2} />
+                        </button>
+                      <button
                         onClick={() => setModal({ type: "reset", user })}
                         title="Reset password"
                         className="p-1.5 text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -505,6 +528,122 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
       )}
 
       {/* ── Role Change Confirm Modal ── */}
+      {modal?.type === "pages" && (() => {
+        const personalOnly = modal.user.role === "user" || modal.user.role === "manager";
+        const visibleGroups = personalOnly
+          ? ACCOUNT_PAGE_GROUPS.filter((g) => g === "Personal Pages")
+          : ACCOUNT_PAGE_GROUPS;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isPending && setModal(null)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100">
+              <h3 className="text-base font-bold text-[#003527]">Menus for this account</h3>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                {modal.user.fullName || modal.user.email}
+              </p>
+            </div>
+            <div className="px-6 py-4">
+              {/* Whether the account works at all. Disabling bans it in
+                  GoTrue, so sign-in is refused and any live session stops
+                  being honoured. */}
+              <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 mb-4 ${
+                modal.enabled ? "border-slate-200 bg-slate-50/60" : "border-red-200 bg-red-50"
+              }`}>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={modal.enabled}
+                  onClick={() => setModal({ ...modal, enabled: !modal.enabled })}
+                  className={`mt-0.5 relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                    modal.enabled ? "bg-[#003527]" : "bg-red-500"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-all ${
+                      modal.enabled ? "left-[1.125rem]" : "left-0.5"
+                    }`}
+                  />
+                </button>
+                <div className="min-w-0">
+                  <p className={`text-sm font-semibold ${modal.enabled ? "text-[#003527]" : "text-red-700"}`}>
+                    Account {modal.enabled ? "enabled" : "disabled"}
+                  </p>
+                  <p className={`text-[11px] mt-0.5 ${modal.enabled ? "text-slate-500" : "text-red-600"}`}>
+                    {modal.enabled
+                      ? "This account can sign in and use the system."
+                      : "Disabled — sign-in is refused and any signed-in session stops working."}
+                  </p>
+                </div>
+              </div>
+
+              <p className="text-xs text-slate-500 mb-3">
+                {personalOnly
+                  ? modal.user.role === "manager"
+                    ? "Ticked pages are added to this manager's sidebar. Their Dashboard and Time Away Request come from their role and are always available."
+                    : "Only ticked pages appear in this contractor's portal. Their Dashboard is always available."
+                  : "Ticked menus are what this account sees. Untouched accounts follow their role's defaults; saving here replaces that with exactly these."}
+                {modal.user.pagesAreDefault && (
+                  <span className="block mt-1 text-[11px] text-slate-400">
+                    Currently on the {ROLE_LABEL[modal.user.role]} defaults.
+                  </span>
+                )}
+              </p>
+              <div className="space-y-4 max-h-[22rem] overflow-y-auto pr-1">
+                {visibleGroups.map((group) => (
+                  <div key={group}>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">{group}</p>
+                    <div className="space-y-1">
+                      {ACCOUNT_PAGES.filter((p) => p.group === group).map((page) => {
+                        const on = modal.pages.includes(page.key);
+                        return (
+                          <label
+                            key={page.key}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={(e) => setModal({
+                                ...modal,
+                                pages: e.target.checked
+                                  ? [...modal.pages, page.key]
+                                  : modal.pages.filter((k) => k !== page.key),
+                              })}
+                              className="size-4 accent-[#003527] cursor-pointer"
+                            />
+                            <span className="text-sm font-medium text-slate-700">{page.label}</span>
+                            <span className="ml-auto text-[11px] text-slate-300 font-mono truncate">{page.href}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setModal(null)}
+                disabled={isPending}
+                className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSaveAccount(modal.user, modal.pages, modal.enabled)}
+                disabled={isPending}
+                className="px-5 py-2 bg-[#003527] hover:bg-[#064e3b] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-60"
+              >
+                {isPending ? <LuLoader size={15} className="animate-spin" /> : <LuPencil size={15} strokeWidth={2} />}
+                {isPending ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {modal?.type === "role" && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />

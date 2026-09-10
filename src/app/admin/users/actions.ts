@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { normalizeAccountPages, defaultAccountPages, accountPagesAreDefault } from "@/lib/accountPages";
 import { type AppRole, normalizeRole } from "@/lib/roles";
 
 function getSupabase() {
@@ -17,6 +18,12 @@ export type AppUser = {
   createdAt: string;
   lastSignIn: string | null;
   confirmed: boolean;
+  /** Menus this account may open. Empty + pagesAreDefault means "role default". */
+  pages: string[];
+  /** False once an admin has set this account's menus explicitly. */
+  pagesAreDefault: boolean;
+  /** Disabled accounts cannot sign in. Backed by GoTrue's ban, not metadata. */
+  enabled: boolean;
 };
 
 function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
@@ -29,6 +36,13 @@ function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
     createdAt:   String(u.created_at  ?? ""),
     lastSignIn:  u.last_sign_in_at ? String(u.last_sign_in_at) : null,
     confirmed:   Boolean(u.email_confirmed_at),
+    pages:       accountPagesAreDefault(metadata?.pages)
+                   ? defaultAccountPages(normalizeRole(metadata?.role))
+                   : normalizeAccountPages(metadata?.pages),
+    pagesAreDefault: accountPagesAreDefault(metadata?.pages),
+    // banned_until is absent on a normal account, and a past date counts as
+    // expired — so only a future ban means disabled.
+    enabled:     !(u.banned_until && new Date(String(u.banned_until)) > new Date()),
   };
 }
 
@@ -102,8 +116,13 @@ export async function deleteUser(id: string): Promise<void> {
 
 export async function updateUserRole(id: string, role: AppRole): Promise<void> {
   const sb = getSupabase();
+  // Merge rather than replace: updateUserById overwrites user_metadata whole,
+  // so writing { role } alone dropped fullName and (now) the granted pages.
+  const { data: existing, error: readErr } = await sb.auth.admin.getUserById(id);
+  if (readErr) throw new Error(readErr.message);
+  const metadata = (existing?.user?.user_metadata ?? {}) as Record<string, unknown>;
   const { error } = await sb.auth.admin.updateUserById(id, {
-    user_metadata: { role },
+    user_metadata: { ...metadata, role },
   });
   if (error) throw new Error(error.message);
 }
@@ -153,4 +172,46 @@ export async function backfillContractorAccounts(): Promise<{ created: number; s
   }
 
   return { created, skipped };
+}
+
+/**
+ * Replaces the account's granted pages.
+ *
+ * updateUserById replaces user_metadata wholesale, so the existing metadata is
+ * read first and merged — writing { pages } alone would drop the role and
+ * silently demote the account (normalizeRole reads a missing role as admin).
+ */
+export async function updateUserPages(id: string, pages: string[] | null): Promise<void> {
+  const sb = getSupabase();
+  const { data: existing, error: readErr } = await sb.auth.admin.getUserById(id);
+  if (readErr) throw new Error(readErr.message);
+  const metadata = (existing?.user?.user_metadata ?? {}) as Record<string, unknown>;
+  // null clears the override: the key is removed rather than set to [], so
+  // the account reads as "never set" and follows its role's defaults again.
+  // An empty array would instead mean "no menus at all".
+  const next = { ...metadata };
+  if (pages === null) delete next.pages;
+  else next.pages = normalizeAccountPages(pages);
+
+  const { error } = await sb.auth.admin.updateUserById(id, { user_metadata: next });
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Enables or disables an account.
+ *
+ * Uses GoTrue's ban rather than a metadata flag, so a disabled account is
+ * refused at the auth layer — it cannot sign in, and an existing session's
+ * token stops being honoured. A metadata flag would only be as good as the
+ * checks that remembered to read it.
+ *
+ * Absent/expired ban = enabled, which is every account today. Nothing is
+ * disabled unless an admin turns it off here.
+ */
+export async function setUserEnabled(id: string, enabled: boolean): Promise<void> {
+  const sb = getSupabase();
+  const { error } = await sb.auth.admin.updateUserById(id, {
+    ban_duration: enabled ? "none" : "876000h", // ~100 years
+  });
+  if (error) throw new Error(error.message);
 }

@@ -11,7 +11,7 @@ import {
   LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
-import { normalizeRole } from "@/lib/roles";
+import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor } from "@/lib/roles";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -34,6 +34,9 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   const [collapsed,      setCollapsed]      = useState(false);
   const [dark,           setDark]           = useState(false);
   const [isAdminViewing, setIsAdminViewing] = useState(false);
+  // null = not page-limited (admin in Contractor View); otherwise the keys
+  // this account may open.
+  const [visiblePages, setVisiblePages] = useState<PortalPageKey[] | null>(null);
   const [switching,      setSwitching]      = useState(false);
 
   useEffect(() => {
@@ -45,27 +48,53 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
       const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
       if (aal?.currentLevel !== "aal2") { router.replace("/two-factor"); return; }
 
-      const role     = normalizeRole(session.user.user_metadata?.role);
+      // From the Auth server rather than the session's JWT — see AuthGuard.
+      const { data: fresh } = await supabase.auth.getUser();
+      const account  = fresh?.user ?? session.user;
+
+      const role     = normalizeRole(account.user_metadata?.role);
       const override = localStorage.getItem("role_override");
+      const granted  = effectivePagesFor(role, account.user_metadata?.pages);
+      // Admins in Contractor View aren't page-limited; the switch exists to
+      // see the whole portal.
+      const limited  = role === "manager" || role === "user";
+      setVisiblePages(limited ? granted : null);
 
       // Allow admins who clicked "Contractor View" to pass through. Only a
       // full admin gets that switch — HR and Managers belong in their own
       // console, so a stale override in their browser must not let them in.
-      if (role !== "user" && !(role === "admin" && override === "contractor")) {
+      // A Manager may open the pages an admin ticked for them on User
+      // Management, and nothing else here. Anything ungranted sends them back
+      // to their own console rather than 404ing.
+      const managerMayOpen = role === "manager" && pageGrantsPath(granted, pathname);
+      if (role !== "user" && !(role === "admin" && override === "contractor") && !managerMayOpen) {
         router.replace("/admin");
+        return;
+      }
+
+      // A contractor whose access to this page has been withdrawn goes to
+      // their Dashboard, which is never page-limited. Only the four
+      // controllable pages are checked, so /dashboard and anything else here
+      // is unaffected.
+      if (role === "user"
+          && PORTAL_PAGES.some((pg) => pathname.startsWith(pg.href))
+          && !pageGrantsPath(granted, pathname)) {
+        router.replace("/contractor/dashboard");
         return;
       }
 
       if (role !== "user") setIsAdminViewing(true);
 
-      const em = session.user.email ?? "";
+      const em = account.email ?? "";
       setEmail(em);
       const name  = em.split("@")[0];
       const parts = name.split(/[.\-_]/);
       setInitials(parts.slice(0, 2).map((p: string) => p[0]?.toUpperCase() ?? "").join("") || "U");
       setChecked(true);
     })();
-  }, [router]);
+    // pathname included because the manager grant check is per-path: moving
+    // between contractor pages has to be re-authorised, not just the first one.
+  }, [router, pathname]);
 
   function switchToAdmin() {
     setSwitching(true);
@@ -127,7 +156,13 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-3 space-y-0.5">
-          {NAV_ITEMS.map(({ href, label, Icon }) => {
+          {(visiblePages === null
+            ? NAV_ITEMS
+            : NAV_ITEMS.filter((item) =>
+                // Dashboard is always available; the rest must be granted.
+                item.href === "/contractor/dashboard"
+                || PORTAL_PAGES.some((p) => p.href === item.href && visiblePages.includes(p.key)))
+          ).map(({ href, label, Icon }) => {
             const active = isActive(href);
             return (
               <Link

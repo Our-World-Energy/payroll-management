@@ -2,16 +2,22 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import {
-  LuLogOut, LuChevronLeft, LuChevronRight, LuSun, LuMoon,
-} from "react-icons/lu";
+import { LuLogOut, LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuUser, LuUmbrella, LuClipboardCheck, LuWallet } from "react-icons/lu";
 import Image from "next/image";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { createClient } from "@/lib/supabase/client";
-import { matchesPath, navItemsForRole } from "@/lib/adminNav";
-import { CONSOLE_LABEL } from "@/lib/roles";
-import { useRole } from "./RoleContext";
+import { matchesPath } from "@/lib/adminNav";
+import { accountNavItems } from "@/lib/accountPages";
+import { CONSOLE_LABEL, PORTAL_PAGES } from "@/lib/roles";
+import { useRole, useAccount } from "./RoleContext";
+
+const PORTAL_PAGE_ICONS = {
+  "profile": LuUser,
+  "time-off": LuUmbrella,
+  "attendance": LuClipboardCheck,
+  "pay-vouchers": LuWallet,
+} as const;
 
 export function AdminSidebar() {
   const pathname = usePathname();
@@ -19,7 +25,17 @@ export function AdminSidebar() {
   const { open, close } = useSidebar();
   const { dark, collapsed, toggleDark, toggleCollapsed } = useAdminTheme();
   const role = useRole();
-  const navItems = navItemsForRole(role);
+  const { pages, rawPages } = useAccount();
+  // A manager's granted pages live under /contractor but belong in their own
+  // sidebar — see PORTAL_PAGES.
+  const navItems = [
+    ...accountNavItems(role, rawPages),
+    ...(role === "manager"
+      ? PORTAL_PAGES.filter((p) => pages.includes(p.key)).map((p) => ({
+          href: p.href, label: p.label, Icon: PORTAL_PAGE_ICONS[p.key], roles: ["manager"] as const,
+        }))
+      : []),
+  ];
 
   async function handleLogout() {
     const supabase = createClient();

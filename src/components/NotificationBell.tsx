@@ -15,7 +15,9 @@ import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "@/app/adm
 import { useAccount } from "./RoleContext";
 import { useContractorConfig } from "./ContractorConfigContext";
 
-type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string };
+type PendingApprovalRow = { name: string; type: string; startDate: string; endDate: string; contractorId: string;
+  /** The contractor's assigned OWE Contact, so a manager's bell covers only their own people. */
+  manager: string };
 type AlertRow = { name: string; department: string };
 type BirthdayRow = { name: string };
 type AnnouncementRow = { title: string; location: string };
@@ -123,8 +125,10 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
             .filter((r) => r.status === "Pending")
             .map((r) => {
               const c = contractors.find((c) => c.email.trim().toLowerCase() === r.email.trim().toLowerCase());
-              return { name: c?.fullName || r.email, type: r.type, startDate: r.startDate, endDate: r.endDate, contractorId: c?.uid ?? "" };
+              return { name: c?.fullName || r.email, type: r.type, startDate: r.startDate, endDate: r.endDate, contractorId: c?.uid ?? "", manager: c?.manager ?? "" };
             })
+            // A lookup miss leaves a manager with nothing rather than everyone.
+            .filter((r) => !isManager || (!!myContactName && r.manager === myContactName))
         );
 
         setBirthdaysToday(
@@ -283,12 +287,14 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="Notifications"
+        aria-label={pendingApprovals.length > 0
+          ? `Notifications — ${pendingApprovals.length} request${pendingApprovals.length === 1 ? "" : "s"} awaiting approval`
+          : "Notifications"}
         className={`relative p-2 rounded-full transition-colors ${dark ? "text-white/60 hover:bg-white/10" : "text-slate-600 hover:bg-slate-50"}`}
       >
-        <LuBell size={20} strokeWidth={1.75} />
+        <LuBell size={20} strokeWidth={1.75} className={pendingApprovals.length > 0 ? "animate-bell-ring" : undefined} />
         {totalCount > 0 && (
-          <span className={`absolute top-1.5 right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold leading-4 text-center border-2 ${dark ? "border-[#0f1a15]" : "border-white"}`}>
+          <span className={`absolute top-1.5 right-1.5 min-w-[16px] h-4 px-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold leading-4 text-center border-2 ${pendingApprovals.length > 0 ? "animate-pulse" : ""} ${dark ? "border-[#0f1a15]" : "border-white"}`}>
             {totalCount > 99 ? "99+" : totalCount}
           </span>
         )}

@@ -338,6 +338,11 @@ model WorksnapDailyLog {
   /// "started exactly on the boundary" — measured at ~0.7% of entries.
   firstInLogged  DateTime? @db.Timestamptz(3)
   lastOutLogged  DateTime? @db.Timestamptz(3)
+  /// The day's individual Worksnap slots as [[startEpochSeconds, minutes], …].
+  /// Lets any "how much of this day fell inside window X" question be answered
+  /// exactly — Local HO Time needs it, since a shift can straddle the holiday's
+  /// edge. Null on rows synced before the column existed.
+  slots          Json?
   totalMins      Int      @default(0)
   entries        Int      @default(0)
   syncedAt       DateTime @default(now())

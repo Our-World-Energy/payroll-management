@@ -211,6 +211,8 @@ type DailyLog = {
   firstInLogged: Date | null;
   lastOutLogged: Date | null;
   totalMins: number;
+  /** Every slot behind totalMins: [startEpochSeconds, minutes]. */
+  slots: [number, number][];
   entries: number;
 };
 
@@ -239,6 +241,9 @@ async function buildDailyLogs(
     endLogged: number;
     mins: number;
     count: number;
+    // Kept rather than discarded: firstIn/lastOut alone can't answer how much
+    // of a day fell inside an arbitrary window, which Local HO Time needs.
+    slots: [number, number][];
   };
   const agg = new Map<string, Acc>();
 
@@ -290,6 +295,7 @@ async function buildDailyLogs(
         }
         cur.mins += mins;
         cur.count += 1;
+        cur.slots.push([startTs, mins]);
       } else {
         agg.set(key, {
           start: startTs,
@@ -298,6 +304,7 @@ async function buildDailyLogs(
           endLogged: loggedTs,
           mins,
           count: 1,
+          slots: [[startTs, mins]],
         });
       }
     }
@@ -320,6 +327,8 @@ async function buildDailyLogs(
       lastOut: new Date(a.end * 1000),
       firstInLogged: a.startLogged ? new Date(a.startLogged * 1000) : null,
       lastOutLogged: a.endLogged ? new Date(a.endLogged * 1000) : null,
+      // Chronological, so a consumer can bisect rather than scan.
+      slots: [...a.slots].sort((x, y) => x[0] - y[0]),
       totalMins: a.mins,
       entries: a.count,
     });
