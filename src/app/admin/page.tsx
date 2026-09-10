@@ -735,6 +735,15 @@ function AdminDashboard() {
 export default function AdminPage() {
   const role = useRole();
   // Same label the sidebar shows, so renaming it in roles.ts carries here.
-  if (role === "manager") return <DashboardView eyebrow={CONSOLE_LABEL[role]} />;
+  // The admin console has no padding of its own — each page supplies it (see
+  // AdminDashboard's root below). This branch mirrors the contractor layout's
+  // own <main> padding, so the view sizes identically in both portals.
+  if (role === "manager") {
+    return (
+      <div className="p-4 sm:p-5 md:p-6 max-w-full overflow-x-hidden">
+        <DashboardView eyebrow={CONSOLE_LABEL[role]} />
+      </div>
+    );
+  }
   return <AdminDashboard />;
 }

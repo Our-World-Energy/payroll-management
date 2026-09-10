@@ -270,7 +270,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
           </div>
         </header>
 
-        <main className="p-4 sm:p-6 md:p-8 contractor-page min-h-screen transition-colors duration-300">{children}</main>
+        <main className="p-4 sm:p-5 md:p-6 contractor-page min-h-screen transition-colors duration-300">{children}</main>
       </div>
     </div>
   );

@@ -13,8 +13,7 @@ import { datesBetween, weekLabel } from "@/lib/weekUtils";
 import { PageHeader } from "../_components/portal";
 import { Logo } from "@/components/Logo";
 import {
-  LuLoader, LuBadgeCheck, LuCalendarDays, LuCalendarCheck,
-  LuInfo, LuCircleMinus, LuDownload, LuWallet, LuChevronDown,
+  LuLoader, LuInfo, LuDownload, LuWallet, LuChevronDown,
 } from "react-icons/lu";
 
 // ── formatting helpers ────────────────────────────────────────────────────
@@ -137,8 +136,8 @@ export default function ContractorPayVouchersPage() {
   const printVoucher = vouchers.find((v) => v.weekStart === printWeek) ?? main;
 
   return (
-    <div className="space-y-8 max-w-6xl mx-auto">
-      <PageHeader title="Pay Vouchers" subtitle="Your weekly earnings statements and payment history." />
+    <div className="space-y-8 max-w-[110rem] mx-auto">
+      <PageHeader eyebrow="" title="Pay Vouchers" subtitle="Your weekly earnings statements and payment history." />
 
       {!main ? (
         <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center shadow-sm">
@@ -194,14 +193,13 @@ function Voucher({ profile, v, vouchers, onSelect, onDownload }: {
   const { bonus, misc, retroPay, reim, cashAdvance, hmo } = v.adjustment;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       {/* Week range selection. Offers only cycles that actually have a
           voucher — unlike the admin picker, which can browse any week — so a
           choice can never land on an empty statement. Hidden when there is
           just the one cycle to show. */}
       {vouchers.length > 1 && (
         <div className="flex items-center gap-3">
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.18em] whitespace-nowrap">Pay Cycle</p>
           <div className="ml-auto flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm overflow-x-auto">
             <div className="flex gap-0.5">
               {vouchers.slice(0, 4).map((w) => (
@@ -234,178 +232,156 @@ function Voucher({ profile, v, vouchers, onSelect, onDownload }: {
         </div>
       )}
 
-      {/* Employee summary + rates */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
-        <div className="space-y-1">
-          <p className="text-[11px] font-bold text-slate-400 uppercase tracking-[0.18em]">Employee Summary</p>
-          <h2 className="text-3xl md:text-4xl font-bold text-[#003527] tracking-tight" style={{ letterSpacing: "-0.02em" }}>{profile.name}</h2>
-          <div className="flex items-center gap-2 text-slate-600 pt-1">
-            <LuBadgeCheck size={17} className="text-emerald-700 shrink-0" strokeWidth={2} />
-            <span className="text-sm">{profile.role} · ID #{profile.contractorId.replace(/^#/, "")}</span>
-          </div>
-          <div className="flex items-center gap-2 text-slate-600">
-            <LuCalendarDays size={17} className="text-emerald-700 shrink-0" strokeWidth={2} />
-            <span className="text-sm">Pay Cycle: {fmtRange(v.rangeFrom, v.rangeTo)}</span>
-          </div>
-          <div className="flex items-center gap-2 text-slate-600">
-            <LuCalendarCheck size={17} className="text-emerald-700 shrink-0" strokeWidth={2} />
-            <span className="text-sm">Check Date: {fmtDate(v.checkDate)}</span>
+      {/* Identity + cycle + rates, on one line rather than a tall summary
+          block with its own rates card beside it. */}
+      <section className="bg-white rounded-2xl border border-slate-200/80 shadow-sm px-5 py-4 flex flex-col lg:flex-row lg:items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-xl font-bold text-[#003527] tracking-tight truncate">{profile.name}</h2>
+          <p className="text-xs text-slate-500 mt-0.5 truncate">
+            {profile.role} · ID #{profile.contractorId.replace(/^#/, "")}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 lg:border-l lg:border-slate-100 lg:pl-6">
+          {([
+            ["Pay Cycle", fmtRange(v.rangeFrom, v.rangeTo)],
+            ["Check Date", fmtDate(v.checkDate)],
+            ["Monthly Rate", `${fmtRate(v.monthlyRate)} ${v.currency}`],
+            ["Weekly Rate", `${fmtRate2(v.weeklyRate)} ${v.currency}`],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">{label}</p>
+              <p className="text-sm font-semibold text-slate-700 tabular-nums whitespace-nowrap">{value}</p>
+            </div>
+          ))}
+        </div>
+        <button
+          onClick={() => onDownload(v.weekStart)}
+          className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#046B4D] hover:bg-[#035c42] text-white text-xs font-bold uppercase tracking-wider transition-colors"
+        >
+          <LuDownload size={15} strokeWidth={2} /> Download PDF
+        </button>
+      </section>
+
+      {/* Net pay, and the two figures it comes from — the one line most people
+          open a voucher to read, so it sits above the breakdown. */}
+      <section className="bg-brand-900 text-white rounded-2xl shadow-sm px-5 py-4 flex flex-wrap items-center gap-x-8 gap-y-3">
+        <div className="flex items-center gap-3 mr-auto">
+          <div className="bg-white/10 p-2 rounded-full shrink-0"><LuWallet size={20} strokeWidth={2} /></div>
+          <div>
+            <p className="text-[10px] font-bold text-emerald-100/80 uppercase tracking-[0.18em]">Total Net Pay</p>
+            <p className="text-2xl font-bold tabular-nums leading-tight">
+              <span className="text-sm font-medium text-emerald-100/90 mr-1.5">{v.currency}</span>
+              {money(t.netPay)}
+            </p>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm flex justify-between md:justify-end md:gap-12">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Monthly Contract Rate</p>
-            <p className="text-2xl font-bold text-[#003527] mt-1 tabular-nums">{fmtRate(v.monthlyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
-          </div>
-          <div className="text-right">
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weekly Contract Rate</p>
-            <p className="text-2xl font-bold text-slate-700 mt-1 tabular-nums">{fmtRate2(v.weeklyRate)} <span className="text-sm font-medium text-slate-400">{v.currency}</span></p>
-          </div>
+        <div className="text-right">
+          <p className="text-[9px] font-bold text-emerald-100/70 uppercase tracking-wider">Gross Pay</p>
+          <p className="text-base font-semibold tabular-nums">{money(t.grossPay)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[9px] font-bold text-emerald-100/70 uppercase tracking-wider">Deductions</p>
+          <p className="text-base font-semibold tabular-nums">−{money(t.totalDeductions)}</p>
         </div>
       </section>
 
-      {/* Gross Pay Breakdown */}
-      <div className="rounded-2xl overflow-hidden border border-slate-200/80 bg-white shadow-sm">
-        <div className="bg-brand-900 px-6 py-3 flex justify-between items-center">
-          <h3 className="text-white font-bold text-xs uppercase tracking-[0.18em]">Gross Pay Breakdown</h3>
-          <LuInfo size={18} className="text-emerald-200/80" strokeWidth={2} />
+      {/* One breakdown card in three columns, instead of separate Gross Pay
+          and Deductions cards stacked down the page. */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+        <div className="bg-brand-900 px-5 py-2.5 flex items-center justify-between">
+          <h3 className="text-white font-bold text-xs uppercase tracking-[0.18em]">Pay Breakdown</h3>
+          <LuInfo size={16} className="text-emerald-200/80" strokeWidth={2} />
         </div>
-        <div className="p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-2 gap-10">
-          {/* Left — hours */}
-          <div className="space-y-8">
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">Weekly Attendance</p>
-              <div className="grid grid-cols-7 border border-slate-100 rounded-lg overflow-hidden">
-                {weekDates.map((date, i) => {
-                  const label = DAY_LABELS[i];
-                  const isOff = restDayLabels.has(label);
-                  const hours = (v.evaluatedDailyMinutes[date] ?? 0) / 60;
-                  const otHours = (v.regularOtDailyMinutes[date] ?? 0) / 60;
-                  const otInPlaceOfZero = !isOff && hours === 0 && otHours > 0;
-                  return (
-                    <div key={date} className={`p-2 text-center border-b border-r border-slate-100 last:border-r-0 ${isOff ? "bg-slate-50" : "bg-white"}`}>
-                      <p className="text-[10px] font-bold text-slate-400">{label}</p>
-                      <p className={`text-xs font-bold tabular-nums mt-0.5 ${isOff ? "text-slate-400" : otInPlaceOfZero ? "text-amber-600" : "text-emerald-900"}`}
-                        title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours` : undefined}>
-                        {isOff ? "OFF" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
-                      </p>
-                      {!otInPlaceOfZero && otHours > 0 && (
-                        <p className="text-[9px] font-semibold leading-tight text-amber-600 tabular-nums"
-                          title={`Regular OT earned this day — counted in REG OT HRS, not REG Hours`}>+{otHours.toFixed(2)}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+
+          {/* Hours */}
+          <div className="p-5 space-y-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Weekly Attendance</p>
+            <div className="grid grid-cols-7 border border-slate-100 rounded-lg overflow-hidden">
+              {weekDates.map((date, i) => {
+                const label = DAY_LABELS[i];
+                const isOff = restDayLabels.has(label);
+                const hours = (v.evaluatedDailyMinutes[date] ?? 0) / 60;
+                const dayOt = (v.regularOtDailyMinutes[date] ?? 0) / 60;
+                const otInPlaceOfZero = !isOff && hours === 0 && dayOt > 0;
+                return (
+                  <div key={date} className={`px-1 py-1.5 text-center border-r border-slate-100 last:border-r-0 ${isOff ? "bg-slate-50" : "bg-white"}`}>
+                    <p className="text-[9px] font-bold text-slate-400">{label}</p>
+                    <p className={`text-xs font-bold tabular-nums ${isOff ? "text-slate-400" : otInPlaceOfZero ? "text-amber-600" : "text-emerald-900"}`}
+                      title={otInPlaceOfZero ? "Regular OT earned this day — counted in OT HRS, not REG Hours" : undefined}>
+                      {isOff ? "OFF" : (otInPlaceOfZero ? dayOt : hours).toFixed(2)}
+                    </p>
+                    {!otInPlaceOfZero && dayOt > 0 && (
+                      <p className="text-[9px] font-semibold leading-tight text-amber-600 tabular-nums"
+                        title="Regular OT earned this day — counted in OT HRS, not REG Hours">+{dayOt.toFixed(2)}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <div className="space-y-1">
-              {[
+            <div>
+              {([
                 ["REG Hours", t.regHours, true],
                 ["PTO HRS", v.ptoHours, false],
                 ["HO HRS", t.usHolidayHours + t.localHolidayHours, false],
-                ["REG OT / RD OT / HO OT", otHours, false],
-              ].map(([label, value, strong]) => (
-                <div key={label as string} className="flex justify-between items-center py-2 border-b border-slate-50 last:border-0">
-                  <span className={`text-sm ${strong ? "font-medium text-slate-600" : "text-slate-500"}`}>{label}</span>
-                  <span className={`font-bold tabular-nums ${(value as number) > 0 ? "text-emerald-900" : "text-slate-300"}`}>{(value as number).toFixed(2)}</span>
+                ["OT HRS (REG/RD/HO)", otHours, false],
+              ] as const).map(([label, value, strong]) => (
+                <div key={label} className="flex justify-between items-center py-1.5 border-b border-dotted border-slate-100 last:border-0">
+                  <span className={`text-xs ${strong ? "font-semibold text-slate-600" : "text-slate-500"}`}>{label}</span>
+                  <span className={`text-sm font-bold tabular-nums ${value > 0 ? "text-emerald-900" : "text-slate-300"}`}>{value.toFixed(2)}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Right — earnings */}
-          <div className="space-y-6">
-            <div className="space-y-3">
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-3 tracking-wider">Earnings Breakdown</p>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-600">Regular Hours Pay</span>
-                <span className="text-2xl font-bold text-emerald-900 tabular-nums">{money(t.regPay)}</span>
-              </div>
-              <div className="space-y-1.5 pt-1">
-                {[
-                  ["Overtime (REG/RD/HO)", overtimePay],
-                  ["Holiday Pay (US/Local)", holidayPay],
-                  ["Time Off Pay", t.timeOffPay],
-                  ["Bonus & Miscellaneous", bonus + misc],
-                  ["Retroactive Pay & REIM", retroPay + reim],
-                ].map(([label, value]) => (
-                  <div key={label as string} className="flex justify-between text-sm">
-                    <span className={(value as number) > 0 ? "text-slate-600" : "text-slate-400"}>{label}</span>
-                    <span className={`tabular-nums ${(value as number) > 0 ? "font-semibold text-slate-700" : "text-slate-400"}`}>{money(value as number)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="pt-6 border-t-2 border-dashed border-slate-100">
-              <div className="bg-emerald-50 border-2 border-emerald-700/20 rounded-xl p-5 flex justify-between items-center">
-                <div>
-                  <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Gross Pay Total</p>
-                  <p className="text-[10px] text-emerald-600">Before deductions</p>
+          {/* Earnings */}
+          <div className="p-5 space-y-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Earnings</p>
+            <div>
+              {([
+                ["Regular Hours Pay", t.regPay, true],
+                ["Overtime (REG/RD/HO)", overtimePay, false],
+                ["Holiday Pay (US/Local)", holidayPay, false],
+                ["Time Off Pay", t.timeOffPay, false],
+                ["Bonus & Miscellaneous", bonus + misc, false],
+                ["Retroactive Pay & REIM", retroPay + reim, false],
+              ] as const).map(([label, value, strong]) => (
+                <div key={label} className="flex justify-between items-center py-1.5 border-b border-dotted border-slate-100 last:border-0">
+                  <span className={`text-xs ${strong ? "font-semibold text-slate-600" : value > 0 ? "text-slate-600" : "text-slate-400"}`}>{label}</span>
+                  <span className={`text-sm tabular-nums ${value > 0 ? "font-bold text-slate-700" : "text-slate-300"}`}>{money(value)}</span>
                 </div>
-                <div className="text-right">
-                  <span className="text-3xl font-bold text-emerald-900 tabular-nums">{money(t.grossPay)}</span>
-                  <span className="text-sm font-medium text-emerald-700 ml-1">{v.currency}</span>
+              ))}
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-700/20 px-4 py-2.5">
+              <p className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Gross Pay</p>
+              <p className="text-lg font-bold text-emerald-900 tabular-nums">{money(t.grossPay)}</p>
+            </div>
+          </div>
+
+          {/* Deductions */}
+          <div className="p-5 space-y-4">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Deductions</p>
+            <div>
+              {([
+                ["Cash Advance", cashAdvance],
+                ["HMO Premium", hmo],
+              ] as const).map(([label, value]) => (
+                <div key={label} className="flex justify-between items-center py-1.5 border-b border-dotted border-slate-100 last:border-0">
+                  <span className={`text-xs ${value > 0 ? "text-slate-600" : "text-slate-400"}`}>{label}</span>
+                  <span className={`text-sm tabular-nums ${value > 0 ? "font-bold text-slate-700" : "text-slate-300"}`}>{money(value)}</span>
                 </div>
-              </div>
+              ))}
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 border border-slate-200 px-4 py-2.5">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Deductions</p>
+              <p className="text-lg font-bold text-slate-700 tabular-nums">{money(t.totalDeductions)}</p>
+            </div>
+            <div className="flex items-center justify-between rounded-xl bg-brand-900 px-4 py-2.5">
+              <p className="text-[10px] font-bold text-emerald-100/80 uppercase tracking-wider">Net Pay</p>
+              <p className="text-lg font-bold text-white tabular-nums">{money(t.netPay)}</p>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Deductions */}
-      <div className="rounded-2xl overflow-hidden border border-slate-200/80 bg-white shadow-sm">
-        <div className="bg-brand-900 px-6 py-3 flex justify-between items-center">
-          <h3 className="text-white font-bold text-xs uppercase tracking-[0.18em]">Deductions</h3>
-          <LuCircleMinus size={18} className="text-emerald-200/80" strokeWidth={2} />
-        </div>
-        <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-          <div className="space-y-4">
-            {[
-              ["Cash Advance", cashAdvance, <LuWallet key="w" size={18} className="text-slate-400" strokeWidth={1.75} />],
-              ["HMO Premium", hmo, <LuBadgeCheck key="h" size={18} className="text-slate-400" strokeWidth={1.75} />],
-            ].map(([label, value, icon]) => (
-              <div key={label as string} className="flex justify-between items-center pb-3 border-b border-slate-100 last:border-0 last:pb-0">
-                <div className="flex items-center gap-3">{icon as React.ReactNode}<span className="text-sm text-slate-600">{label as string}</span></div>
-                <span className={`font-bold tabular-nums ${(value as number) > 0 ? "text-slate-700" : "text-slate-300"}`}>{money(value as number)}</span>
-              </div>
-            ))}
-          </div>
-          <div className="md:border-l border-slate-100 md:pl-10">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Deductions</p>
-                <p className="text-[10px] text-slate-400">Current pay cycle</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg px-6 py-3">
-                <span className="text-2xl font-bold text-slate-700 tabular-nums">{money(t.totalDeductions)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Net Pay */}
-      <div className="bg-brand-900 text-white rounded-2xl shadow-lg p-8 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div className="flex items-center gap-4">
-          <div className="bg-white/10 p-3 rounded-full"><LuWallet size={28} strokeWidth={2} /></div>
-          <div>
-            <h2 className="text-2xl font-bold">Final Settlement</h2>
-            <p className="text-emerald-100/80 text-sm">Voucher for period: {fmtRange(v.rangeFrom, v.rangeTo)}</p>
-          </div>
-        </div>
-        <div className="flex flex-col items-center md:items-end">
-          <p className="text-[10px] font-bold text-emerald-100/80 uppercase tracking-[0.18em] mb-1">Total Net Pay</p>
-          <div className="flex items-baseline gap-2">
-            <span className="text-xl font-medium text-emerald-100/90">{v.currency}</span>
-            <span className="text-4xl md:text-5xl font-bold tabular-nums">{money(t.netPay)}</span>
-          </div>
-        </div>
-        <button
-          onClick={() => onDownload(v.weekStart)}
-          className="bg-secondary-container text-on-secondary-container px-7 py-3 rounded-full font-bold text-sm uppercase tracking-wider hover:opacity-90 transition-opacity flex items-center gap-2"
-        >
-          <LuDownload size={17} strokeWidth={2} /> Download PDF
-        </button>
       </div>
     </div>
   );

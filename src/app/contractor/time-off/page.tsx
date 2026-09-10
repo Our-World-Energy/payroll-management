@@ -13,7 +13,7 @@ import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
   LuChevronRight, LuChevronDown, LuInfo, LuX, LuCircleAlert,
-  LuClipboardList, LuSend, LuCalendarDays,
+  LuClipboardList, LuSend, LuCalendarDays, LuCirclePlus, LuEye,
 } from "react-icons/lu";
 import { PageHeader, HeaderChip, ProgressRing } from "../_components/portal";
 import { CalendarDateInput } from "@/components/CalendarDateInput";
@@ -204,6 +204,8 @@ export default function ContractorTimeOffPage() {
   const INDIA_LEAVE_TYPES  = ["Sick Leave", "Sick Leave Half Day"] as const;
 
   const [leaveType, setLeaveType] = useState<typeof ALL_LEAVE_TYPES[number]>("PTO");
+  const [showForm, setShowForm] = useState(false);
+  const [viewRequest, setViewRequest] = useState<LeaveRequest | null>(null);
   const [cancelTarget, setCancelTarget] = useState<LeaveRequest | null>(null);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState("");
@@ -372,6 +374,53 @@ export default function ContractorTimeOffPage() {
     setCancelTarget(null);
   }
 
+  const viewDialog = viewRequest && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setViewRequest(null)} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-slate-100">
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-[#003527]">{leaveTypeDisplayLabel(viewRequest.type)}</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Request details</p>
+          </div>
+          <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(viewRequest.status)}`}>
+            {viewRequest.status}
+          </span>
+        </div>
+        <div className="px-5 py-4 space-y-0.5">
+          {([
+            ["Dates", viewRequest.endDate && viewRequest.endDate !== viewRequest.startDate
+              ? `${fmtDayAndDate(viewRequest.startDate)} – ${fmtDayAndDate(viewRequest.endDate)}`
+              : fmtDayAndDate(viewRequest.startDate)],
+            ["Duration", fmtRequestHours(viewRequest.type, viewRequest.durationDays)],
+            ["Filed", fmtDayAndDate(String(viewRequest.createdAt).slice(0, 10))],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="flex items-baseline justify-between gap-4 py-1.5 border-b border-dotted border-slate-200 last:border-b-0">
+              <span className="text-xs text-slate-500">{label}</span>
+              <span className="text-sm font-medium text-slate-700 text-right">{value}</span>
+            </div>
+          ))}
+          <div className="pt-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-1.5">Reason</p>
+            <div className="rounded-xl border border-slate-200 px-3 py-2.5 min-h-[4rem]">
+              <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
+                {viewRequest.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="px-5 py-3 border-t border-slate-100 bg-slate-50 flex justify-end">
+          <button
+            onClick={() => setViewRequest(null)}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   const cancelDialog = cancelTarget && (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !cancelBusy && setCancelTarget(null)} />
@@ -438,11 +487,13 @@ export default function ContractorTimeOffPage() {
   const isPtoHidden = country.toLowerCase() === "india";
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 max-w-[110rem] mx-auto">
       {cancelDialog}
+      {viewDialog}
       {/* Page title */}
       <PageHeader
-        title="Time Away Management"
+        eyebrow=""
+        title="Time Away"
         subtitle="Track and manage your leave requests and balances."
         right={
           <HeaderChip icon={<LuClock size={13} strokeWidth={2} className="text-emerald-600" />}>
@@ -484,20 +535,50 @@ export default function ContractorTimeOffPage() {
         />
       </section>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-start">
-      {/* Request form + policy */}
-      <section className="grid grid-cols-1 gap-8 min-w-0">
-        {/* Form */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+      {/* Apply for Leave — a banner that opens the form, rather than the whole
+          form sitting open on the page. */}
+      <section className="rounded-2xl border border-emerald-100 bg-linear-to-r from-emerald-50/80 to-white shadow-sm px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="size-11 rounded-xl bg-emerald-100 text-emerald-700 grid place-items-center shrink-0">
+          <LuClipboardList size={20} strokeWidth={1.75} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-bold text-[#003527]">Apply for Leave</h3>
+          <p className="text-xs text-slate-500 mt-0.5">Submit a request for time away. All fields are required.</p>
+        </div>
+        <button
+          onClick={() => { setShowForm(true); setFormError(""); }}
+          disabled={!requestsEnabled}
+          title={!requestsEnabled ? "Time Away requests are currently disabled by your administrator" : undefined}
+          className="shrink-0 inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-[#046B4D] hover:bg-[#035c42] text-white text-sm font-bold shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <LuCirclePlus size={17} strokeWidth={2} />
+          {requestsEnabled ? "Apply for Leave" : "Requests Closed"}
+          <LuChevronRight size={16} strokeWidth={2.5} />
+        </button>
+      </section>
+
+      {/* The form itself, in a dialog. */}
+      {showForm && (
+      <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowForm(false)} />
+        <section className="relative grid grid-cols-1 gap-8 min-w-0 w-full max-w-2xl my-8">
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-2xl overflow-hidden">
           {/* Header */}
           <div className="border-b border-slate-100 px-5 py-3.5 flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 grid place-items-center shrink-0">
               <LuClipboardList size={19} strokeWidth={1.75} />
             </div>
-            <div>
+            <div className="flex-1 min-w-0">
               <h3 className="text-base font-bold text-[#003527]">Apply for Leave</h3>
               <p className="text-xs text-slate-400 mt-0.5">Submit a request for time away. All fields are required.</p>
             </div>
+            <button
+              onClick={() => setShowForm(false)}
+              aria-label="Close"
+              className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <LuX size={16} strokeWidth={2.5} />
+            </button>
           </div>
 
           <div className="p-6 space-y-5">
@@ -668,7 +749,9 @@ export default function ContractorTimeOffPage() {
             </fieldset>
           </div>
         </div>
-      </section>
+        </section>
+      </div>
+      )}
 
       {/* Recent requests */}
       <section className="space-y-3 min-w-0">
@@ -687,17 +770,16 @@ export default function ContractorTimeOffPage() {
             <table className="w-full text-left">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-slate-50 border-b border-slate-100">
-                  {["Type", "Dates", "Duration", "Reason", "Status"].map(h => (
+                  {["Type", "Dates", "Duration", "Reason", "Status", "Action"].map(h => (
                     <th key={h} className="bg-slate-50 px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">{h}</th>
                   ))}
-                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {requests.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-6 py-12 text-center text-sm text-slate-400">
-                      No requests yet. Submit your first request above.
+                      No requests yet. Use Apply for Leave above to submit one.
                     </td>
                   </tr>
                 ) : (
@@ -730,13 +812,20 @@ export default function ContractorTimeOffPage() {
                             {row.status}
                           </span>
                         </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {row.status === "Pending" && (
+                        <td className="px-4 py-2.5">
+                          {row.status === "Pending" ? (
                             <button
                               onClick={() => { setCancelTarget(row); setCancelError(""); }}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors whitespace-nowrap"
                             >
                               <LuX size={13} strokeWidth={2.5} /> Cancel Request
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => setViewRequest(row)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors whitespace-nowrap"
+                            >
+                              <LuEye size={13} strokeWidth={2} /> View
                             </button>
                           )}
                         </td>
@@ -749,7 +838,6 @@ export default function ContractorTimeOffPage() {
           </div>
         </div>
       </section>
-      </div>
 
       {/* ── History Modal ── */}
       {showHistory && (

@@ -311,14 +311,10 @@ export default function ContractorAttendancePage() {
     : 0;
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
+    <div className="space-y-5 max-w-[110rem] mx-auto">
       {/* ── Page header ── */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2.5 mb-1.5">
-            <span className="h-px w-8 bg-emerald-600/50" />
-            <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">Contractor Portal</span>
-          </div>
           <h2 className="text-[1.8rem] md:text-[2.16rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
             Attendance Logs
           </h2>

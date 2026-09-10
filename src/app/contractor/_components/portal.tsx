@@ -19,10 +19,12 @@ export function PageHeader({
   return (
     <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
       <div>
-        <div className="flex items-center gap-2.5 mb-3">
-          <span className="h-px w-8 bg-emerald-600/50" />
-          <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">{eyebrow}</span>
-        </div>
+        {eyebrow && (
+          <div className="flex items-center gap-2.5 mb-3">
+            <span className="h-px w-8 bg-emerald-600/50" />
+            <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">{eyebrow}</span>
+          </div>
+        )}
         <h2 className="text-[1.8rem] md:text-[2.16rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
           {title}
         </h2>

@@ -3,18 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { fetchContractorProfileByEmail, fetchCurrentMonthBirthdays, type ContractorProfile, type BirthdayEntry } from "../profile/actions";
-import { sendBirthdayWish, fetchWishState, type ReceivedWish } from "./wishes";
-import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
-import { fetchAnnouncements, type Announcement } from "@/app/admin/announcements/actions";
+import { type ContractorProfile, type BirthdayEntry } from "../profile/actions";
+import { type Holiday } from "@/app/admin/holidays/actions";
+import { type Announcement } from "@/app/admin/announcements/actions";
+import { fetchDashboardBundle } from "./actions";
 import { ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
-import { PageHeader } from "../_components/portal";
 import { Confetti } from "../_components/Confetti";
 import {
-  LuCalendarDays, LuCake,
-  LuChevronRight, LuLoader, LuShieldCheck,
-  LuArrowRight,
-  LuX, LuChevronLeft, LuMegaphone,
+  LuCalendarDays, LuCake, LuGlobe,
+  LuChevronRight, LuShieldCheck,
+  LuX, LuChevronLeft,
 } from "react-icons/lu";
 
 // ── Calendar helpers ──────────────────────────────────────────────────────────
@@ -281,15 +279,12 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   // plain Announcements list below (which holds the country-scoped ones plus
   // "Offshore"/"All", and is never gated by date).
   const [globalBanners, setGlobalBanners] = useState<Announcement[]>([]);
-  const [dismissedBannerIds, setDismissedBannerIds] = useState<Set<string>>(new Set());
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
   // Birthday wishes: my email, colleagues I've already wished today, and wishes
   // I've received today (shown when it's my own birthday).
   const [myEmail,       setMyEmail]       = useState("");
-  const [wishedEmails,  setWishedEmails]  = useState<Set<string>>(new Set());
-  const [receivedWishes, setReceivedWishes] = useState<ReceivedWish[]>([]);
 
   // Local calendar date (YYYY-MM-DD) — the wishDate key for today's birthdays.
   const todayIso = useMemo(() => {
@@ -304,25 +299,14 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       if (!session?.user?.email) { router.replace("/login"); return; }
       const email = session.user.email;
 
-      const [prof, hols, allAnnouncements, bdays] = await Promise.all([
-        fetchContractorProfileByEmail(email),
-        fetchHolidays(),
-        fetchAnnouncements(),
-        fetchCurrentMonthBirthdays(),
-      ]);
+      // One Server Action, not four — see fetchDashboardBundle.
+      const { profile: prof, holidays: hols, announcements: allAnnouncements, birthdays: bdays } =
+        await fetchDashboardBundle(email);
 
       setProfile(prof);
       setAllHolidays(hols);
       setBirthdays(bdays);
       setMyEmail(email);
-
-      // Load today's birthday-wish state (sent + received).
-      fetchWishState(email, todayIso)
-        .then(({ sentTo, received }) => {
-          setWishedEmails(new Set(sentTo));
-          setReceivedWishes(received);
-        })
-        .catch(() => { /* leave empty */ });
 
       // Country comes from the location field: "City, Country" → last segment
       const country = prof?.location?.split(",").pop()?.trim() ?? "";
@@ -372,16 +356,6 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   const isMyBirthdayToday = !!myEmail && birthdays.some(
     (b) => b.email.trim().toLowerCase() === myEmail.trim().toLowerCase() && b.dob.slice(5, 10) === todayIso.slice(5, 10)
   );
-  useEffect(() => {
-    if (!isMyBirthdayToday || !myEmail) return;
-    const id = setInterval(() => {
-      fetchWishState(myEmail, todayIso)
-        .then(({ sentTo, received }) => { setWishedEmails(new Set(sentTo)); setReceivedWishes(received); })
-        .catch(() => { /* ignore */ });
-    }, 30000);
-    return () => clearInterval(id);
-  }, [isMyBirthdayToday, myEmail, todayIso]);
-
   // On your birthday, stamp the browser tab with a 🎂 title + favicon; restore on leave.
   useEffect(() => {
     if (!isMyBirthdayToday) return;
@@ -398,17 +372,8 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
     };
   }, [isMyBirthdayToday, profile]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <LuLoader size={28} className="text-slate-300 animate-spin" />
-      </div>
-    );
-  }
-
   const firstName = profile?.firstName || profile?.fullName?.split(" ")[0] || "there";
   const country   = profile?.location?.split(",").pop()?.trim() ?? "";
-  const myName    = profile?.fullName || firstName;
 
   const now = new Date();
   // Arizona (HO) time, not the viewer's own browser/local time — the whole
@@ -416,17 +381,9 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   const azHour = Number(new Intl.DateTimeFormat("en-US", { timeZone: ARIZONA_TIME_ZONE, hour: "numeric", hour12: false }).format(now));
   const greeting = azHour < 12 ? "Good morning" : azHour < 17 ? "Good afternoon" : "Good evening";
 
-  // One-click birthday wish (with an optional note) → record it and
-  // optimistically mark as wished.
-  async function handleSendWish(toEmail: string, message?: string) {
-    if (!myEmail || !toEmail) return;
-    setWishedEmails((prev) => new Set(prev).add(toEmail.toLowerCase()));
-    const res = await sendBirthdayWish({ fromEmail: myEmail, fromName: myName, toEmail, wishDate: todayIso, message });
-    if (!res.ok) {
-      // roll back on failure
-      setWishedEmails((prev) => { const next = new Set(prev); next.delete(toEmail.toLowerCase()); return next; });
-    }
-  }
+  const mastheadDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: ARIZONA_TIME_ZONE, weekday: "short", month: "short", day: "2-digit", year: "numeric",
+  }).format(now).toUpperCase();
 
   const statusChip = profile?.status === "Active" ? (
     <span className="inline-flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-2 rounded-full text-sm font-semibold shadow-sm">
@@ -436,7 +393,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   ) : undefined;
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
+    <div className="space-y-0 max-w-[110rem] mx-auto">
 
       {calOpen && (
         <HolidayCalendarModal
@@ -446,148 +403,218 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
         />
       )}
 
-      {/* ── Global Announcement banner(s) ── */}
-      {globalBanners.filter((a) => !dismissedBannerIds.has(a.id)).map((a) => (
+      {/* ── Masthead: top rule ── */}
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-y-2 border-[#003527] py-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#003527]">
+        <span className="inline-flex items-center gap-2 min-w-0 justify-self-start truncate">
+          <LuGlobe size={13} strokeWidth={2} className="text-emerald-700" />
+          Our World Energy
+          {eyebrow && <span className="text-slate-400 font-bold">&middot; {eyebrow}</span>}
+        </span>
+        <span className="hidden md:block justify-self-center whitespace-nowrap text-slate-500 tracking-[0.22em]">
+          People &middot; Energy &middot; A Brighter Tomorrow
+        </span>
+        <span className="justify-self-end whitespace-nowrap tabular-nums text-slate-600">{mastheadDate}</span>
+      </div>
+
+      {/* ── Masthead: the nameplate ── */}
+      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b-2 border-[#003527] py-4 px-1">
+        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36">
+          &ldquo;Together<br />We Power<br />Possibilities&rdquo;
+        </p>
+        <div className="text-center">
+          <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
+            OWE DAILY
+          </h1>
+          <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
+            News &middot; Announcements &middot; People &middot; Updates
+          </p>
+        </div>
+        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36">
+          {greeting},<br />{firstName}.
+        </p>
+      </div>
+
+      {loading ? (
+        /* Placeholder in the shape of the page, rather than a bare spinner in
+           an empty viewport. */
+        <div className="mt-4 animate-pulse space-y-4">
+          <div className="h-28 rounded-lg bg-slate-100" />
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6 border-t-2 border-slate-200 pt-4">
+            <div className="space-y-3">
+              <div className="h-6 w-56 rounded bg-slate-100" />
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex gap-4">
+                  <div className="hidden sm:block size-24 rounded-md bg-slate-100 shrink-0" />
+                  <div className="flex-1 space-y-2 py-1">
+                    <div className="h-3 w-24 rounded bg-slate-100" />
+                    <div className="h-4 w-2/3 rounded bg-slate-100" />
+                    <div className="h-3 w-full rounded bg-slate-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-3">
+              <div className="h-5 w-40 rounded bg-slate-100" />
+              <div className="h-20 rounded-md bg-slate-100" />
+              <div className="h-10 rounded-md bg-slate-100" />
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
+
+      {/* ── Your birthday: a special edition bar ── */}
+      {isMyBirthdayToday && (
+        <>
+          <Confetti />
+          <div className="mt-4 rounded-lg border-2 border-[#003527] bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-800 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/75">Special Edition</p>
+              <h2 className="font-serif text-2xl md:text-3xl font-bold mt-0.5">Happy Birthday, {firstName}! &#127881;</h2>
+            </div>
+            {statusChip}
+          </div>
+        </>
+      )}
+
+      {/* ── Front-page feature: today's global announcement(s) ── */}
+      {globalBanners.map((a, i) => (
         <div
           key={a.id}
-          className="relative overflow-hidden rounded-2xl p-5 md:p-6 text-white shadow-sm bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-800 animate-announcement-slide-in"
+          className="mt-4 overflow-hidden rounded-lg border-2 border-[#003527] bg-[#003527] text-white animate-announcement-slide-in"
         >
-          <div className="absolute inset-0 bg-grid-soft opacity-25 pointer-events-none" />
-          <div className="relative flex items-start gap-4">
-            <div className="w-11 h-11 rounded-xl bg-white/15 ring-1 ring-white/20 shrink-0 grid place-items-center animate-announcement-glow">
-              <LuMegaphone size={20} strokeWidth={2} className="text-white animate-announcement-ring" />
+          <div className="grid grid-cols-1 md:grid-cols-[7rem_1fr_auto]">
+            {a.imageUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={a.imageUrl} alt="" className="hidden md:block h-full w-full object-cover" />
+            ) : (
+              <div className={`hidden md:grid place-items-center text-3xl ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
+                {ANNOUNCEMENT_ICONS[i % ANNOUNCEMENT_ICONS.length]}
+              </div>
+            )}
+            <div className="px-5 py-4 min-w-0">
+              <h2 className="font-serif text-2xl md:text-3xl font-bold leading-tight">{a.title}</h2>
+              <p className="text-sm text-white/85 mt-2 leading-relaxed wrap-break-word">{a.body}</p>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-100/80">Announcement</p>
-              <h3 className="text-base md:text-lg font-bold mt-0.5 leading-snug">{a.title}</h3>
-              <p className="text-sm text-emerald-50/90 mt-1 leading-relaxed">{a.body}</p>
+            <div className="hidden lg:flex flex-col justify-center gap-1 border-l border-white/15 px-6 text-[10px] font-bold uppercase tracking-[0.24em] text-emerald-100/80">
+              <span>Joyful</span><span>People</span><span>Brighter</span><span>Tomorrows</span>
             </div>
-            <button
-              onClick={() => setDismissedBannerIds((prev) => new Set(prev).add(a.id))}
-              className="shrink-0 p-1.5 rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-              title="Dismiss"
-            >
-              <LuX size={16} strokeWidth={2} />
-            </button>
           </div>
         </div>
       ))}
 
-      {/* ── Welcome / birthday hero ── */}
-      {isMyBirthdayToday ? (
-        <>
-          <Confetti />
-          <div className="relative overflow-hidden rounded-2xl p-6 md:p-8 text-white shadow-sm bg-linear-to-r from-emerald-500 via-teal-500 to-emerald-700">
-            <div className="absolute inset-0 bg-grid-soft opacity-30 pointer-events-none" />
-            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-white/80">🎂 Happy Birthday</p>
-                <h2 className="text-3xl md:text-4xl font-bold mt-1.5 leading-none">Happy Birthday, {firstName}! 🎉</h2>
-                <p className="text-white/85 mt-2 text-sm">
-                  {receivedWishes.length > 0
-                    ? `${receivedWishes.length} colleague${receivedWishes.length !== 1 ? "s" : ""} have wished you so far — scroll down to see them.`
-                    : "Wishing you a fantastic day from everyone at Our World Energy."}
-                </p>
-              </div>
-              {statusChip}
-            </div>
-          </div>
-        </>
-      ) : (
-        <PageHeader
-          eyebrow={eyebrow}
-          title={`${greeting}, ${firstName}.`}
-          subtitle="Ready to power the future today?"
-          right={statusChip}
-        />
-      )}
+      {/* ── Two columns: announcements | holidays ── */}
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-0 lg:gap-6 border-t-2 border-[#003527] pt-3">
 
-      {/* ── Announcements + holidays ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 items-start">
-        {/* Announcements — left 2/3 */}
-        <div className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-lg font-bold text-[#003527]">Announcements</h3>
-            <button className="text-emerald-700 text-sm font-semibold flex items-center gap-1 hover:underline">
-              View All <LuChevronRight size={16} strokeWidth={2} />
-            </button>
+        {/* Left column — the news */}
+        <div className="lg:pr-6 lg:border-r border-slate-200 min-w-0">
+          <div className="flex items-end justify-between gap-4 border-b border-slate-300 pb-1.5 mb-3">
+            <h3 className="font-serif text-2xl font-bold text-[#003527] leading-none">Latest Announcements</h3>
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 whitespace-nowrap">
+              View All News &rarr;
+            </span>
           </div>
 
-          <div className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden shadow-sm">
-            {announcements.length === 0 ? (
-              <div className="p-8 text-center text-sm text-slate-400">No announcements yet.</div>
-            ) : (
-              <div className="divide-y divide-slate-100 max-h-[24rem] overflow-y-auto">
-                {announcements.map((a, i) => (
-                  <div key={a.id} className="flex gap-3 p-4 hover:bg-slate-50 transition-colors">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
+          {announcements.length === 0 ? (
+            <p className="py-10 text-center text-sm text-slate-400">No announcements yet.</p>
+          ) : (
+            <div className="divide-y divide-slate-200 max-h-[30rem] overflow-y-auto pr-1">
+              {announcements.map((a, i) => (
+                <article key={a.id} className="flex gap-4 py-3">
+                  {a.imageUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={a.imageUrl} alt="" className="hidden sm:block size-24 rounded-md object-cover shrink-0 border border-slate-200" />
+                  ) : (
+                    <div className={`hidden sm:grid place-items-center size-24 rounded-md shrink-0 text-3xl ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
                       {ANNOUNCEMENT_ICONS[i % ANNOUNCEMENT_ICONS.length]}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start gap-2">
-                        <h4 className="text-sm font-bold text-[#003527]">{a.title}</h4>
-                        <span className="text-xs text-slate-400 shrink-0">{fmtAnnouncementDate(a.date)}</span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">{a.location}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 whitespace-nowrap shrink-0">
+                        {fmtAnnouncementDate(a.date)}
+                      </p>
+                    </div>
+                    <h4 className="font-serif text-lg font-bold text-[#003527] leading-snug mt-0.5">{a.title}</h4>
+                    <p className="text-[13px] text-slate-600 leading-relaxed mt-1 wrap-break-word">{a.body}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right column — the almanac */}
+        <aside className="mt-6 lg:mt-0 min-w-0">
+          <div className="flex items-end justify-between gap-3 border-b border-slate-300 pb-1.5 mb-3">
+            <h3 className="font-serif text-xl font-bold text-[#003527] leading-none">{MONTHS[new Date().getMonth()]} Holidays</h3>
+            <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400 whitespace-nowrap">
+              <LuCalendarDays size={12} strokeWidth={2} /> Mark your calendar
+            </span>
+          </div>
+
+          {upcomingHols.length === 0 ? (
+            <p className="py-6 text-center text-sm text-slate-400">No holidays this month.</p>
+          ) : (
+            <div className="space-y-2 max-h-[20rem] overflow-y-auto pr-1">
+              {upcomingHols.map((h) => {
+                const iso = h.date.slice(0, 10);
+                const [, mm, dd] = iso.split("-").map(Number);
+                const dow = new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
+                const code = COUNTRY_CODE[h.country] ?? h.country.slice(0, 2).toUpperCase();
+                const colorCls = COUNTRY_BG[h.country] ?? "bg-slate-100 text-slate-500";
+                return (
+                  <div key={h.id} className="flex gap-3 rounded-md border border-slate-200 bg-white p-2.5">
+                    <div className="grid place-items-center shrink-0 w-14 rounded-md bg-slate-50 border border-slate-200 py-1.5">
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{MONTHS[(mm ?? 1) - 1].slice(0, 3)}</span>
+                      <span className="font-serif text-2xl font-bold text-[#003527] leading-none">{dd}</span>
+                      <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{dow}</span>
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-serif text-base font-bold text-[#003527] leading-tight truncate">{h.name}</p>
+                        <span className={`shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${colorCls}`}>{code}</span>
                       </div>
-                      <p className="text-sm text-slate-500 mt-0.5 leading-relaxed">{a.body}</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        {new Date(iso + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+                      </p>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+                );
+              })}
+            </div>
+          )}
 
-        {/* Right panel */}
-        <div className="space-y-4">
-          {/* This Month's Holidays */}
-          <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-lg font-bold text-[#003527]">{MONTHS[new Date().getMonth()]} Holidays</h3>
-          </div>
-          <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
-            {upcomingHols.length === 0 ? (
-              <p className="text-sm text-slate-400">No holidays this month.</p>
-            ) : (
-              <div className="space-y-2">
-                {upcomingHols.map((h) => {
-                  const code     = COUNTRY_CODE[h.country] ?? h.country.slice(0, 2).toUpperCase();
-                  const colorCls = COUNTRY_BG[h.country]  ?? "bg-slate-100 text-slate-600";
-                  const date     = new Date(h.date + "T00:00:00").toLocaleDateString("en-US", {
-                    month: "short", day: "numeric",
-                  });
-                  return (
-                    <div key={h.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-[10px] font-bold shrink-0 ${colorCls}`}>
-                        {code}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{h.name}</p>
-                        <p className="text-xs text-slate-400 tabular-nums">{date}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            <button
-              onClick={() => setCalOpen(true)}
-              className="mt-3 flex items-center gap-1 text-xs font-semibold text-emerald-700 hover:underline"
-            >
-              View full calendar <LuArrowRight size={13} strokeWidth={2} />
-            </button>
-          </div>
+          <button
+            onClick={() => setCalOpen(true)}
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-md bg-[#003527] hover:bg-[#064E3B] text-white px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.16em] transition-colors"
+          >
+            <LuCalendarDays size={13} strokeWidth={2} /> View Full Holiday Calendar &rarr;
+          </button>
 
-        </div>
+          <figure className="mt-4 border-y border-slate-200 py-4 text-center">
+            <blockquote className="font-serif italic text-lg text-[#003527] leading-snug">
+              Take time to rest and recharge.
+            </blockquote>
+          </figure>
+
+          <div className="mt-4 rounded-md bg-[#003527] text-white px-4 py-3 flex items-center justify-between gap-3">
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em]">Our World Energy</span>
+            <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-200/80 text-right leading-relaxed">
+              People<br />Progress<br />Possibilities
+            </span>
+          </div>
+        </aside>
       </div>
 
-      {/* ── Birthday Calendar ── */}
-      <BirthdaySection
-        birthdays={birthdays}
-        myEmail={myEmail}
-        wishedEmails={wishedEmails}
-        receivedWishes={receivedWishes}
-        onSendWish={handleSendWish}
-      />
+      {/* ── Today's birthdays ── */}
+      <div className="mt-5 border-t-2 border-[#003527] pt-3">
+        <BirthdaySection birthdays={birthdays} myEmail={myEmail} />
+      </div>
 
+      </>
+      )}
     </div>
   );
 }
@@ -598,21 +625,15 @@ function initialsOf(name: string) {
 }
 
 // ── Birthday section component ────────────────────────────────────────────────
-function BirthdaySection({
-  birthdays, myEmail, wishedEmails, receivedWishes, onSendWish,
-}: {
-  birthdays: BirthdayEntry[];
-  myEmail: string;
-  wishedEmails: Set<string>;
-  receivedWishes: ReceivedWish[];
-  onSendWish: (toEmail: string, message?: string) => void;
-}) {
+// ── Today's birthdays ─────────────────────────────────────────────────────────
+// A plain list: who has a birthday today, and nothing else. No wish-sending,
+// no per-person cards.
+function BirthdaySection({ birthdays, myEmail }: { birthdays: BirthdayEntry[]; myEmail: string }) {
   const today    = new Date();
   const month    = today.getMonth();
   const todayDay = today.getDate();
   const me       = myEmail.trim().toLowerCase();
 
-  // Only today's birthdays (same month + day as today).
   const items = birthdays
     .map((c) => {
       const [, mm, dd] = c.dob.split("-").map(Number);
@@ -621,108 +642,60 @@ function BirthdaySection({
     .filter((c) => c.mm && c.dd && c.mm - 1 === month && c.dd === todayDay)
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
-  const monthAbbr = MONTHS[month].slice(0, 3);
-  const todayLabel = today.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+  const todayLabel = today
+    .toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric", year: "numeric" })
+    .toUpperCase();
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2.5">
-        <h3 className="text-lg font-bold text-[#003527]">Today&apos;s Birthdays</h3>
-        <div className="flex items-center gap-2">
-          <LuCake size={18} strokeWidth={1.75} className="text-teal-500" />
-          <span className="text-xs font-semibold text-slate-400">{todayLabel}</span>
-        </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-300 pb-1.5 mb-3">
+        <h3 className="font-serif text-2xl font-bold text-[#003527] leading-none">Today&apos;s Birthdays</h3>
+        <span className="hidden sm:block h-6 w-px bg-slate-300" />
+        <span className="inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+          <LuCake size={14} strokeWidth={1.75} className="text-teal-600" />
+          {todayLabel}
+        </span>
+        <span className="ml-auto text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 whitespace-nowrap">
+          Celebrating our amazing people
+        </span>
       </div>
-      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 md:p-5 shadow-sm">
 
-        {/* ── Wishes wall — the wishes I've received on my birthday ── */}
-        {receivedWishes.length > 0 && (
-          <div className="mb-6">
-            <p className="text-sm font-bold text-emerald-800 flex items-center gap-2 mb-3">
-              <LuCake size={16} strokeWidth={2} className="text-teal-600" />
-              {receivedWishes.length} birthday wish{receivedWishes.length !== 1 ? "es" : ""} for you 🎉
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {receivedWishes.map((w, i) => (
-                <div key={`${w.fromEmail}-${i}`} className="flex items-start gap-2.5 rounded-xl bg-emerald-50/70 border border-emerald-100 px-3 py-2.5">
-                  <div className="w-8 h-8 rounded-full bg-teal-100 text-teal-700 grid place-items-center text-[11px] font-bold shrink-0">
-                    {initialsOf(w.fromName)}
+      {items.length === 0 ? (
+        <p className="py-8 text-center font-serif italic text-base text-slate-400">
+          No birthdays today.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_16rem] gap-4 items-start">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+            {items.map((c) => {
+              const isMe = !!c.email && c.email.trim().toLowerCase() === me;
+              return (
+                <div
+                  key={`${c.fullName}-${c.dd}`}
+                  className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-4 py-3"
+                >
+                  <div className="size-10 rounded-full bg-teal-100 text-teal-700 grid place-items-center text-xs font-bold shrink-0">
+                    {initialsOf(c.fullName)}
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-[#003527] truncate">{w.fromName}</p>
-                    <p title={w.message?.trim() || undefined} className="text-xs text-slate-500 leading-snug wrap-break-word line-clamp-2">
-                      {w.message?.trim() || "🎉 Happy Birthday!"}
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#003527] truncate">
+                      {c.fullName}
+                      {isMe && <span className="ml-2 text-[9px] font-bold uppercase tracking-wide text-teal-600">You</span>}
+                    </p>
+                    <p className="font-serif italic text-sm text-amber-700 mt-0.5">
+                      &#127874; Happy Birthday!
                     </p>
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        )}
 
-        {items.length === 0 ? (
-          <p className="text-sm text-slate-400 text-center py-6">No birthdays today.</p>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-[18rem] overflow-y-auto pr-0.5">
-            {items.map((c) => (
-              <BirthdayCard
-                key={`${c.fullName}-${c.dd}`}
-                name={c.fullName}
-                email={c.email}
-                dateLabel={`${monthAbbr} ${c.dd}`}
-                isMe={!!c.email && c.email.trim().toLowerCase() === me}
-                wished={wishedEmails.has(c.email.trim().toLowerCase())}
-                onSendWish={onSendWish}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── One birthday card ────────────────────────────────────────────────────────
-function BirthdayCard({
-  name, email, dateLabel, isMe, wished, onSendWish,
-}: {
-  name: string;
-  email: string;
-  dateLabel: string;
-  isMe: boolean;
-  wished: boolean;
-  onSendWish: (toEmail: string, message?: string) => void;
-}) {
-  const hasEmail = !!email.trim();
-
-  return (
-    <div className="bday-card flex flex-col gap-3 p-3 h-full">
-      <div className="flex items-center gap-3">
-        <div className="relative shrink-0">
-          <div className="w-10 h-10 rounded-full bg-teal-100 text-teal-700 flex items-center justify-center text-sm font-bold">
-            {initialsOf(name)}
-          </div>
-          <span className="absolute -top-1.5 -right-1.5 text-sm animate-bday-wiggle select-none" aria-hidden>🎂</span>
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-[#003527] leading-tight truncate">{name}</p>
-          <p className="text-xs text-teal-600/80 tabular-nums">🎂 {dateLabel}</p>
-        </div>
-      </div>
-
-      {isMe ? (
-        <span className="mt-auto text-center text-[11px] font-bold text-emerald-700 bg-emerald-100 rounded-lg py-2">That&apos;s you 🎉</span>
-      ) : wished ? (
-        <span className="mt-auto text-center text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg py-2">Wished ✓</span>
-      ) : (
-        <div className="mt-auto">
-          <button
-            onClick={() => onSendWish(email)}
-            disabled={!hasEmail}
-            className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold text-white bg-[#003527] hover:opacity-90 active:scale-[0.98] rounded-lg py-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <LuCake size={13} strokeWidth={2.25} /> Send Wishes
-          </button>
+          <figure className="lg:border-l border-slate-200 lg:pl-5 py-2 text-center">
+            <blockquote className="font-serif italic text-lg text-[#003527] leading-snug">
+              Great people make a brighter tomorrow.
+            </blockquote>
+          </figure>
         </div>
       )}
     </div>

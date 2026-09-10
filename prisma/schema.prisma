@@ -400,6 +400,10 @@ model Announcement {
   title     String
   body      String
   location  String
+  /// Public URL of an uploaded image that replaces the generated emoji tile on
+  /// the Dashboard. Null keeps the emoji. File lives in the
+  /// "announcement-images" storage bucket.
+  imageUrl  String?
   date      DateTime @db.Date // the date this announcement is posted for
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

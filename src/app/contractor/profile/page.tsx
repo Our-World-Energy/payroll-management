@@ -85,16 +85,12 @@ export default function ContractorProfilePage() {
   const isActive = (profile.status ?? "Active") === "Active";
 
   return (
-    <div className="max-w-7xl mx-auto space-y-5">
+    <div className="max-w-[110rem] mx-auto space-y-5">
       {/* Page header — sized 20% smaller than the shared PageHeader (this
           page only; PageHeader itself is shared across the whole Contractor
           Portal, so its sizing isn't touched). */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5 mb-3">
-            <span className="h-px w-8 bg-emerald-600/50" />
-            <span className="text-[8.8px] font-bold uppercase tracking-[0.22em] text-emerald-700">Contractor Portal</span>
-          </div>
           <h2 className="text-[1.8rem] md:text-[2.16rem] font-bold text-[#003527] leading-none" style={{ letterSpacing: "-0.025em" }}>
             My Profile
           </h2>
