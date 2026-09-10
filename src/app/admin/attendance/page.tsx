@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminTheme } from "@/components/AdminThemeContext";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer, LuCalendarDays, LuBanknote } from "react-icons/lu";
@@ -56,6 +56,7 @@ type WorksnapEntry = {
   restDay?: string | null;
   location?: string | null;
   shiftType?: string | null;
+  shiftHours?: string | null;
   payCategory?: string | null;
   hireDate?: string | null;
   dailyWorksnapMinutes?: Record<string, number>;
@@ -281,6 +282,21 @@ function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest
 // status, for the read-only Time Away Request columns), this is what actually
 // drives Completion Time / OT suppression in Attendance Review, so a merely
 // Pending or Rejected request can't grant time-off credit.
+function isSickLeaveType(type: string) {
+  return type.includes("Sick Leave");
+}
+
+/**
+ * Approved sick-leave minutes covering `date` — the only leave Fixed-Ind's Ind
+ * Time counts, since that category is judged on the week's total against the
+ * 2,400-min target and sick leave is the absence that still pays.
+ */
+function sickLeaveMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
+  const match = leaveRequests.find((r) =>
+    r.status === "Approved" && isSickLeaveType(r.type) && date >= r.startDate && date <= r.endDate);
+  return match ? Math.round(hoursForLeaveRequest(match) * 60) : 0;
+}
+
 function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
   const match = leaveRequests.find((r) => r.status === "Approved" && date >= r.startDate && date <= r.endDate);
   if (!match) return "-";
@@ -468,7 +484,9 @@ function localHolidayNameFor(date: string, country: string, holidays: HolidayEnt
   return matchingLocalHoliday(date, country, holidays)?.name ?? "";
 }
 
-type DailyLogEntry = { entryDate: string; firstIn: string; lastOut: string; worksnapUserId?: number; totalMins?: number };
+type DailyLogEntry = { entryDate: string; firstIn: string; lastOut: string; worksnapUserId?: number; totalMins?: number;
+  /** [startEpochSeconds, minutes] per Worksnap slot — see WorksnapDailyLog.slots. */
+  slots?: [number, number][] | null };
 
 // Minutes of ALL the contractor's shifts (firstIn→lastOut, real UTC instants)
 // that overlap the holiday's OWN true local-country window, restricted to
@@ -481,10 +499,10 @@ type DailyLogEntry = { entryDate: string; firstIn: string; lastOut: string; work
 // still falls inside this holiday's window. Summing per-shift overlap against
 // this single, non-overlapping window is safe — a shift that doesn't
 // genuinely fall inside it always contributes exactly 0.
-// Each shift's contribution is capped at its own totalMins — firstIn→lastOut
-// is only the outer span of the day's activity and can contain large gaps
-// (breaks/idle time), so raw span-overlap alone can wildly overstate actual
-// worked minutes; totalMins is the real accumulated work for that day.
+// Credit comes from the day's actual Worksnap slots, each a real timestamped
+// block, so only minutes genuinely tracked inside the window count and
+// minutes belonging to the neighbouring local date are left out of it. Rows
+// synced before slots were stored fall back to a prorated span estimate.
 // Returns null when `date` isn't (any part of) a local holiday for `country`.
 function localHolidayMinutesFor(
   date: string,
@@ -514,14 +532,41 @@ function localHolidayMinutesFor(
   const windowStart = Math.max(holidayStart, arizonaDayStart);
   const windowEnd = Math.min(holidayEnd, arizonaDayEnd);
 
+  // Decided per day, not per week: a week can hold a mix of re-synced days
+  // (slots present) and older ones, and a straddling shift must still be
+  // counted from whichever kind of row it happens to live on.
   return dailyLogs.reduce((sum, log) => {
+    // Each slot is a real timestamped block, so its overlap with the window is
+    // exact — no assumption about where the day's tracked time sat inside its
+    // first-in/last-out span. Time on the neighbouring local date contributes
+    // exactly 0 and is therefore left out, which is the whole point.
+    if (Array.isArray(log.slots) && log.slots.length > 0) {
+      return sum + log.slots.reduce((slotSum, [startSec, minutes]) => {
+        const slotStart = startSec * 1000;
+        const slotEnd = slotStart + minutes * 60000;
+        const overlapStart = Math.max(slotStart, windowStart);
+        const overlapEnd = Math.min(slotEnd, windowEnd);
+        return slotSum + (overlapEnd > overlapStart ? Math.round((overlapEnd - overlapStart) / 60000) : 0);
+      }, 0);
+    }
+
+    // Days synced before slots were stored have no per-slot detail, so exactly
+    // where inside the span the tracked time sat is unknowable. Credit only the
+    // window's proportional share of the span, never the whole day's tracked
+    // time: a span that merely reaches across the window used to hand over
+    // every tracked minute, pulling in time that actually belongs to the
+    // neighbouring local date. Still an estimate — re-syncing the week
+    // populates slots and the exact branch above takes over.
     const start = new Date(log.firstIn).getTime();
     const end = new Date(log.lastOut).getTime();
+    const spanMinutes = Math.round((end - start) / 60000);
+    if (spanMinutes <= 0) return sum;
     const overlapStart = Math.max(start, windowStart);
     const overlapEnd = Math.min(end, windowEnd);
-    const overlapMinutes = overlapEnd > overlapStart ? Math.round((overlapEnd - overlapStart) / 60000) : 0;
-    const cappedMinutes = log.totalMins != null ? Math.min(overlapMinutes, log.totalMins) : overlapMinutes;
-    return sum + cappedMinutes;
+    if (overlapEnd <= overlapStart) return sum;
+    const overlapMinutes = Math.round((overlapEnd - overlapStart) / 60000);
+    const trackedMinutes = log.totalMins ?? spanMinutes;
+    return sum + Math.min(overlapMinutes, Math.round((trackedMinutes * overlapMinutes) / spanMinutes));
   }, 0);
 }
 
@@ -753,7 +798,7 @@ function effectiveDailyMinutesFor(row: AttendanceRow, adjustedDaily?: Record<str
   return merged;
 }
 
-function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>) {
+function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[], adjustedDaily?: Record<string, number>, leaveRequests: AdminLeaveRequest[] = []) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
 
   if (isFixedContractor(row.payCategory)) {
@@ -767,8 +812,15 @@ function computeWeeklyCompletionMinutes(row: AttendanceRow, weekDates: string[],
     // vanished, sitting as it does on top of an already-full week. 2,400 stays
     // the *target* — it still drives the Standard Met band and the Time Credit
     // offer — but it no longer rewrites what was worked.
+    // Plus approved sick leave: Ind Time is worked time and sick leave, and
+    // nothing else. Holiday credits are shown in their own columns rather than
+    // folded in here.
     const rawWorksnapMinutes = row.dailyWorksnapMinutes ?? {};
-    return weekDates.reduce((sum, date) => sum + (rawWorksnapMinutes[date] ?? 0), 0);
+    const rowLeave = leaveRequests.filter((r) => r.email === row.contractorId);
+    return weekDates.reduce(
+      (sum, date) => sum + (rawWorksnapMinutes[date] ?? 0) + sickLeaveMinutesFor(date, rowLeave),
+      0,
+    );
   }
 
   const restDaysStr = restDaysForAttendanceRow(row);
@@ -962,6 +1014,7 @@ type AttendanceRow = AttendanceRecord & {
   department?: string;
   restDay?: string;
   shiftType?: string;
+  shiftHours?: string;
   payCategory?: string;
   hireDate?: string;
   dailyWorksnapMinutes?: Record<string, number>;
@@ -1046,6 +1099,7 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
     department: entry.department?.trim() || "",
     restDay: entry.restDay?.trim() || "",
     shiftType,
+    shiftHours: entry.shiftHours?.trim() || "",
     payCategory,
     hireDate: entry.hireDate?.trim() || "",
     dailyWorksnapMinutes: entry.dailyWorksnapMinutes ?? {},
@@ -1054,7 +1108,7 @@ function worksnapEntryToAttendanceRecord(entry: WorksnapEntry, index: number, we
 }
 
 function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates: string[]) {
-  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; payCategory: string | null; hireDate: string | null; dailyWorksnapMinutes: Record<string, number>; hasContractorProfile: boolean }>();
+  const rowsByUser = new Map<string, { worksnapUserId: number | null; userName: string | null; email: string | null; durationMins: number; department: string | null; restDay: string | null; location: string | null; shiftType: string | null; shiftHours: string | null; payCategory: string | null; hireDate: string | null; dailyWorksnapMinutes: Record<string, number>; hasContractorProfile: boolean }>();
 
   entries.forEach((entry, index) => {
     const key = entry.email?.trim().toLowerCase() || entry.userName?.trim().toLowerCase() || `worksnap-${index}`;
@@ -1074,6 +1128,7 @@ function worksnapEntriesToAttendanceRecords(entries: WorksnapEntry[], weekDates:
       restDay: current?.restDay || entry.restDay || null,
       location: current?.location || entry.location || null,
       shiftType: current?.shiftType || entry.shiftType || null,
+      shiftHours: current?.shiftHours || entry.shiftHours || null,
       payCategory: current?.payCategory || entry.payCategory || null,
       hireDate: current?.hireDate || entry.hireDate || null,
       dailyWorksnapMinutes,
@@ -1175,13 +1230,19 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   // empty (untouched) Adjusted Time falls back to Worksnap Time. Worksnap
   // Time itself is left untouched and still shown for reference in its own
   // column — only this derived map feeds calculations.
+  const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
+  const isIndia = isFixedContractor((record as AttendanceRow).payCategory);
+  // Fixed-Ind reads the actual Worksnap time, so an Adjusted Time entry does
+  // not replace it. The week's Ind Time already worked this way (see
+  // indiaTotalMinutes / computeWeeklyCompletionMinutes) while the per-day cells
+  // honoured the adjustment — so a day with 590 logged and a 480 adjustment
+  // showed 480 per day but counted 590 in the week. The raw figure wins for
+  // this pay category; the Adjusted Time column still shows what was entered.
   const effectiveDailyMinutes = weekDates.reduce<Record<string, number>>((acc, d) => {
-    const hasAdjustedTime = (adjustedTimes[d] ?? "").trim() !== "";
+    const hasAdjustedTime = !isIndia && (adjustedTimes[d] ?? "").trim() !== "";
     acc[d] = hasAdjustedTime ? timeValueToMinutes(adjustedTimes[d]) : (dailyWorksnapMinutes[d] ?? 0);
     return acc;
   }, {});
-  const restDaysStr = restDaysForAttendanceRow(record as AttendanceRow);
-  const isIndia = isFixedContractor((record as AttendanceRow).payCategory);
   const hireDate = (record as AttendanceRow).hireDate;
   const shiftType = shiftTypeForAttendanceRow(record as AttendanceRow);
   // Seeded from the credit already saved on this week, so reopening a reviewed
@@ -1196,11 +1257,9 @@ function ReviewModal({ record, weekDates, onClose, appliedOffsetCredit = 0, onSa
   // reads the same as the Worksnap Actual Time figure beside it. Adjusted Time
   // is deliberately not folded in here, and the 2,400-min target no longer
   // truncates it (see computeWeeklyCompletionMinutes).
-  const indiaTotalMinutes = worksnapTotalMinutes;
-const totalHolidayMins = weekDates.reduce(
-    (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, effectiveDailyMinutes, restDaysStr, weekDates, hireDate, record.region, allHolidays)),
-    0
-  );
+  // Worked time plus approved sick leave — see computeWeeklyCompletionMinutes.
+  const indiaSickLeaveMinutes = weekDates.reduce((sum, d) => sum + sickLeaveMinutesFor(d, leaveRequests), 0);
+  const indiaTotalMinutes = worksnapTotalMinutes + indiaSickLeaveMinutes;
   // Declared here rather than further down because the Fixed-Ind pool below
   // needs it, and that pool feeds completionTotalMinutes.
   const totalLocalHolidayMinutes = weekDates.reduce(
@@ -1210,7 +1269,9 @@ const totalHolidayMins = weekDates.reduce(
   // Everything Fixed-Ind Net Time is derived from: worked time (Ind Time) plus
   // both holiday credits, US and local. Named once so the Completion Time cell,
   // the Net Time row and the Time Credit offer can't drift apart.
-  const indiaPoolMinutes = indiaTotalMinutes + totalHolidayMins + totalLocalHolidayMinutes;
+  // Ind Time itself is the whole pool now: holiday credits keep their own
+  // columns rather than being folded into it.
+  const indiaPoolMinutes = indiaTotalMinutes;
   // Repayment first, then the 2,400-min cap over the whole figure — both holiday
   // credits included, so 2,400 is the ceiling on Net Time itself and not just on
   // the worked part of it. See fixedIndNetMinutes.
@@ -1744,12 +1805,14 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay, isIndia);
                     const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay, isIndia);
                     const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? rawRegularOtMinutes : 0);
-                    const completionTime = completionTimeFor(
-                      evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold),
-                      // Fixed-Ind's Ind Time carries the local holiday credit too,
-                      // matching the week's Net Time pool (see indiaPoolMinutes).
-                      isIndia ? formatMinutesAsMins(localHolidayMinutes ?? 0) : "-",
-                    );
+                    // Fixed-Ind's Ind Time is the Worksnap time plus approved sick
+                    // leave, and nothing else — holiday credits stay in their own
+                    // columns. Matches the week's figure (see indiaTotalMinutes).
+                    const completionTime = isIndia
+                      ? formatMinutesAsMins(rawWorksnapMinutes + sickLeaveMinutesFor(date, leaveRequests))
+                      : completionTimeFor(
+                          evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold),
+                        );
                     const displayedUsHoMinutes = boostedUsHoMinutes(holidayTime, isRestDay, isUsHolidayDate(date, usaHolidays), dailyDecisionStatus === "Approved", rdOtMinutes);
                     const regularAllocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: 0 };
                     // Includes whatever Regular OT a half-day leave day borrowed to
@@ -3156,6 +3219,7 @@ export default function AttendancePage() {
   const [worksnapError, setWorksnapError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [breakdownTarget, setBreakdownTarget] = useState<AttendanceRow | null>(null);
   const [nameSearch, setNameSearch] = useState("");
@@ -3225,7 +3289,7 @@ export default function AttendancePage() {
     fetchAllLeaveRequestsAdmin()
       .then(setLeaveRequests)
       .catch(() => setLeaveRequests([]));
-  }, []);
+  }, [reloadKey]);
 
   // Adjusted Time per contractor for the selected week — so the main
   // table's "Need Attention" conflict check (rowHasLeaveOverworkConflict)
@@ -3251,7 +3315,7 @@ export default function AttendancePage() {
       })
       .catch(() => { if (!isCancelled) setAdjustedByEmail(new Map()); });
     return () => { isCancelled = true; };
-  }, [rangeFrom, rangeTo]);
+  }, [rangeFrom, rangeTo, reloadKey]);
 
   // Week selector = recent Sun→Sat weeks in Arizona time, anchored to the
   // current week (e.g. Jun 28 – Jul 4). Computed on the client to use the
@@ -3549,7 +3613,7 @@ export default function AttendancePage() {
       (sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, weekDates, row.hireDate, row.region, allHolidays)),
       0
     );
-    const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates);
+    const computedCompletionMins = computeWeeklyCompletionMinutes(row, weekDates, undefined, leaveRequests);
     // Fixed-Ind's local-holiday credit is a flat standard day per matching
     // holiday (see localHolidayMinutesFor), so it needs no daily logs — which is
     // why this table can compute it without the per-contractor log fetch the
@@ -3665,6 +3729,20 @@ export default function AttendancePage() {
       },
     }));
   }
+
+  // Pick up changes made outside this tab — another admin approving, or the
+  // Worksnap sync landing — without anyone reaching for the browser refresh.
+  // Keyed to the tab becoming visible/focused rather than a timer, so an idle
+  // tab costs nothing and a returning one is always current.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh]);
 
   function handleBulkApprove() {
     // Re-fetch from Supabase rather than trust a local mutation, so the table

@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { canAccessAdminPath } from "@/lib/adminNav";
-import { homeForRole, normalizeRole, usesAdminConsole } from "@/lib/roles";
+import { accountCanAccessAdminPath } from "@/lib/accountPages";
+import { homeForRole, normalizeRole, usesAdminConsole, normalizePages } from "@/lib/roles";
 import { RoleProvider, type ConsoleAccount } from "./RoleContext";
 
 // Cache the auth check result for the lifetime of the browser tab so
@@ -49,7 +49,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const resolved = normalizeRole(session.user.user_metadata?.role);
+      // Read the account from the Auth server, not from the session. A
+      // session's user_metadata is baked into the JWT at sign-in, so a role or
+      // page change made in User Management wouldn't reach this browser until
+      // the token happened to refresh. getUser() asks the server, so an edit
+      // takes effect on the next page load.
+      const { data: fresh } = await supabase.auth.getUser();
+      const account = fresh?.user ?? session.user;
+
+      const resolved = normalizeRole(account.user_metadata?.role);
 
       // Contractors have their own portal — the console is not theirs.
       if (!usesAdminConsole(resolved)) {
@@ -58,7 +66,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      const resolvedAccount: ConsoleAccount = { role: resolved, email: session.user.email ?? "" };
+      const resolvedAccount: ConsoleAccount = {
+        role: resolved,
+        email: account.email ?? "",
+        pages: normalizePages(account.user_metadata?.pages),
+        rawPages: account.user_metadata?.pages,
+      };
       authCache = resolvedAccount;
       setAccount(resolvedAccount);
     })();
@@ -72,11 +85,17 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   // Held to their own menu: HR or a Manager who types (or is linked to) a
   // route outside it lands back on their dashboard. Re-runs on navigation, so
   // a client-side push to a forbidden page is caught too.
-  const allowed = account !== null && canAccessAdminPath(account.role, pathname);
+  const allowed = account !== null && accountCanAccessAdminPath(account.role, account.rawPages, pathname);
 
   useEffect(() => {
-    if (account !== null && !allowed) router.replace(homeForRole(account.role));
-  }, [account, allowed, router]);
+    if (account === null || allowed) return;
+    // Redirecting to a home the account also can't open would loop forever on
+    // "Loading…" — accountNavItems guarantees a non-empty menu, but don't rely
+    // on that from here.
+    const home = homeForRole(account.role);
+    if (home.replace(/\/+$/, "") === pathname.replace(/\/+$/, "")) return;
+    router.replace(home);
+  }, [account, allowed, router, pathname]);
 
   if (account === null || !allowed) {
     return (

@@ -279,6 +279,10 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   // plain Announcements list below (which holds the country-scoped ones plus
   // "Offshore"/"All", and is never gated by date).
   const [globalBanners, setGlobalBanners] = useState<Announcement[]>([]);
+  // The front page shows the newest three; this keeps the rest for "View All
+  // News", which would otherwise promise more than the page holds.
+  const [allNews, setAllNews] = useState<Announcement[]>([]);
+  const [newsOpen, setNewsOpen] = useState(false);
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
@@ -331,10 +335,17 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       // None of these are date-gated. "Global" is handled separately below:
       // it's the only kind with a scheduled announce-date, so it's pulled out
       // into its own animated banner instead of this list.
-      const filtered = allAnnouncements
-        .filter(a => a.location === "All" || a.location === "Offshore" || a.location === country)
-        .slice(0, 3);
-      setAnnouncements(filtered);
+      const addressedToMe = allAnnouncements.filter(a =>
+        a.location === "All" || a.location === "Offshore" || a.location === country
+        // A due "Global" announcement is addressed to everyone, so it belongs
+        // in the full list even though the front page shows it as the banner.
+        || (a.location === "Global" && a.date <= today)
+      );
+      setAllNews([...addressedToMe].sort((a, b) => b.date.localeCompare(a.date)));
+      // Latest Announcements excludes "Global" — those already have the front
+      // page's banner, and repeating them in the list below it is noise. The
+      // All Announcements window still lists them.
+      setAnnouncements(addressedToMe.filter(a => a.location !== "Global").slice(0, 3));
 
       // Banner announcements (location "Global", set on the admin Dashboard's
       // Announcements board): shown only once the scheduled date has arrived,
@@ -401,6 +412,70 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
           country={country}
           onClose={() => setCalOpen(false)}
         />
+      )}
+
+      {/* All news, for when the front page's three aren't the whole story. */}
+      {newsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setNewsOpen(false)} />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-4 px-6 py-4 border-b-2 border-[#003527]">
+              <div>
+                <h3 className="font-serif text-2xl font-bold text-[#003527] leading-none">All Announcements</h3>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400 mt-1.5">
+                  {allNews.length} {allNews.length === 1 ? "story" : "stories"} for you
+                </p>
+              </div>
+              <button
+                onClick={() => setNewsOpen(false)}
+                aria-label="Close"
+                className="shrink-0 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <LuX size={18} strokeWidth={2.5} />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-6 py-2">
+              {allNews.length === 0 ? (
+                <p className="py-12 text-center font-serif italic text-base text-slate-400">
+                  No announcements yet.
+                </p>
+              ) : (
+                <div className="divide-y divide-slate-200">
+                  {allNews.map((a, i) => (
+                    <article key={a.id} className="flex gap-4 py-4">
+                      {a.imageUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={a.imageUrl} alt="" className="hidden sm:block size-20 rounded-md object-cover shrink-0 border border-slate-200" />
+                      ) : (
+                        <div className={`hidden sm:grid place-items-center size-20 rounded-md shrink-0 text-2xl ${ANNOUNCEMENT_BG[i % ANNOUNCEMENT_BG.length]}`}>
+                          {ANNOUNCEMENT_ICONS[i % ANNOUNCEMENT_ICONS.length]}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">{a.location}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 whitespace-nowrap shrink-0">
+                            {fmtAnnouncementDate(a.date)}
+                          </p>
+                        </div>
+                        <h4 className="font-serif text-lg font-bold text-[#003527] leading-snug mt-0.5">{a.title}</h4>
+                        <p className="text-[13px] text-slate-600 leading-relaxed mt-1 wrap-break-word">{a.body}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 flex justify-end">
+              <button
+                onClick={() => setNewsOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Masthead: top rule ── */}
@@ -510,9 +585,12 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
         <div className="lg:pr-6 lg:border-r border-slate-200 min-w-0">
           <div className="flex items-end justify-between gap-4 border-b border-slate-300 pb-1.5 mb-3">
             <h3 className="font-serif text-2xl font-bold text-[#003527] leading-none">Latest Announcements</h3>
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 whitespace-nowrap">
-              View All News &rarr;
-            </span>
+            <button
+              onClick={() => setNewsOpen(true)}
+              className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 whitespace-nowrap hover:underline"
+            >
+              View All News {allNews.length > 0 && `(${allNews.length}) `}&rarr;
+            </button>
           </div>
 
           {announcements.length === 0 ? (

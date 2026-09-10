@@ -327,6 +327,27 @@
 }
 .animate-announcement-ring { animation: announcement-ring 2.5s ease-in-out infinite; }
 
+/* Notification bell, when something is waiting on the viewer: a short ring
+   burst then a pause, rather than a constant jitter that becomes wallpaper.
+   Pivots near the top of the glyph so it swings like a bell rather than
+   spinning about its middle, and swells as it rings so it reads at a glance
+   even in peripheral vision. */
+@keyframes bell-ring {
+  0%, 55%, 100% { transform: rotate(0deg)   scale(1); }
+  5%            { transform: rotate(-14deg) scale(1.2); }
+  12%           { transform: rotate(12deg)  scale(1.2); }
+  19%           { transform: rotate(-9deg)  scale(1.15); }
+  26%           { transform: rotate(7deg)   scale(1.1); }
+  33%           { transform: rotate(-4deg)  scale(1.06); }
+  40%           { transform: rotate(2deg)   scale(1.02); }
+}
+.animate-bell-ring { animation: bell-ring 2.4s ease-in-out infinite; transform-origin: 50% 15%; }
+
+/* Anyone who has asked for less motion gets the badge alone. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-bell-ring { animation: none; }
+}
+
 @keyframes announcement-slide-in {
   from { transform: translateY(-14px); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }

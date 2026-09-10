@@ -56,6 +56,9 @@ export async function GET(request: Request) {
       firstInLogged: true,
       lastOutLogged: true,
       totalMins: true,
+      // The day's individual slots, so a caller can measure exactly how much
+      // of it fell inside an arbitrary window.
+      slots: true,
     },
   });
 

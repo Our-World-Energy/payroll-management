@@ -438,10 +438,19 @@ export default function ContractorAttendancePage() {
                     const dayBadgeAnim  = dayBadge === "PTO" ? "animate-vacation-float" : dayBadge === "ML" ? "animate-sick-wobble" : "animate-holiday-bounce";
                     const dayBadgeTitle = dayBadge === "PTO" ? "PTO" : dayBadge === "ML" ? "Medical Leave" : dayBadge === "USO" ? "US Holiday" : "Local Holiday";
 
+                    // Only when the day is genuinely empty and is a working
+                    // day: a holiday on a rest day credits nothing, so
+                    // labelling it HO would imply otherwise.
+                    const isHolidayBadge = dayBadge === "USO" || dayBadge === "LHO";
+                    const showHoliday = inMonth && mins === 0 && !rest && isHolidayBadge;
+
                     let cellClass = "bg-white border-slate-100 text-slate-600 hover:border-slate-200";
                     if (!inMonth)      cellClass = "border-transparent text-slate-300";
                     else if (isToday)  cellClass = "bg-[#003527] border-[#003527] text-white shadow-md shadow-emerald-900/20";
                     else if (mins > 0) cellClass = isOver ? "bg-yellow-50 border-yellow-100 text-yellow-900" : isExact ? "bg-emerald-50 border-emerald-100 text-emerald-900" : "bg-red-50 border-red-100 text-red-900";
+                    else if (showHoliday) cellClass = dayBadge === "USO"
+                      ? "bg-blue-50 border-blue-200 text-blue-900"
+                      : "bg-violet-50 border-violet-200 text-violet-900";
                     else if (rest)     cellClass = "bg-slate-50 border-slate-100 text-slate-400";
 
                     const isSelected = d === activeDate;
@@ -467,6 +476,15 @@ export default function ContractorAttendancePage() {
                           <span className={`inline-flex items-center gap-1 text-[10px] font-bold ${isToday ? (isOver ? "text-yellow-200" : isExact ? "text-emerald-200" : "text-red-200") : (isOver ? "text-yellow-700" : isExact ? "text-emerald-700" : "text-red-700")}`}>
                             <span className={`w-1.5 h-1.5 rounded-full ${isToday ? (isOver ? "bg-yellow-300" : isExact ? "bg-emerald-300" : "bg-red-300") : (isOver ? "bg-yellow-500" : isExact ? "bg-emerald-500" : "bg-red-500")}`} />
                             {fmtHoursMinutes(mins)}
+                          </span>
+                        ) : showHoliday ? (
+                          <span
+                            className={`text-[9px] font-bold uppercase tracking-wide ${
+                              isToday ? "text-blue-200" : dayBadge === "USO" ? "text-blue-700" : "text-violet-700"
+                            }`}
+                            title={dayBadgeTitle}
+                          >
+                            HO
                           </span>
                         ) : inMonth && rest ? (
                           <span className="text-[8px] font-bold uppercase tracking-wide text-slate-400">Rest</span>
@@ -570,6 +588,8 @@ export default function ContractorAttendancePage() {
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-50 border border-emerald-200" /> Exactly {STANDARD_SHIFT_MINUTES}m</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-red-50 border border-red-200" /> Under {STANDARD_SHIFT_MINUTES}m</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-slate-50 border border-slate-200" /> Rest day</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-200" /> HO — US Holiday</span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-50 border border-violet-200" /> HO — Local Holiday</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#003527]" /> Today</span>
             <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🏖️</span> PTO</span>
             <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🤒</span> Medical Leave</span>

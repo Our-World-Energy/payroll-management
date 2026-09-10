@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useSidebar } from "./SidebarContext";
 import { useAdminTheme } from "./AdminThemeContext";
 import { NotificationBell } from "./NotificationBell";
-import { navItemsForRole } from "@/lib/adminNav";
+import { accountNavItems } from "@/lib/accountPages";
 import { ROLE_TITLE } from "@/lib/roles";
 import { useAccount } from "./RoleContext";
 
@@ -14,7 +14,7 @@ export function AdminTopbar() {
   const { toggle } = useSidebar();
   const { dark } = useAdminTheme();
   const router = useRouter();
-  const { role, email } = useAccount();
+  const { role, email, rawPages } = useAccount();
   const [switching, setSwitching] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -36,8 +36,8 @@ export function AdminTopbar() {
       .map((part) => part[0]?.toUpperCase() ?? "")
       .join("") || "U";
 
-  // Search only offers what this role can actually open.
-  const navItems = navItemsForRole(role);
+  // Search only offers what this account can actually open.
+  const navItems = accountNavItems(role, rawPages);
   const matches = query.trim()
     ? navItems.filter((item) => item.label.toLowerCase().includes(query.trim().toLowerCase()))
     : navItems;
