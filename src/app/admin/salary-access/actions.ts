@@ -31,6 +31,8 @@ export type SalaryAccessStatus = {
   canView: boolean;
   mailConfigured: boolean;
   setupError?: string;
+  /** SALARY_MASTER_KEY not configured here — salary is unavailable, not an error. */
+  keyMissing?: boolean;
 };
 
 export async function getSalaryAccessStatus(): Promise<SalaryAccessStatus> {
@@ -45,6 +47,7 @@ export async function getSalaryAccessStatus(): Promise<SalaryAccessStatus> {
     canView: a.canView,
     mailConfigured: isMailConfigured(),
     setupError: a.setupError,
+    keyMissing: a.keyMissing,
   };
 }
 
@@ -122,6 +125,8 @@ export async function verifySalaryOtp(codeInput: string): Promise<{ ok: true; ve
   const access = await getSalaryAccess();
   if (!access.email) return { ok: false, error: "You need to be signed in." };
   if (!access.isAdmin || !access.eligible) return { ok: false, error: "Your account is not permitted to view salary data." };
+
+  if (!hasSalaryKey()) return { ok: false, error: "SALARY_MASTER_KEY is not configured on the server." };
 
   const code = codeInput.replace(/\D/g, "");
   if (code.length !== 6) return { ok: false, error: "Enter the 6-digit code." };

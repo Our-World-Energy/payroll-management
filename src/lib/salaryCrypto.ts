@@ -55,14 +55,29 @@ export function encryptSalary(plain: string): string {
   return `${PREFIX}${iv.toString("base64")}:${tag.toString("base64")}:${ct.toString("base64")}`;
 }
 
+let warnedMissingKey = false;
+
 /**
  * Decrypts a stored value. Legacy plaintext (no prefix) is returned unchanged
  * so rows that pre-date encryption keep working until they're backfilled.
+ *
+ * With no SALARY_MASTER_KEY configured (a developer's machine, typically) an
+ * encrypted value comes back as "" — masked, never an exception — so the app
+ * runs normally with salary simply absent. A key that IS present but fails to
+ * decrypt still throws: a wrong key in production must never silently turn
+ * every salary into 0.
  */
 export function decryptSalary(value: unknown): string {
   if (value == null) return "";
   const str = String(value);
   if (!str.startsWith(PREFIX)) return str;
+  if (!hasSalaryKey()) {
+    if (!warnedMissingKey) {
+      warnedMissingKey = true;
+      console.warn("[salary] SALARY_MASTER_KEY is not set — encrypted salary values are shown masked in this environment.");
+    }
+    return "";
+  }
   const [ivB64, tagB64, ctB64] = str.slice(PREFIX.length).split(":");
   if (!ivB64 || !tagB64 || !ctB64) throw new Error("Malformed encrypted salary value.");
   const key = loadKey();

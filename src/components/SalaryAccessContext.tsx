@@ -283,8 +283,20 @@ function SalaryVerifyModal({ email, mailConfigured, onClose, onVerified }: {
 // Settings → Salary Visibility, which is also where re-locking lives.
 
 export function SalaryLockedBanner({ dark, what = "Salary and payment figures" }: { dark: boolean; what?: string }) {
-  const { loading, canView, eligible, openVerify } = useSalaryAccess();
+  const { loading, canView, eligible, keyMissing, openVerify } = useSalaryAccess();
   if (loading || canView) return null;
+  // No key on this server (a developer's machine): a quiet note, not a prompt
+  // — there's no verifying into it.
+  if (keyMissing) {
+    return (
+      <div className={`mb-3 md:mb-4 flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+        dark ? "bg-white/5 border-white/10 text-white/60" : "bg-slate-50 border-slate-200 text-slate-500"
+      }`}>
+        <LuLock size={16} strokeWidth={2} className="shrink-0" />
+        <p><span className="font-semibold">{what} are not available in this environment.</span> Salary data is encrypted and this server has no decryption key configured.</p>
+      </div>
+    );
+  }
   return (
     <div className={`mb-3 md:mb-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 rounded-xl border px-4 py-3 text-sm ${
       dark ? "bg-amber-400/10 border-amber-400/20 text-amber-200" : "bg-amber-50 border-amber-200 text-amber-900"

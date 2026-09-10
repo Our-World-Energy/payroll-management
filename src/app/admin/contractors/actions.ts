@@ -7,7 +7,7 @@ import { provisionContractorUser } from "@/lib/provisionContractor";
 import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved, planSpecialLeaveGrantDeduction, roundBalance, type SpecialLeaveGrantDeduction } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 import { canViewSalary } from "@/lib/salaryAccess";
-import { decryptSalary, encryptSalary } from "@/lib/salaryCrypto";
+import { decryptSalary, encryptSalary, hasSalaryKey } from "@/lib/salaryCrypto";
 
 const TABLE = "contractor_profiles";
 const LOG_TABLE = "time_off_request_logs";
@@ -28,7 +28,12 @@ function revealRates(rows: Contractor[], canView: boolean): Contractor[] {
   }));
 }
 
-function encryptedRates(c: Contractor) {
+// With no SALARY_MASTER_KEY on this server (a developer's machine) nothing can
+// be encrypted, so the rate columns are left out of the write — the row keeps
+// its stored (encrypted) rates on update, or the "" default on create — rather
+// than failing the whole save or storing salary in plaintext.
+function encryptedRates(c: Contractor): Partial<Pick<Contractor, "monthlyRate" | "weeklyRate" | "hourlyRate">> {
+  if (!hasSalaryKey()) return {};
   return {
     monthlyRate: encryptSalary(c.monthlyRate ?? ""),
     weeklyRate:  encryptSalary(c.weeklyRate  ?? ""),

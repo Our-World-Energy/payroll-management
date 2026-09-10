@@ -1,5 +1,6 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
+import { hasSalaryKey } from "@/lib/salaryCrypto";
 
 // Who may see salary / payment figures, and whether they've proven it recently.
 //
@@ -36,6 +37,13 @@ export type SalaryAccess = {
   canView: boolean;
   /** Set when the access tables aren't reachable (migration not run yet). */
   setupError?: string;
+  /**
+   * True when SALARY_MASTER_KEY isn't configured on this server (e.g. a
+   * developer's machine). Salary is then locked for everyone regardless of the
+   * allowlist or any grant — nothing could be decrypted anyway — and no popup
+   * is offered.
+   */
+  keyMissing?: boolean;
 };
 
 export function serviceClient() {
@@ -116,6 +124,12 @@ export async function getSalaryAccess(): Promise<SalaryAccess> {
   // Contractors (role "user") only ever see their own figures via the
   // ownership check in the portal actions — never the org-wide unlock.
   if (!identity.isAdmin) return base;
+
+  // No key on this server: nobody is eligible, so the popup never appears and
+  // every read path takes the masked branch. Checked before the allowlist and
+  // grants because those live in the shared database — an admin who verified
+  // on production would otherwise look "unlocked" on a keyless dev machine.
+  if (!hasSalaryKey()) return { ...base, keyMissing: true };
 
   let eligible = false;
   try {
