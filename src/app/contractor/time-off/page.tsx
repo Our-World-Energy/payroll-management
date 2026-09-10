@@ -138,6 +138,11 @@ function BalanceCard({
   const usedPct   = total > 0 ? Math.min((used / total) * 100, 100) : 0;
   const availPct  = 100 - usedPct;
 
+  // Under 8 hours left is less than a full day off, so the balance and the
+  // percentage both turn orange — the card's own accent colour reads as
+  // healthy and would understate how little is actually left.
+  const lowColor = available < HOURS_PER_DAY ? "text-orange-500" : availColor;
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-4 hover:shadow-md transition-shadow">
       <div className="flex items-center justify-between mb-3">
@@ -152,7 +157,7 @@ function BalanceCard({
         <div className="relative grid place-items-center shrink-0">
           <ProgressRing pct={availPct} size={68} stroke={6} />
           <div className="absolute text-center leading-none">
-            <span className={`block text-sm font-bold tabular-nums ${availColor}`}>{Math.round(availPct)}%</span>
+            <span className={`block text-sm font-bold tabular-nums ${lowColor}`}>{Math.round(availPct)}%</span>
             <span className="block text-[8px] font-semibold text-slate-400 uppercase tracking-wide">left</span>
           </div>
         </div>
@@ -168,7 +173,7 @@ function BalanceCard({
           </div>
           <div>
             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-[0.1em] mb-0.5">Available</p>
-            <p className={`text-base font-bold tabular-nums ${availColor}`}>{fmtHoursMinutes(available)}</p>
+            <p className={`text-base font-bold tabular-nums ${lowColor}`}>{fmtHoursMinutes(available)}</p>
           </div>
         </div>
       </div>

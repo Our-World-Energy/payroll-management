@@ -82,8 +82,6 @@ export default function ContractorProfilePage() {
     return val.toLocaleString("en-US", { style: "currency", currency, minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  const isActive = (profile.status ?? "Active") === "Active";
-
   return (
     <div className="max-w-[110rem] mx-auto space-y-5">
       {/* Page header — sized 20% smaller than the shared PageHeader (this
@@ -109,32 +107,23 @@ export default function ContractorProfilePage() {
 
           {/* Info */}
           <div className="flex-1 w-full text-center md:text-left">
-            <div className="flex flex-col md:flex-row md:items-start justify-between gap-2">
-              <div>
-                <h1 className="text-xl font-bold text-white leading-none" style={{ letterSpacing: "-0.02em" }}>
-                  {profile.fullName || "—"}
-                </h1>
-                <p className="text-sm font-semibold text-emerald-300 mt-1">{profile.role || "Contractor"}</p>
-                <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-2.5 gap-y-1 mt-1.5 text-emerald-100/80">
-                  {profile.contractorId && (
-                    <span className="flex items-center text-xs gap-1">
-                      <LuBadge size={12} strokeWidth={1.75} /> {profile.contractorId}
-                    </span>
-                  )}
-                  {profile.location && (
-                    <span className="flex items-center text-xs gap-1">
-                      <LuMapPin size={12} strokeWidth={1.75} /> {profile.location}
-                    </span>
-                  )}
-                </div>
+            <div>
+              <h1 className="text-xl font-bold text-white leading-none" style={{ letterSpacing: "-0.02em" }}>
+                {profile.fullName || "—"}
+              </h1>
+              <p className="text-sm font-semibold text-emerald-300 mt-1">{profile.role || "Contractor"}</p>
+              <div className="flex flex-wrap items-center justify-center md:justify-start gap-x-2.5 gap-y-1 mt-1.5 text-emerald-100/80">
+                {profile.contractorId && (
+                  <span className="flex items-center text-xs gap-1">
+                    <LuBadge size={12} strokeWidth={1.75} /> {profile.contractorId}
+                  </span>
+                )}
+                {profile.location && (
+                  <span className="flex items-center text-xs gap-1">
+                    <LuMapPin size={12} strokeWidth={1.75} /> {profile.location}
+                  </span>
+                )}
               </div>
-              <span className={`self-center md:self-start px-2.5 py-0.5 rounded-full text-[11px] font-bold whitespace-nowrap ${
-                isActive
-                  ? "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-300/30"
-                  : "bg-red-400/15 text-red-200 ring-1 ring-red-300/30"
-              }`}>
-                {profile.status || "Active"}
-              </span>
             </div>
           </div>
         </div>
