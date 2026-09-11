@@ -1084,18 +1084,30 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       setOverrideError(result.error ?? "Failed to create override.");
                       return;
                     }
-                    const req = result.request;
+                    // One request per day, so the local balance has to add up
+                    // every day's hours — adding just the first showed 8h
+                    // deducted for a two-day override until a refresh
+                    // replaced it with the 16h actually taken.
+                    const newRequests = result.requests ?? [result.request];
+                    const added = newRequests.reduce(
+                      (sum, r) => ({
+                        pto: sum.pto + r.ptoUsedHours,
+                        sick: sum.sick + r.sickLeaveUsedHours,
+                        special: sum.special + r.specialLeaveUsedHours,
+                      }),
+                      { pto: 0, sick: 0, special: 0 },
+                    );
                     setContractors((prev) => prev.map((c) =>
                       c.uid === selectedRow.id
                         ? {
                             ...c,
-                            ptoUsed: c.ptoUsed + req.ptoUsedHours,
-                            sickLeaveUsed: c.sickLeaveUsed + req.sickLeaveUsedHours,
-                            specialLeaveUsed: c.specialLeaveUsed + req.specialLeaveUsedHours,
+                            ptoUsed: c.ptoUsed + added.pto,
+                            sickLeaveUsed: c.sickLeaveUsed + added.sick,
+                            specialLeaveUsed: c.specialLeaveUsed + added.special,
                           }
                         : c
                     ));
-                    setLeaveRequests((prev) => [req, ...prev]);
+                    setLeaveRequests((prev) => [...newRequests, ...prev]);
                     // Hourly/Fixed-Ind Special Leave can span multiple grants —
                     // cheaper and more reliable to refetch than to reconstruct
                     // the server's FIFO deduction client-side.

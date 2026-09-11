@@ -873,7 +873,7 @@ export async function createLeaveOverride(params: {
   startDate: string;
   endDate: string;
   reason: string;
-}): Promise<{ ok: boolean; error?: string; request?: AdminLeaveRequest }> {
+}): Promise<{ ok: boolean; error?: string; request?: AdminLeaveRequest; requests?: AdminLeaveRequest[] }> {
   const sb = getSupabase();
 
   const hours = leaveTypeHours(params.type);
@@ -984,23 +984,26 @@ export async function createLeaveOverride(params: {
     });
   }
 
-  return {
-    ok: true,
-    request: {
-      id,
-      email: params.email,
-      type: params.type,
-      startDate: dates[0],
-      endDate: dates[0],
-      durationDays,
-      reason: params.reason,
-      status: "Approved",
-      ptoUsedHours,
-      sickLeaveUsedHours,
-      specialLeaveUsedHours,
-      createdAt: now,
-    },
-  };
+  // Every day created, so the caller can add the whole deduction to its local
+  // balance and list all the new rows. Returning only the first made the UI
+  // show one day's hours until a refetch replaced it with the real figure.
+  const requests: AdminLeaveRequest[] = dates.map((date, i) => ({
+    id: ids[i],
+    email: params.email,
+    type: params.type,
+    startDate: date,
+    endDate: date,
+    durationDays,
+    reason: params.reason,
+    status: "Approved",
+    ptoUsedHours,
+    sickLeaveUsedHours,
+    specialLeaveUsedHours,
+    createdAt: now,
+  }));
+
+  // `request` stays the first day for callers that only need one.
+  return { ok: true, request: requests[0], requests };
 }
 
 // Same admin-driven override pattern as createLeaveOverride above, but for
