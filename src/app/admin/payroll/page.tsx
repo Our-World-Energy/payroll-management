@@ -571,18 +571,22 @@ export default function PayrollPage() {
     // its own column now, and "PHP 1,234.56" imports as text, so a
     // spreadsheet can neither sum nor sort the column.
     const decimal = (n: number) => n.toFixed(2);
+    // Decimal hours rather than "36h 00m", for the same reason: a spreadsheet
+    // cannot total a duration written as text. Same minutes-over-60 the
+    // voucher's own hour figures use, so 440 min reads 7.33 in both places.
+    const hours = (minutes: number) => (minutes / 60).toFixed(2);
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
         r.name, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
-        r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "",
-        r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "",
-        r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "",
-        r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "",
-        r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "",
-        r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "",
-        r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
-        r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
+        r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
+        r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
+        r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
+        r.totalRegularOtMinutes ? hours(r.totalRegularOtMinutes) : "",
+        r.totalRdOtMinutes ? hours(r.totalRdOtMinutes) : "",
+        r.totalHoOtMinutes ? hours(r.totalHoOtMinutes) : "",
+        r.totalTimeOffRequestMinutes > 0 ? hours(r.totalTimeOffRequestMinutes) : "",
+        r.completionMinutes != null ? hours(r.completionMinutes) : "",
         r.currency,
         `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
         r.earnings != null ? decimal(r.earnings) : "",
