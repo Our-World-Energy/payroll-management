@@ -12,6 +12,7 @@ import {
   addSubDepartment, removeSubDepartment,
   addRole, removeRole,
   fetchCutOffTime, saveCutOffTime,
+  fetchProcessTimeAwayEnabled, saveProcessTimeAwayEnabled,
   fetchTimeAwayRequestsEnabled, saveTimeAwayRequestsEnabled,
   fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
@@ -110,6 +111,34 @@ export default function SettingsPage() {
     if (!res.ok) {
       setTimeAwayEnabled(prev);
       setTimeAwayError(res.error ?? "Could not save the setting.");
+    }
+  }
+
+  // ── Enable Process Time Away ──────────────────────────────────────────────
+  // Controls the Process Time Away button in Time Away Management. Same
+  // save-on-toggle-and-revert-on-failure handling as the switch above.
+  const [processEnabled, setProcessEnabled] = useState(true);
+  const [processLoaded, setProcessLoaded] = useState(false);
+  const [processSaving, setProcessSaving] = useState(false);
+  const [processError, setProcessError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchProcessTimeAwayEnabled()
+      .then(setProcessEnabled)
+      .catch(() => setProcessEnabled(true))
+      .finally(() => setProcessLoaded(true));
+  }, []);
+
+  async function handleToggleProcess(next: boolean) {
+    const prev = processEnabled;
+    setProcessEnabled(next);
+    setProcessSaving(true);
+    setProcessError(null);
+    const res = await saveProcessTimeAwayEnabled(next);
+    setProcessSaving(false);
+    if (!res.ok) {
+      setProcessEnabled(prev);
+      setProcessError(res.error ?? "Could not save the setting.");
     }
   }
 
@@ -851,6 +880,45 @@ export default function SettingsPage() {
                   <span className="text-emerald-600">Enabled — contractors can submit Time Away requests.</span>
                 ) : (
                   <span className="text-amber-700">Disabled — contractors cannot submit new Time Away requests.</span>
+                )}
+              </p>
+            </div>
+
+            {/* Enable Process Time Away — controls the button in Time Away
+                Management. Disabling hides nothing else: the grid, balances
+                and approvals all stay usable. */}
+            <div className="mb-5 pb-5 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-semibold text-[#003527]">Enable Process Time Away</h5>
+                  <p className="text-xs text-slate-400 mt-0.5 max-w-lg">
+                    When off, the Process Time Away button in Time Away Management is disabled, so no run can be
+                    started. Viewing the grid, balances and approving or declining requests are unaffected.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={processEnabled}
+                  aria-label="Enable Process Time Away"
+                  disabled={!processLoaded || processSaving}
+                  onClick={() => handleToggleProcess(!processEnabled)}
+                  className={`relative shrink-0 mt-0.5 h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${processEnabled ? "bg-emerald-600" : "bg-slate-300"}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${processEnabled ? "left-[1.375rem]" : "left-0.5"}`} />
+                </button>
+              </div>
+              <p className="mt-2 text-xs font-semibold">
+                {!processLoaded ? (
+                  <span className="text-slate-400">Loading…</span>
+                ) : processSaving ? (
+                  <span className="text-slate-400">Saving…</span>
+                ) : processError ? (
+                  <span className="text-red-600">{processError}</span>
+                ) : processEnabled ? (
+                  <span className="text-emerald-600">Enabled — Time Away can be processed.</span>
+                ) : (
+                  <span className="text-amber-700">Disabled — the Process Time Away button is not available.</span>
                 )}
               </p>
             </div>

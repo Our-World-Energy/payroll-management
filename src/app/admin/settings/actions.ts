@@ -420,6 +420,39 @@ export async function saveTimeAwayRequestsEnabled(enabled: boolean): Promise<{ o
   return { ok: true };
 }
 
+const PROCESS_TIME_AWAY_ENABLED = "process_time_away_enabled";
+
+/**
+ * Whether the Process Time Away button in Time Away Management is available.
+ * Defaults to **enabled** when no row exists, matching the switch above — a
+ * missing row or a read failure must not quietly withdraw a control an admin
+ * never chose to turn off.
+ */
+export async function fetchProcessTimeAwayEnabled(): Promise<boolean> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("app_settings")
+    .select("value")
+    .eq("key", PROCESS_TIME_AWAY_ENABLED)
+    .maybeSingle();
+
+  if (error || !data) return true;
+  return data.value !== "false";
+}
+
+export async function saveProcessTimeAwayEnabled(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("app_settings")
+    .upsert(
+      { key: PROCESS_TIME_AWAY_ENABLED, value: enabled ? "true" : "false", updatedAt: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // ── Notification Alerts ─────────────────────────────────────────────────────
 // Custom admin-defined alerts (name + a one-time scheduled date) — replaces
 // the old static notification-toggle list on Settings.
