@@ -3,7 +3,9 @@ import { createServerClient } from "@supabase/ssr";
 
 /**
  * Refreshes the Supabase session cookie on every request.
- * Called from proxy.ts. Returns the response with updated cookies.
+ * Called from proxy.ts. Returns the response with updated cookies, plus the
+ * signed-in user so the caller can gate routes without a second round trip —
+ * this function still only hydrates; the gating decision lives in proxy.ts.
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -29,9 +31,11 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // Touching getUser() forces Supabase to refresh the token if needed.
-  // Do not gate routes here — proxy is for session hydration only.
-  await supabase.auth.getUser();
+  // Touching getUser() forces Supabase to refresh the token if needed. It
+  // also asks the Auth server for live user_metadata, so a role change in
+  // User Management takes effect on the very next request rather than
+  // whenever the JWT happens to refresh.
+  const { data } = await supabase.auth.getUser();
 
-  return response;
+  return { response, user: data?.user ?? null };
 }

@@ -1,5 +1,5 @@
-import { NAV_ITEMS, navItemsForRole, type NavItem } from "./adminNav";
-import { PORTAL_PAGES, type AppRole, effectivePagesFor } from "./roles";
+import { NAV_ITEMS, navItemsForRole, matchesPath, type NavItem } from "./adminNav";
+import { PORTAL_PAGES, type AppRole, effectivePagesFor, usesAdminConsole } from "./roles";
 
 /**
  * Every menu an account can be given, for the tick boxes on User Management.
@@ -78,10 +78,28 @@ export function accountNavItems(role: AppRole, raw: unknown): NavItem[] {
   return items.length > 0 ? items : navItemsForRole(role);
 }
 
-/** Whether an account may open a path inside the admin console. */
+/**
+ * Whether an account may open a path inside the admin console.
+ *
+ * Goes through matchesPath rather than a plain prefix test. Every console menu
+ * contains "/admin" (Dashboard), and a bare startsWith("/admin/") matches every
+ * console page there is — so a Manager holding only Dashboard and Time Away
+ * Request could open Payroll or Attendance by pasting the URL.
+ */
 export function accountCanAccessAdminPath(role: AppRole, raw: unknown, pathname: string): boolean {
-  const path = pathname.replace(/\/+$/, "") || "/";
-  return accountNavItems(role, raw).some(
-    (item) => path === item.href || path.startsWith(`${item.href}/`),
-  );
+  if (!usesAdminConsole(role)) return false;
+
+  // An admin holds the whole console, including manager-scoped pages and the
+  // ones with no sidebar entry — unless a custom menu has been composed for
+  // that specific account, which is then honoured like anyone else's.
+  if (role === "admin" && !Array.isArray(raw)) return true;
+
+  // Some console pages have no sidebar entry — /admin/holidays,
+  // /admin/salary-access, /admin/announcements. They can't be ticked in User
+  // Management either, so testing the menu alone would make them unreachable
+  // for everyone. They stay admin-only, as canAccessAdminPath had it.
+  const hasMenuEntry = NAV_ITEMS.some((item) => matchesPath(pathname, item.href));
+  if (!hasMenuEntry) return role === "admin";
+
+  return accountNavItems(role, raw).some((item) => matchesPath(pathname, item.href));
 }
