@@ -196,20 +196,37 @@ export async function submitLeaveRequest(params: {
   const now = new Date().toISOString();
   const hours = leaveTypeHours(params.type);
   const isPto = isPtoLeaveType(params.type);
-  const { error } = await sb.from(LEAVE_TABLE).insert({
+
+  // One row per day, not one row spanning the range: picking 22nd–23rd files
+  // two single-day requests. Each is then approved, declined, cancelled and
+  // deducted on its own, and the per-date views no longer have to unpack a
+  // range to know what a given day holds.
+  //
+  // A half-day only ever occupies its start date, so it stays a single row
+  // however the range was submitted.
+  const lastDate = isHalfDayLeaveType(params.type) ? params.startDate : params.endDate;
+  const dates = datesCoveredByRange(params.startDate, lastDate);
+  if (dates.length === 0) return { ok: false, error: "Select a start date." };
+
+  const rows = dates.map((date) => ({
     id:                 crypto.randomUUID(),
     email:              params.email,
     type:               params.type,
-    startDate:          params.startDate,
-    endDate:            params.endDate,
-    durationDays:       params.durationDays,
+    startDate:          date,
+    endDate:            date,
+    // Each row is one day. The column is an integer and a half day is stored
+    // as 1 by existing convention — the "* Half Day" type is what encodes the
+    // half, and leaveTypeHours already reads 4h from it.
+    durationDays:       1,
     reason:             params.reason,
     status:             "Pending",
     ptoUsedHours:       isPto ? hours : 0,
     sickLeaveUsedHours: isPto ? 0 : hours,
     createdAt:          now,
     updatedAt:          now,
-  });
+  }));
+
+  const { error } = await sb.from(LEAVE_TABLE).insert(rows);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
