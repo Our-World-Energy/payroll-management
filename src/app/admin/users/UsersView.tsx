@@ -12,6 +12,12 @@ import { ACCOUNT_PAGES, ACCOUNT_PAGE_GROUPS } from "@/lib/accountPages";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
 
+// Full Name and Email stay put while the rest of the table scrolls sideways.
+// Email's sticky offset is Full Name's width, so the two must agree — keep
+// left-[220px] in step with FROZEN_NAME_W if either changes.
+const FROZEN_NAME_W  = "w-[220px] min-w-[220px]";
+const FROZEN_EMAIL_W = "w-[240px] min-w-[240px]";
+
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
@@ -413,11 +419,23 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
+          {/* minWidth keeps the nine columns at their natural size instead of
+              letting w-full squeeze them to fit — that overflow is what makes
+              the container scroll sideways and the frozen pair worth having. */}
+          <table className="w-full text-left" style={{ minWidth: "1420px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr style={{ background: "#003527" }}>
                 {["Full Name", "Email", "Role", "Status", "Contractor Status", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
-                  <th key={h} className="px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap">
+                  <th
+                    key={h}
+                    className={`px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap ${
+                      h === "Full Name"
+                        ? `sticky left-0 z-20 ${FROZEN_NAME_W} bg-[#003527] shadow-[1px_0_0_0_#0a4435]`
+                        : h === "Email"
+                        ? `sticky left-[220px] z-20 ${FROZEN_EMAIL_W} bg-[#003527] shadow-[1px_0_0_0_#0a4435]`
+                        : ""
+                    }`}
+                  >
                     {h}
                   </th>
                 ))}
@@ -427,8 +445,9 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td className="px-5 py-4"><div className="flex items-center gap-3"><div className="size-8 rounded-full bg-slate-100" /><div className="h-3 bg-slate-100 rounded w-36" /></div></td>
-                    {[1,2,3,4,5,6,7,8].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
+                    <td className={`sticky left-0 z-10 ${FROZEN_NAME_W} px-5 py-4 bg-white shadow-[1px_0_0_0_#e2e8f0]`}><div className="flex items-center gap-3"><div className="size-8 rounded-full bg-slate-100" /><div className="h-3 bg-slate-100 rounded w-36" /></div></td>
+                    <td className={`sticky left-[220px] z-10 ${FROZEN_EMAIL_W} px-5 py-4 bg-white shadow-[1px_0_0_0_#e2e8f0]`}><div className="h-3 bg-slate-100 rounded w-32" /></td>
+                    {[1,2,3,4,5,6,7].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
                   </tr>
                 ))
               ) : filteredUsers.length === 0 ? (
@@ -440,15 +459,17 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                 </tr>
               ) : filteredUsers.map((user) => (
                 <tr key={user.id} className="hover:bg-slate-50 transition-colors group">
-                  <td className="px-5 py-4">
+                  <td className={`sticky left-0 z-10 ${FROZEN_NAME_W} px-5 py-4 bg-white group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_0_#e2e8f0]`}>
                     <div className="flex items-center gap-3">
                       <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColor(user.id)}`}>
                         {initials(user.fullName, user.email)}
                       </div>
-                      <span className="text-sm font-semibold text-slate-700 truncate max-w-xs">{user.fullName || "—"}</span>
+                      <span className="text-sm font-semibold text-slate-700 truncate">{user.fullName || "—"}</span>
                     </div>
                   </td>
-                  <td className="px-5 py-4 text-sm text-slate-500 truncate max-w-xs">{user.email}</td>
+                  <td className={`sticky left-[220px] z-10 ${FROZEN_EMAIL_W} px-5 py-4 text-sm text-slate-500 bg-white group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_0_#e2e8f0]`}>
+                    <span className="block truncate">{user.email}</span>
+                  </td>
                   <td className="px-5 py-4">
                     <button
                       onClick={() => handleRolePick(user)}
