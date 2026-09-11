@@ -564,9 +564,13 @@ export default function PayrollPage() {
     const headers = [
       "Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-      "Completion Time", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    // Plain 2dp, no currency prefix and no thousands separators: currency is
+    // its own column now, and "PHP 1,234.56" imports as text, so a
+    // spreadsheet can neither sum nor sort the column.
+    const decimal = (n: number) => n.toFixed(2);
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
@@ -579,23 +583,26 @@ export default function PayrollPage() {
         r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "",
         r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
         r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
+        r.currency,
         `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
-        r.earnings != null ? fmtMoney(r.earnings, r.currency) : "",
-        r.ptoPay ? fmtMoney(r.ptoPay, r.currency) : "",
-        r.sickPay ? fmtMoney(r.sickPay, r.currency) : "",
-        r.specialPay ? fmtMoney(r.specialPay, r.currency) : "",
-        r.advancePay ? fmtMoney(r.advancePay, r.currency) : "",
+        r.earnings != null ? decimal(r.earnings) : "",
+        r.ptoPay ? decimal(r.ptoPay) : "",
+        r.sickPay ? decimal(r.sickPay) : "",
+        r.specialPay ? decimal(r.specialPay) : "",
+        r.advancePay ? decimal(r.advancePay) : "",
         // Blank rather than 0.00 when an adjustment wasn't entered, so a real
         // zero stays distinguishable from "nothing recorded" in a spreadsheet.
-        r.bonus ? fmtMoney(r.bonus, r.currency) : "",
-        r.misc ? fmtMoney(r.misc, r.currency) : "",
-        r.retroPay ? fmtMoney(r.retroPay, r.currency) : "",
-        r.reim ? fmtMoney(r.reim, r.currency) : "",
-        r.gross != null ? fmtMoney(r.gross, r.currency) : "",
-        r.cashAdvance ? fmtMoney(r.cashAdvance, r.currency) : "",
-        r.hmo ? fmtMoney(r.hmo, r.currency) : "",
-        r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "",
-        r.net != null ? fmtMoney(r.net, r.currency) : "",
+        r.bonus ? decimal(r.bonus) : "",
+        r.misc ? decimal(r.misc) : "",
+        r.retroPay ? decimal(r.retroPay) : "",
+        r.reim ? decimal(r.reim) : "",
+        r.gross != null ? decimal(r.gross) : "",
+        r.cashAdvance ? decimal(r.cashAdvance) : "",
+        r.hmo ? decimal(r.hmo) : "",
+        // Kept negative — it is a deduction, and the sign is what makes the
+        // column reconcile against Gross and Net.
+        r.deductions != null ? decimal(-r.deductions) : "",
+        r.net != null ? decimal(r.net) : "",
         r.status,
       ].map(escape).join(",")),
     ];
