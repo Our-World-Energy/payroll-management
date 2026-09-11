@@ -10,7 +10,7 @@ import {
 } from "./actions";
 import {
   HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType,
-  bookedLeaveHoursByDate, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY,
+  bookedLeaveByDate, canAddLeaveOnDate, MAX_LEAVE_HOURS_PER_DAY,
 } from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
@@ -311,15 +311,13 @@ export default function ContractorTimeOffPage() {
   // it covers. A date is only closed once the two together pass 8 — so a PTO
   // Half Day and a Sick Leave Half Day can share one date, while a second
   // full day on top of either cannot.
-  const bookedHours = bookedLeaveHoursByDate(
+  const bookedByDate = bookedLeaveByDate(
     (allRequests.length > 0 ? allRequests : requests).map((r) => ({
       type: r.type, startDate: r.startDate, endDate: r.endDate, status: r.status,
     })),
   );
-  const hoursThisRequestAdds = leaveHoursPerCoveredDate(leaveType);
-  const wouldExceedOn = (date: string) =>
-    hoursThisRequestAdds > 0
-    && (bookedHours.get(date) ?? 0) + hoursThisRequestAdds > MAX_LEAVE_HOURS_PER_DAY;
+  // Sharing a date is a half-day-only allowance - see canAddLeaveOnDate.
+  const wouldExceedOn = (date: string) => !canAddLeaveOnDate(bookedByDate.get(date), leaveType);
 
   // Dates in the range being filled in that this request cannot fit on.
   const clashingDates = datesCoveredBy(startDate, effectiveEndDate).filter(wouldExceedOn);
@@ -329,7 +327,7 @@ export default function ContractorTimeOffPage() {
   // Same shape Leave Override passes its calendar, but keyed on whether THIS
   // request still fits rather than on the date being touched at all — a date
   // holding 4h stays selectable for another half day and closed to a full one.
-  const blockedDates = new Set([...bookedHours.keys()].filter(wouldExceedOn));
+  const blockedDates = new Set([...bookedByDate.keys()].filter(wouldExceedOn));
   // The hint beside each field still names whatever already holds the date,
   // shown whenever there is something there — including the 4h case that is
   // no longer blocking, so the contractor can see why the day is part-used.
@@ -709,7 +707,7 @@ export default function ContractorTimeOffPage() {
                   <BookedDateHint
                     date={startDate}
                     booked={startBooked}
-                    heldHours={bookedHours.get(startDate) ?? 0}
+                    heldHours={bookedByDate.get(startDate)?.hours ?? 0}
                     blocked={wouldExceedOn(startDate)}
                   />
                 )}
@@ -735,7 +733,7 @@ export default function ContractorTimeOffPage() {
                   <BookedDateHint
                     date={effectiveEndDate}
                     booked={endBooked}
-                    heldHours={bookedHours.get(effectiveEndDate) ?? 0}
+                    heldHours={bookedByDate.get(effectiveEndDate)?.hours ?? 0}
                     blocked={wouldExceedOn(effectiveEndDate)}
                   />
                 )}

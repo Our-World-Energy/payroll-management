@@ -3,7 +3,8 @@
 import { createClient } from "@supabase/supabase-js";
 import {
   leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved,
-  bookedLeaveHoursByDate, datesCoveredByRange, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY,
+  bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange, leaveHoursPerCoveredDate,
+  isHalfDayLeaveType, MAX_LEAVE_HOURS_PER_DAY,
 } from "@/lib/timeOffBalances";
 import { fetchCutOffTime, fetchTimeAwayRequestsEnabled } from "../../admin/settings/actions";
 
@@ -158,33 +159,36 @@ export async function submitLeaveRequest(params: {
     return { ok: false, error: "Time Away requests are currently disabled by your administrator." };
   }
 
-  // A date may hold up to 8 hours of leave in total, so a PTO Half Day and a
-  // Sick Leave Half Day can share one date. Anything that would take a date
-  // past 8 is refused. This is the real enforcement — the portal greys the
-  // dates out, but a disabled control is a hint, not a guarantee.
-  const perDate = leaveHoursPerCoveredDate(params.type);
-  if (perDate > 0) {
+  // Only half days may share a date, and only while the day total stays within
+  // 8 hours — see canAddLeaveOnDate. This is the real enforcement; the portal
+  // greys the dates out, but a disabled control is a hint, not a guarantee.
+  {
     const { data: existing } = await sb
       .from(LEAVE_TABLE)
       .select("type, startDate, endDate, status")
       .eq("email", params.email);
-    const booked = bookedLeaveHoursByDate(
+    const booked = bookedLeaveByDate(
       (existing ?? []).map((r) => ({
         type: String(r.type), startDate: String(r.startDate),
         endDate: String(r.endDate), status: String(r.status ?? "Pending"),
       })),
     );
     // A half-day only ever occupies its start date, whatever range was sent.
-    const lastDate = params.type.endsWith("Half Day") ? params.startDate : params.endDate;
-    const overloaded = datesCoveredByRange(params.startDate, lastDate)
-      .filter((d) => (booked.get(d) ?? 0) + perDate > MAX_LEAVE_HOURS_PER_DAY);
-    if (overloaded.length > 0) {
-      const held = booked.get(overloaded[0]) ?? 0;
+    const lastDate = isHalfDayLeaveType(params.type) ? params.startDate : params.endDate;
+    const refused = datesCoveredByRange(params.startDate, lastDate)
+      .filter((d) => !canAddLeaveOnDate(booked.get(d), params.type));
+    if (refused.length > 0) {
+      const held = booked.get(refused[0]);
+      const reason = !isHalfDayLeaveType(params.type)
+        ? "only half-day leave can share a date that already has leave on it"
+        : held && !held.allHalfDay
+        ? "a full-day leave already covers it"
+        : `it already holds ${held?.hours ?? 0}h, and adding ${leaveHoursPerCoveredDate(params.type)}h would pass the ${MAX_LEAVE_HOURS_PER_DAY}h daily limit`;
       return {
         ok: false,
-        error: overloaded.length === 1
-          ? `${overloaded[0]} already has ${held}h of leave; adding ${perDate}h would exceed the ${MAX_LEAVE_HOURS_PER_DAY}h daily limit.`
-          : `${overloaded.length} dates in this range would exceed the ${MAX_LEAVE_HOURS_PER_DAY}h daily leave limit.`,
+        error: refused.length === 1
+          ? `Cannot add leave on ${refused[0]} - ${reason}.`
+          : `${refused.length} dates in this range already have leave that cannot be shared.`,
       };
     }
   }

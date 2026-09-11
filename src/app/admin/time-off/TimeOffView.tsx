@@ -17,7 +17,7 @@ import {
 import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveHoursByDate, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -1227,16 +1227,13 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   // holding a 4h half day still take a second half day, which
                   // a presence check made impossible. The soft duplicate
                   // warning still fires, so an admin keeps the final say.
-                  const overrideBookedHours = bookedLeaveHoursByDate(
+                  const overrideBooked = bookedLeaveByDate(
                     leaveRequests
                       .filter((r) => r.email === selectedRow.email)
                       .map((r) => ({ type: r.type, startDate: r.startDate, endDate: r.endDate, status: r.status })),
                   );
-                  const overrideHoursPerDate = leaveHoursPerCoveredDate(overrideType);
                   const requestedDates = new Set(
-                    [...overrideBookedHours.keys()].filter((d) =>
-                      overrideHoursPerDate > 0
-                      && (overrideBookedHours.get(d) ?? 0) + overrideHoursPerDate > MAX_LEAVE_HOURS_PER_DAY),
+                    [...overrideBooked.keys()].filter((d) => !canAddLeaveOnDate(overrideBooked.get(d), overrideType)),
                   );
 
                   return (
