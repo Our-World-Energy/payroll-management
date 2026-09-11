@@ -418,20 +418,24 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        {/* overflow-x-scroll, not -auto: the bar stays on screen instead of
-            appearing only once something overflows, so it is visible that the
-            table scrolls sideways past the frozen Name/Email pair. */}
-        <div className="overflow-x-scroll">
+        {/* Height-capped like Weekly Payroll, so the horizontal scrollbar
+            sits at the bottom of this box — on screen — rather than at the
+            end of a 350-row page that has to be scrolled to reach it. Rows
+            scroll vertically inside here, under a sticky header.
+            overflow-x-scroll keeps the horizontal bar present even on a
+            monitor wide enough that 1420px doesn't overflow; vertical stays
+            automatic so a short list gets no pointless empty track. */}
+        <div className="overflow-x-scroll overflow-y-auto max-h-[72vh] md:max-h-[60vh]">
           {/* minWidth keeps the nine columns at their natural size instead of
               letting w-full squeeze them to fit — that overflow is what makes
               the container scroll sideways and the frozen pair worth having. */}
           <table className="w-full text-left" style={{ minWidth: "1420px", borderCollapse: "separate", borderSpacing: 0 }}>
-            <thead>
+            <thead className="sticky top-0 z-30">
               <tr style={{ background: "#003527" }}>
                 {["Full Name", "Email", "Role", "Status", "Contractor Status", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
                   <th
                     key={h}
-                    className={`px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap ${
+                    className={`px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap bg-[#003527] ${
                       h === "Full Name"
                         ? `sticky left-0 z-20 ${FROZEN_NAME_W} bg-[#003527] shadow-[1px_0_0_0_#0a4435]`
                         : h === "Email"
