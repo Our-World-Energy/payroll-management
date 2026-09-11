@@ -418,7 +418,10 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* overflow-x-scroll, not -auto: the bar stays on screen instead of
+            appearing only once something overflows, so it is visible that the
+            table scrolls sideways past the frozen Name/Email pair. */}
+        <div className="overflow-x-scroll">
           {/* minWidth keeps the nine columns at their natural size instead of
               letting w-full squeeze them to fit — that overflow is what makes
               the container scroll sideways and the frozen pair worth having. */}
