@@ -253,9 +253,37 @@ function isFullTimeOffStatus(timeOffStatus: string) {
 
 // Portal leave request (if any) covering this date — "PTO" | "PTO Half Day" |
 // "Sick Leave" | "Sick Leave Half Day", from contractor_leave_requests.type.
+// Every request covering `date`. A date can legitimately hold two half-day
+// requests (PTO Half Day + Sick Leave Half Day = a normal 8-hour day), so
+// these columns sum and combine rather than reporting whichever request
+// happened to be found first.
+function requestsCoveringDate(date: string, leaveRequests: AdminLeaveRequest[]) {
+  return leaveRequests.filter((r) => date >= r.startDate && date <= r.endDate);
+}
+
+function totalRequestMinutes(requests: AdminLeaveRequest[]) {
+  return requests.reduce((sum, r) => sum + Math.round(hoursForLeaveRequest(r) * 60), 0);
+}
+
+/**
+ * What was requested for this date. Two half-days read as one combined label —
+ * "PTO/Sick Leave Half Day" — with the parts sorted so the text doesn't depend
+ * on the order the rows came back in.
+ */
 function timeOffRequestTypeFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
-  return match?.type ?? "-";
+  const matches = requestsCoveringDate(date, leaveRequests);
+  if (matches.length === 0) return "-";
+  if (matches.length === 1) return matches[0].type;
+
+  const kinds = Array.from(new Set(matches.map((r) => r.type)));
+  const allHalfDay = matches.every((r) => r.type.endsWith("Half Day"));
+  if (allHalfDay) {
+    const parts = Array.from(new Set(kinds.map((t) => t.replace(/ Half Day$/, "")))).sort();
+    return `${parts.join("/")} Half Day`;
+  }
+  // Not the half-day pattern — list them plainly rather than inventing a
+  // label that would imply they add up to one day.
+  return kinds.sort().join(" + ");
 }
 
 // Hours stamped on a leave request for its own type's bucket — PTO types read
@@ -272,9 +300,11 @@ function hoursForLeaveRequest(r: AdminLeaveRequest): number {
 // e.g. a full-day Special Leave request reads its stamped 8h as 480 mins,
 // same as a full-day PTO/Sick Leave request.
 function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
-  if (!match) return "-";
-  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
+  const matches = requestsCoveringDate(date, leaveRequests);
+  if (matches.length === 0) return "-";
+  // Two half-days sum to the full 480, which is what makes the combined label
+  // above and this figure agree.
+  return `${totalRequestMinutes(matches)} mins`;
 }
 
 // Minutes for the APPROVED request covering this date only — unlike
@@ -292,15 +322,20 @@ function isSickLeaveType(type: string) {
  * 2,400-min target and sick leave is the absence that still pays.
  */
 function sickLeaveMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) =>
-    r.status === "Approved" && isSickLeaveType(r.type) && date >= r.startDate && date <= r.endDate);
-  return match ? Math.round(hoursForLeaveRequest(match) * 60) : 0;
+  return totalRequestMinutes(
+    requestsCoveringDate(date, leaveRequests)
+      .filter((r) => r.status === "Approved" && isSickLeaveType(r.type)),
+  );
 }
 
 function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => r.status === "Approved" && date >= r.startDate && date <= r.endDate);
-  if (!match) return "-";
-  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
+  const matches = requestsCoveringDate(date, leaveRequests).filter((r) => r.status === "Approved");
+  if (matches.length === 0) return "-";
+  // Summed, so two approved half-days reach 480 and
+  // isApprovedFullTimeOffRequestDay below recognises the day as fully
+  // credited. Reporting only the first would leave it at 240 and treat a
+  // contractor who was away all day as half-present.
+  return `${totalRequestMinutes(matches)} mins`;
 }
 
 // Whether an APPROVED portal request covering `date` is worth a full day
