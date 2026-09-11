@@ -1339,7 +1339,8 @@ function PayrollVoucherModal({
   const {
     regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
     regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    ptoHours, ptoPay, sickPay, specialPay, advancePay,
+    ptoHours, sickHours, specialHours, advanceHours,
+    ptoPay, sickPay, specialPay, advancePay,
     bonus, misc, retroPay, reim, indHoursPay, cashAdvance, hmo,
     grossPay, totalDeductions, netPay,
   } = figures;
@@ -1484,7 +1485,14 @@ function PayrollVoucherModal({
               <div className="space-y-1 text-xs">
                 {[
                   ["REG Hours", regHours],
-                  ["PTO HRS", ptoHours],
+                  // Every paid-leave hour for the week, not just PTO: Medical
+                  // Unavailability, Special Leave and the advance pools all
+                  // land here, half-days included (a half-day request stamps
+                  // 4h in its own column, so it needs no special handling).
+                  // This is what the Time Off Pay line below is paid on — it
+                  // sums the same four — so showing PTO alone left hours ×
+                  // rate unable to reconcile with the pay beside it.
+                  ["PTO HRS", ptoHours + sickHours + specialHours + advanceHours],
                   // Combined to match the single Holiday Pay line below. Kept
                   // distinct from "HO OT HRS" in the next group — that's
                   // overtime worked on a holiday, not holiday hours.
