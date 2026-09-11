@@ -24,10 +24,22 @@ export type AppUser = {
   pagesAreDefault: boolean;
   /** Disabled accounts cannot sign in. Backed by GoTrue's ban, not metadata. */
   enabled: boolean;
+  /**
+   * The engagement status from Contractor Details, or null for an account with
+   * no contractor record at all (admin-only logins) — which is not the same as
+   * a contractor who is on file and dismissed.
+   */
+  contractorStatus: ContractorStatus | null;
 };
 
-function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
+export type ContractorStatus = "Active" | "Dismissed";
+
+function toAppUser(
+  u: Record<string, unknown>,
+  profile?: { fullName: string; status: string },
+): AppUser {
   const metadata = u.user_metadata as Record<string, unknown> | undefined;
+  const fullName = profile?.fullName ?? "";
   return {
     id:          String(u.id          ?? ""),
     email:       String(u.email       ?? ""),
@@ -43,6 +55,11 @@ function toAppUser(u: Record<string, unknown>, fullName = ""): AppUser {
     // banned_until is absent on a normal account, and a past date counts as
     // expired — so only a future ban means disabled.
     enabled:     !(u.banned_until && new Date(String(u.banned_until)) > new Date()),
+    // Mirrors Contractor Details, which treats anything that isn't the literal
+    // "Dismissed" as Active.
+    contractorStatus: profile == null
+      ? null
+      : profile.status === "Dismissed" ? "Dismissed" : "Active",
   };
 }
 
@@ -74,10 +91,11 @@ export async function fetchUsers(): Promise<AppUser[]> {
     sb.from("contractor_profiles").select("email, status, fullName"),
   ]);
 
-  // Only show Active contractors — accounts with no matching contractor
-  // record (e.g. admin-only accounts) always show, since there's no status
-  // to check for them. Full name is also sourced from here when available,
-  // falling back to whatever's in the auth account's own metadata.
+  // Every account is listed, dismissed contractors included — the Contractor
+  // Status column reports the engagement, so hiding the dismissed ones would
+  // leave that column able to say only "Active". Accounts with no contractor
+  // record (admin-only logins) carry no status at all. Full name is sourced
+  // from here when available, falling back to the auth account's metadata.
   const profileByEmail = new Map(
     (contractorsRes.data ?? []).map((c) => [
       String(c.email ?? "").trim().toLowerCase(),
@@ -85,15 +103,9 @@ export async function fetchUsers(): Promise<AppUser[]> {
     ])
   );
 
-  return authUsers
-    .map((raw) => {
-      const profile = profileByEmail.get(String(raw.email ?? "").trim().toLowerCase());
-      return toAppUser(raw, profile?.fullName);
-    })
-    .filter((u) => {
-      const status = profileByEmail.get(u.email.trim().toLowerCase())?.status;
-      return status == null || status === "Active";
-    });
+  return authUsers.map((raw) =>
+    toAppUser(raw, profileByEmail.get(String(raw.email ?? "").trim().toLowerCase())),
+  );
 }
 
 export async function createUser(email: string, password: string, role: AppRole): Promise<AppUser> {
