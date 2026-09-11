@@ -15,9 +15,9 @@ import {
   updateLeaveRequestStatus,
 } from "../contractors/actions";
 import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
-import { CalendarDateInput, parseDate, toDateStr } from "@/components/CalendarDateInput";
+import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveHoursByDate, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -1221,17 +1221,23 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   // request for this contractor, so the Start/End Date calendars can
                   // red it out. Rejected/Archived requests are excluded — they never
                   // actually consumed these dates, so those dates stay selectable.
-                  const requestedDates = new Set<string>();
-                  for (const r of leaveRequests) {
-                    if (r.email !== selectedRow.email) continue;
-                    if (r.status === "Rejected" || r.status === "Archived") continue;
-                    const start = parseDate(r.startDate);
-                    const end = parseDate(r.endDate);
-                    if (!start || !end) continue;
-                    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                      requestedDates.add(toDateStr(d));
-                    }
-                  }
+                  // Same 8-hour daily rule the Contractor Portal applies: a
+                  // date is only refused once the leave already on it plus
+                  // what this override would add passes 8. That lets a day
+                  // holding a 4h half day still take a second half day, which
+                  // a presence check made impossible. The soft duplicate
+                  // warning still fires, so an admin keeps the final say.
+                  const overrideBookedHours = bookedLeaveHoursByDate(
+                    leaveRequests
+                      .filter((r) => r.email === selectedRow.email)
+                      .map((r) => ({ type: r.type, startDate: r.startDate, endDate: r.endDate, status: r.status })),
+                  );
+                  const overrideHoursPerDate = leaveHoursPerCoveredDate(overrideType);
+                  const requestedDates = new Set(
+                    [...overrideBookedHours.keys()].filter((d) =>
+                      overrideHoursPerDate > 0
+                      && (overrideBookedHours.get(d) ?? 0) + overrideHoursPerDate > MAX_LEAVE_HOURS_PER_DAY),
+                  );
 
                   return (
                     <div className="space-y-4">
