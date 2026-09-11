@@ -126,6 +126,10 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   // Table filters
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<"All" | AppRole>("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | "Enabled" | "Disabled">("All");
+  // "None" covers accounts with no contractor record — the dash in the column.
+  const [contractorFilter, setContractorFilter] =
+    useState<"All" | ContractorStatus | "None">("All");
 
   // Create form
   const [newEmail,    setNewEmail]    = useState("");
@@ -257,6 +261,11 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   const filteredUsers = users
     .filter((u) =>
       (roleFilter === "All" || u.role === roleFilter) &&
+      (statusFilter === "All" || (statusFilter === "Enabled") === u.enabled) &&
+      (contractorFilter === "All"
+        || (contractorFilter === "None"
+              ? u.contractorStatus === null
+              : u.contractorStatus === contractorFilter)) &&
       (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
     )
     .sort((a, b) =>
@@ -369,9 +378,31 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
             <option key={role} value={role}>{ROLE_LABEL[role]}</option>
           ))}
         </select>
-        {(searchTerm !== "" || roleFilter !== "All") && (
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as "All" | "Enabled" | "Disabled")}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Statuses</option>
+          <option value="Enabled">Enabled</option>
+          <option value="Disabled">Disabled</option>
+        </select>
+        <select
+          value={contractorFilter}
+          onChange={(e) => setContractorFilter(e.target.value as "All" | ContractorStatus | "None")}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Contractor Statuses</option>
+          <option value="Active">Active</option>
+          <option value="Dismissed">Dismissed</option>
+          <option value="None">No contractor record</option>
+        </select>
+        {(searchTerm !== "" || roleFilter !== "All" || statusFilter !== "All" || contractorFilter !== "All") && (
           <button
-            onClick={() => { setSearchTerm(""); setRoleFilter("All"); }}
+            onClick={() => {
+              setSearchTerm(""); setRoleFilter("All");
+              setStatusFilter("All"); setContractorFilter("All");
+            }}
             className="text-sm font-semibold text-teal-600 hover:text-teal-700"
           >
             Clear
