@@ -1550,7 +1550,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     setOffsetCredit(credit);
   }
 
-  async function handleSaveClick() {
+  async function handleSaveClick(markProcessed = false) {
     const finalCompletionMinutes = isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes;
     const finalOffsetCredit = isIndia ? offsetCredit : 0;
 
@@ -1619,6 +1619,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             // next week knows what it owes back without relying on React state.
             offsetCreditMinutes: finalOffsetCredit,
             days,
+            // Stamps weeklyStatus "Processed", the same flag Process
+            // Attendance sets in bulk.
+            processed: markProcessed,
           }),
         });
         if (!response.ok) {
@@ -2195,9 +2198,28 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               Approve All
             </button>
           )}
+          {/* Only while this week is actually flagged — the same condition
+              the Need Attention badge above uses. It stays a deliberate,
+              per-contractor decision: the conflict is real (leave filed and
+              more than half a day worked), so an admin is accepting it rather
+              than having it silently pass. */}
+          {record.weeklyStatus === "Reviewed" && weekHasLeaveWorkConflict && (
+            <button
+              type="button"
+              onClick={() => handleSaveClick(true)}
+              disabled={isSaving || isLoadingReviewData || !isWeekEnded}
+              title={!isWeekEnded
+                ? "Processing is only available once the selected week has ended"
+                : "Accept this week despite the conflict and mark it Processed"}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              <LuListChecks size={15} strokeWidth={2} />
+              {isSaving ? "Processing…" : "Push to Processed"}
+            </button>
+          )}
           <button
             type="button"
-            onClick={handleSaveClick}
+            onClick={() => handleSaveClick()}
             disabled={isSaving || isLoadingReviewData}
             title={isLoadingReviewData ? "Waiting for saved review data to finish loading…" : undefined}
             className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
