@@ -4,7 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import type { Contractor, FilterRule } from "./types";
 import { COLUMNS } from "./types";
 import { provisionContractorUser } from "@/lib/provisionContractor";
-import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved, planSpecialLeaveGrantDeduction, roundBalance, type SpecialLeaveGrantDeduction } from "@/lib/timeOffBalances";
+import { calculatePtoBalance, calculateSickLeaveBalance, advanceLeaveResetDueAt, leaveTypeHours, leaveBucketFor, LEAVE_BUCKET_FIELDS, cutoffFromSaved, planSpecialLeaveGrantDeduction, roundBalance, datesCoveredByRange, type SpecialLeaveGrantDeduction } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../settings/actions";
 import { canViewSalary } from "@/lib/salaryAccess";
 import { decryptSalary, encryptSalary } from "@/lib/salaryCrypto";
@@ -883,32 +883,43 @@ export async function createLeaveOverride(params: {
   const sickLeaveUsedHours = bucket === "sickLeave" ? hours : 0;
   const specialLeaveUsedHours = bucket === "specialLeave" ? hours : 0;
 
-  const durationDays = Math.max(
-    1,
-    Math.round((new Date(params.endDate).getTime() - new Date(params.startDate).getTime()) / 86400000) + 1
-  );
+  // One row per day, matching how the Contractor Portal files a range: an
+  // override across the 21st and 22nd becomes two single-day requests. The
+  // hours on a request are a fixed per-request amount, so a single spanning
+  // row charged one day's hours for the whole range — two days off deducted
+  // 8h instead of 16h.
+  //
+  // A half day only ever occupies its start date, so it stays one row.
+  const lastDate = params.type.endsWith("Half Day") ? params.startDate : params.endDate;
+  const dates = datesCoveredByRange(params.startDate, lastDate);
+  if (dates.length === 0) return { ok: false, error: "Select a start date." };
+  const durationDays = 1;
 
-  const id = crypto.randomUUID();
   const now = new Date().toISOString();
+  const ids = dates.map(() => crypto.randomUUID());
+  const id = ids[0];
 
-  const { error: insertErr } = await sb.from(LEAVE_TABLE).insert({
-    id,
-    email: params.email,
-    type: params.type,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    durationDays,
-    reason: params.reason,
-    status: "Approved",
-    ptoUsedHours,
-    sickLeaveUsedHours,
-    specialLeaveUsedHours,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const { error: insertErr } = await sb.from(LEAVE_TABLE).insert(
+    dates.map((date, i) => ({
+      id: ids[i],
+      email: params.email,
+      type: params.type,
+      startDate: date,
+      endDate: date,
+      durationDays,
+      reason: params.reason,
+      status: "Approved",
+      ptoUsedHours,
+      sickLeaveUsedHours,
+      specialLeaveUsedHours,
+      createdAt: now,
+      updatedAt: now,
+    })),
+  );
   if (insertErr) return { ok: false, error: insertErr.message };
 
-  const hoursToAdd = hours;
+  // Every day created draws its own hours.
+  const hoursToAdd = hours * dates.length;
   if (hoursToAdd > 0) {
     if (bucket === "specialLeave") {
       const { data: profile, error: profileErr } = await sb
@@ -925,6 +936,8 @@ export async function createLeaveOverride(params: {
       if (usesGrants) {
         const result = await deductSpecialLeaveGrantHours(sb, params.email, hoursToAdd);
         if (!result.ok) return { ok: false, error: result.error };
+        // Stamped on the first row of the set — reversal reads the breakdown
+        // from there, and the rows were created together as one override.
         const { error: attachErr } = await sb
           .from(LEAVE_TABLE)
           .update({ specialLeaveGrantDeductions: result.deductions })
@@ -955,19 +968,21 @@ export async function createLeaveOverride(params: {
     }
   }
 
-  await logTimeOffRequestHistory(sb, {
-    requestId: id,
-    email: params.email,
-    type: params.type,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    durationDays,
-    reason: params.reason,
-    status: "Approved",
-    ptoUsedHours,
-    sickLeaveUsedHours,
-    specialLeaveUsedHours,
-  });
+  for (let i = 0; i < dates.length; i++) {
+    await logTimeOffRequestHistory(sb, {
+      requestId: ids[i],
+      email: params.email,
+      type: params.type,
+      startDate: dates[i],
+      endDate: dates[i],
+      durationDays,
+      reason: params.reason,
+      status: "Approved",
+      ptoUsedHours,
+      sickLeaveUsedHours,
+      specialLeaveUsedHours,
+    });
+  }
 
   return {
     ok: true,
@@ -975,8 +990,8 @@ export async function createLeaveOverride(params: {
       id,
       email: params.email,
       type: params.type,
-      startDate: params.startDate,
-      endDate: params.endDate,
+      startDate: dates[0],
+      endDate: dates[0],
       durationDays,
       reason: params.reason,
       status: "Approved",

@@ -17,7 +17,7 @@ import {
 import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -1172,7 +1172,17 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       return;
                     }
 
-                    const requiredHours = leaveTypeHours(overrideType);
+                    // An override now files one request per day, each drawing
+                    // its own hours, so the check has to cover every day in
+                    // the range — otherwise a 2-day override would pass on
+                    // one day's balance and overdraw on apply.
+                    const overrideDayCount = Math.max(
+                      1,
+                      overrideType.endsWith("Half Day")
+                        ? 1
+                        : datesCoveredByRange(overrideStartDate, overrideEndDate).length,
+                    );
+                    const requiredHours = leaveTypeHours(overrideType) * overrideDayCount;
                     const overrideBucket = leaveBucketFor(overrideType);
                     const availableHours =
                       overrideBucket === "pto" ? selectedRow.ptoAvailable :
