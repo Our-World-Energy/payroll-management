@@ -214,6 +214,7 @@ export default function PayrollPage() {
   const [countryFilter, setCountryFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
+  const [statusFilter, setStatusFilter] = useState<"All" | PayrollRow["status"]>("All");
   const [voucherTarget, setVoucherTarget] = useState<PayrollRow | null>(null);
   const [reviewTarget,  setReviewTarget]  = useState<PayrollRow | null>(null);
   const [hoursTarget,   setHoursTarget]   = useState<PayrollRow | null>(null);
@@ -536,7 +537,11 @@ export default function PayrollPage() {
     return () => { isMounted = false; };
   }, [rangeFrom, rangeTo, reloadKey, salaryLoading, salaryVisible]);
 
-  const filteredRows = rows.filter((r) => {
+  // Every filter EXCEPT status. The scorecards count from this, so picking a
+  // status narrows the table without flattening the status breakdown above it
+  // to a single non-zero card — which is the one moment that breakdown is
+  // actually being read.
+  const rowsBeforeStatusFilter = rows.filter((r) => {
     const query = nameSearch.trim().toLowerCase();
     const matchesName = !query || r.name.toLowerCase().includes(query) || r.email.includes(query);
     const matchesPayCategory = payCategoryFilter === "All" || r.payCategory === payCategoryFilter;
@@ -545,6 +550,10 @@ export default function PayrollPage() {
     const matchesDepartment = departmentFilter === "All" || r.department === departmentFilter;
     return matchesName && matchesPayCategory && matchesCountry && matchesShiftType && matchesDepartment;
   }).sort((a, b) => a.name.localeCompare(b.name));
+
+  const filteredRows = statusFilter === "All"
+    ? rowsBeforeStatusFilter
+    : rowsBeforeStatusFilter.filter((r) => r.status === statusFilter);
 
   const payCategoryOptions = Array.from(new Set(rows.map((r) => r.payCategory).filter((c) => c !== "-"))).sort();
   const countryOptions = Array.from(new Set(rows.map((r) => r.country).filter((c) => c !== "-"))).sort();
@@ -603,10 +612,10 @@ export default function PayrollPage() {
     URL.revokeObjectURL(url);
   }
 
-  const forReviewCount   = filteredRows.filter((r) => r.status === "For Review").length;
-  const reviewedCount    = filteredRows.filter((r) => r.status === "Reviewed").length;
-  const noActivityCount  = filteredRows.filter((r) => r.status === "No Activity").length;
-  const processedCount   = filteredRows.filter((r) => r.status === "Processed").length;
+  const forReviewCount   = rowsBeforeStatusFilter.filter((r) => r.status === "For Review").length;
+  const reviewedCount    = rowsBeforeStatusFilter.filter((r) => r.status === "Reviewed").length;
+  const noActivityCount  = rowsBeforeStatusFilter.filter((r) => r.status === "No Activity").length;
+  const processedCount   = rowsBeforeStatusFilter.filter((r) => r.status === "Processed").length;
 
   const STATS = [
     { label: "For Review",  value: forReviewCount,  color: "text-amber-700",  iconBg: "bg-amber-50",  iconColor: "text-amber-600",  Icon: LuClock       },
@@ -620,7 +629,8 @@ export default function PayrollPage() {
     payCategoryFilter !== "All" ||
     countryFilter !== "All" ||
     shiftTypeFilter !== "All" ||
-    departmentFilter !== "All";
+    departmentFilter !== "All" ||
+    statusFilter !== "All";
 
   function clearFilters() {
     setNameSearch("");
@@ -628,6 +638,7 @@ export default function PayrollPage() {
     setCountryFilter("All");
     setShiftTypeFilter("All");
     setDepartmentFilter("All");
+    setStatusFilter("All");
   }
 
   async function handleSaveAdjustment(values: {
@@ -816,9 +827,23 @@ export default function PayrollPage() {
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+            {/* Wider than its neighbours on purpose: team names run to 23
+                characters ("Supply Chain Operations"), which the 8.5rem the
+                other filters use cut off mid-word. */}
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(7rem,13.3vw,12.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
               <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+            </FilterSelect>
+            {/* Fixed options rather than derived from the rows: a status with
+                no rows this week still has to be selectable, or it silently
+                disappears from the filter exactly when someone wants to
+                confirm nothing is sitting in it. */}
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(6rem,10.6vw,10rem)]" value={statusFilter} onChange={(v) => setStatusFilter(v as "All" | PayrollRow["status"])} label="Filter by status">
+              <option value="All">All Statuses</option>
+              <option value="For Review">For Review</option>
+              <option value="Reviewed">Reviewed</option>
+              <option value="Processed">Processed</option>
+              <option value="No Activity">No Activity</option>
             </FilterSelect>
 
             <div className="flex items-center gap-2 ml-auto">
@@ -1314,7 +1339,8 @@ function PayrollVoucherModal({
   const {
     regHours, regOtHours, rdOtHours, usHolidayHours, hoOtHours, localHolidayHours,
     regPay, regOtPay, rdOtPay, usHolidayPay, hoOtPay, localHolidayPay,
-    ptoHours, ptoPay, sickPay, specialPay, advancePay,
+    ptoHours, sickHours, specialHours, advanceHours,
+    ptoPay, sickPay, specialPay, advancePay,
     bonus, misc, retroPay, reim, indHoursPay, cashAdvance, hmo,
     grossPay, totalDeductions, netPay,
   } = figures;
@@ -1406,6 +1432,13 @@ function PayrollVoucherModal({
             <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{figures.role}</span></p>
             <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.weeklyRate)}</span></p>
+            {/* Empty left cell so the three rates stay stacked in the right
+                column instead of Hourly landing under Role. */}
+            <p />
+            {/* Two decimals, not fmtRate: the hourly rate is Monthly × 12 ÷ 52
+                ÷ 40, which recurs — fmtRate would print 819.2307692307692.
+                Pay is still calculated from the unrounded value. */}
+            <p><span className="text-slate-500">Hourly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.hourlyRate)}</span></p>
           </div>
 
           {/* Gross Pay */}
@@ -1459,7 +1492,14 @@ function PayrollVoucherModal({
               <div className="space-y-1 text-xs">
                 {[
                   ["REG Hours", regHours],
-                  ["PTO HRS", ptoHours],
+                  // Every paid-leave hour for the week, not just PTO: Medical
+                  // Unavailability, Special Leave and the advance pools all
+                  // land here, half-days included (a half-day request stamps
+                  // 4h in its own column, so it needs no special handling).
+                  // This is what the Time Off Pay line below is paid on — it
+                  // sums the same four — so showing PTO alone left hours ×
+                  // rate unable to reconcile with the pay beside it.
+                  ["PTO HRS", ptoHours + sickHours + specialHours + advanceHours],
                   // Combined to match the single Holiday Pay line below. Kept
                   // distinct from "HO OT HRS" in the next group — that's
                   // overtime worked on a holiday, not holiday hours.

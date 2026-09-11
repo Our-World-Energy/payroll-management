@@ -14,7 +14,7 @@ import {
   fetchAllSpecialLeaveGrantsAdmin, addSpecialLeaveGrant, type SpecialLeaveGrant,
   updateLeaveRequestStatus,
 } from "../contractors/actions";
-import { fetchCutOffTime, fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
+import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate, toDateStr } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
@@ -397,6 +397,9 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
 
   const [showUsedImportModal, setShowUsedImportModal] = useState(false);
   const [showProcessTimeOffModal, setShowProcessTimeOffModal] = useState(false);
+  // Settings → Time Away Settings → Enable Process Time Away. Starts true so
+  // the button isn't briefly greyed out on every load; reloadData corrects it.
+  const [processEnabled, setProcessEnabled] = useState(true);
 
   // The Scheduled Trigger Date (Settings → Time Away Settings → Reset Time
   // Off) is a one-time due date/time, not a recurring cron — checked as soon
@@ -423,13 +426,15 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
     try {
-      const [all, requests, grants, savedCutoff] = await Promise.all([
+      const [all, requests, grants, savedCutoff, canProcess] = await Promise.all([
         fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
         fetchAllLeaveRequestsAdmin(),
         fetchAllSpecialLeaveGrantsAdmin(),
         fetchCutOffTime(),
+        fetchProcessTimeAwayEnabled(),
       ]);
       setContractors(all); setLeaveRequests(requests); setSpecialLeaveGrants(grants); setCutoff(cutoffFromSaved(savedCutoff));
+      setProcessEnabled(canProcess);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
     } finally {
@@ -1692,7 +1697,8 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
           {!readOnly && (<>
           <button
             onClick={() => setShowProcessTimeOffModal(true)}
-            disabled={loading}
+            disabled={loading || !processEnabled}
+            title={processEnabled ? undefined : "Turned off in Settings → Time Away Settings → Enable Process Time Away"}
             className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? <LuLoader size={13} strokeWidth={2} className="animate-spin" /> : <LuListChecks size={13} strokeWidth={2} />}
