@@ -1,7 +1,10 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved } from "@/lib/timeOffBalances";
+import {
+  leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved,
+  bookedLeaveHoursByDate, datesCoveredByRange, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY,
+} from "@/lib/timeOffBalances";
 import { fetchCutOffTime, fetchTimeAwayRequestsEnabled } from "../../admin/settings/actions";
 
 function getSupabase() {
@@ -153,6 +156,37 @@ export async function submitLeaveRequest(params: {
   // control is a hint, not a guarantee — this is what actually holds.
   if (!(await fetchTimeAwayRequestsEnabled())) {
     return { ok: false, error: "Time Away requests are currently disabled by your administrator." };
+  }
+
+  // A date may hold up to 8 hours of leave in total, so a PTO Half Day and a
+  // Sick Leave Half Day can share one date. Anything that would take a date
+  // past 8 is refused. This is the real enforcement — the portal greys the
+  // dates out, but a disabled control is a hint, not a guarantee.
+  const perDate = leaveHoursPerCoveredDate(params.type);
+  if (perDate > 0) {
+    const { data: existing } = await sb
+      .from(LEAVE_TABLE)
+      .select("type, startDate, endDate, status")
+      .eq("email", params.email);
+    const booked = bookedLeaveHoursByDate(
+      (existing ?? []).map((r) => ({
+        type: String(r.type), startDate: String(r.startDate),
+        endDate: String(r.endDate), status: String(r.status ?? "Pending"),
+      })),
+    );
+    // A half-day only ever occupies its start date, whatever range was sent.
+    const lastDate = params.type.endsWith("Half Day") ? params.startDate : params.endDate;
+    const overloaded = datesCoveredByRange(params.startDate, lastDate)
+      .filter((d) => (booked.get(d) ?? 0) + perDate > MAX_LEAVE_HOURS_PER_DAY);
+    if (overloaded.length > 0) {
+      const held = booked.get(overloaded[0]) ?? 0;
+      return {
+        ok: false,
+        error: overloaded.length === 1
+          ? `${overloaded[0]} already has ${held}h of leave; adding ${perDate}h would exceed the ${MAX_LEAVE_HOURS_PER_DAY}h daily limit.`
+          : `${overloaded.length} dates in this range would exceed the ${MAX_LEAVE_HOURS_PER_DAY}h daily leave limit.`,
+      };
+    }
   }
 
   const now = new Date().toISOString();

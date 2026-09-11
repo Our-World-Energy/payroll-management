@@ -54,6 +54,64 @@ export function leaveTypeHours(type: string): number {
   return LEAVE_TYPE_HOURS[type] ?? 8;
 }
 
+/**
+ * How much leave a day may carry in total. Two half-days on one date is
+ * allowed — PTO Half Day plus Sick Leave Half Day is a normal 8-hour day —
+ * so the rule is a total, not "one request per date".
+ */
+export const MAX_LEAVE_HOURS_PER_DAY = HOURS_PER_DAY;
+
+/**
+ * What a request contributes to ONE of the dates it covers.
+ *
+ * Deliberately not leaveTypeHours ÷ days: leaveTypeHours is a fixed
+ * per-request deduction (see above), whereas a multi-day full-day request
+ * occupies a whole 8 hours on every date it spans. A half-day only ever
+ * covers its single start date.
+ */
+export function leaveHoursPerCoveredDate(type: string): number {
+  return type.endsWith("Half Day") ? 4 : leaveTypeHours(type);
+}
+
+/** Whether a request is still holding its dates. */
+export function leaveRequestHoldsDates(status: string): boolean {
+  return status !== "Rejected" && status !== "Archived";
+}
+
+/**
+ * Hours of leave already held on each date by `requests`, keyed by date.
+ * Rejected and Archived requests release their dates.
+ */
+export function bookedLeaveHoursByDate(
+  requests: Array<{ type: string; startDate: string; endDate: string; status: string }>,
+): Map<string, number> {
+  const byDate = new Map<string, number>();
+  for (const r of requests) {
+    if (!leaveRequestHoldsDates(r.status)) continue;
+    const perDate = leaveHoursPerCoveredDate(r.type);
+    if (perDate <= 0) continue; // Unpaid Leave holds no hours
+    // A half-day covers only its start date, however the range was saved.
+    const last = r.type.endsWith("Half Day") ? r.startDate : r.endDate;
+    for (const d of datesCoveredByRange(r.startDate, last)) {
+      byDate.set(d, (byDate.get(d) ?? 0) + perDate);
+    }
+  }
+  return byDate;
+}
+
+/** Inclusive list of "YYYY-MM-DD" dates from `from` to `to`. */
+export function datesCoveredByRange(from: string, to: string): string[] {
+  if (!from) return [];
+  const start = parseDate(from);
+  const end = parseDate(to || from);
+  if (!start || !end || end < start) return from ? [from] : [];
+  const out: string[] = [];
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    out.push(formatDateIso(d));
+  }
+  return out;
+}
+
 export function isPtoLeaveType(type: string): boolean {
   return type.startsWith("PTO");
 }

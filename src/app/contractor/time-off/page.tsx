@@ -8,7 +8,10 @@ import {
   submitLeaveRequest, cancelLeaveRequest,
   type ContractorTimeOff, type LeaveRequest,
 } from "./actions";
-import { HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType } from "@/lib/timeOffBalances";
+import {
+  HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType,
+  bookedLeaveHoursByDate, leaveHoursPerCoveredDate, MAX_LEAVE_HOURS_PER_DAY,
+} from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
   LuLoader, LuClock, LuCircleCheck, LuUmbrella, LuStethoscope,
@@ -34,14 +37,25 @@ function datesCoveredBy(startDate: string, endDate: string): string[] {
 // Sits under the Start / End date field when that exact date is already
 // spoken for, colour-matched to the leave that booked it. Native date inputs
 // cannot mark their own days, so the signal lives beside the field instead.
-function BookedDateHint({ date, booked }: { date: string; booked: { kind: BookedKind; status: string; type: string } }) {
-  const tone = booked.kind === "pto" ? "text-teal-700 bg-teal-50 border-teal-200"
+function BookedDateHint({ date, booked, heldHours, blocked }: {
+  date: string;
+  booked: { kind: BookedKind; status: string; type: string };
+  heldHours: number;
+  blocked: boolean;
+}) {
+  // Red only when the day is genuinely full for this request. A day holding
+  // 4h that can still take another half day keeps its own leave-type tint,
+  // since it is telling the contractor something, not stopping them.
+  const tone = blocked ? "text-red-700 bg-red-50 border-red-200"
+    : booked.kind === "pto" ? "text-teal-700 bg-teal-50 border-teal-200"
     : booked.kind === "sick" ? "text-orange-700 bg-orange-50 border-orange-200"
     : "text-purple-700 bg-purple-50 border-purple-200";
+  const remaining = MAX_LEAVE_HOURS_PER_DAY - heldHours;
   return (
     <p className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${tone}`}>
       <LuCircleAlert size={12} strokeWidth={2.5} className="shrink-0" />
-      {fmtDayAndDate(date)} — already requested {leaveTypeDisplayLabel(booked.type)} ({booked.status})
+      {fmtDayAndDate(date)} — {leaveTypeDisplayLabel(booked.type)} ({booked.status}), {heldHours}h used
+      {blocked ? " — day is full" : remaining > 0 ? ` — ${remaining}h still available` : ""}
     </p>
   );
 }
@@ -293,14 +307,32 @@ export default function ContractorTimeOffPage() {
     return map;
   })();
 
-  // Dates in the range being filled in that are already booked.
-  const clashingDates = datesCoveredBy(startDate, effectiveEndDate).filter((d) => bookedDates.has(d));
+  // Hours already held per date, and what this request would add to each date
+  // it covers. A date is only closed once the two together pass 8 — so a PTO
+  // Half Day and a Sick Leave Half Day can share one date, while a second
+  // full day on top of either cannot.
+  const bookedHours = bookedLeaveHoursByDate(
+    (allRequests.length > 0 ? allRequests : requests).map((r) => ({
+      type: r.type, startDate: r.startDate, endDate: r.endDate, status: r.status,
+    })),
+  );
+  const hoursThisRequestAdds = leaveHoursPerCoveredDate(leaveType);
+  const wouldExceedOn = (date: string) =>
+    hoursThisRequestAdds > 0
+    && (bookedHours.get(date) ?? 0) + hoursThisRequestAdds > MAX_LEAVE_HOURS_PER_DAY;
+
+  // Dates in the range being filled in that this request cannot fit on.
+  const clashingDates = datesCoveredBy(startDate, effectiveEndDate).filter(wouldExceedOn);
   // The Start / End hints already speak for those two dates; this covers a
   // clash buried in the middle of a range, which neither field would show.
   const clashesInsideRange = clashingDates.filter((d) => d !== startDate && d !== effectiveEndDate);
-  // Same shape Leave Override passes its calendar: every date already covered
-  // by a live request, which the picker renders red and refuses to select.
-  const blockedDates = new Set(bookedDates.keys());
+  // Same shape Leave Override passes its calendar, but keyed on whether THIS
+  // request still fits rather than on the date being touched at all — a date
+  // holding 4h stays selectable for another half day and closed to a full one.
+  const blockedDates = new Set([...bookedHours.keys()].filter(wouldExceedOn));
+  // The hint beside each field still names whatever already holds the date,
+  // shown whenever there is something there — including the 4h case that is
+  // no longer blocking, so the contractor can see why the day is part-used.
   const startBooked = startDate ? bookedDates.get(startDate) : undefined;
   const endBooked = effectiveEndDate && effectiveEndDate !== startDate ? bookedDates.get(effectiveEndDate) : undefined;
   const startTooSoon = isPto && Boolean(startDate) && startDate < earliestPtoDate;
@@ -673,7 +705,14 @@ export default function ContractorTimeOffPage() {
                   />
                 </div>
                 {startTooSoon && <ShortNoticeHint days={daysOfNotice(startDate)} />}
-                {startBooked && <BookedDateHint date={startDate} booked={startBooked} />}
+                {startBooked && (
+                  <BookedDateHint
+                    date={startDate}
+                    booked={startBooked}
+                    heldHours={bookedHours.get(startDate) ?? 0}
+                    blocked={wouldExceedOn(startDate)}
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-800 mb-2">3. End Date</label>
@@ -692,7 +731,14 @@ export default function ContractorTimeOffPage() {
                   />
                 </div>
                 {endTooSoon && <ShortNoticeHint days={daysOfNotice(effectiveEndDate)} />}
-                {endBooked && <BookedDateHint date={effectiveEndDate} booked={endBooked} />}
+                {endBooked && (
+                  <BookedDateHint
+                    date={effectiveEndDate}
+                    booked={endBooked}
+                    heldHours={bookedHours.get(effectiveEndDate) ?? 0}
+                    blocked={wouldExceedOn(effectiveEndDate)}
+                  />
+                )}
               </div>
             </div>
 
@@ -701,7 +747,8 @@ export default function ContractorTimeOffPage() {
                 <LuCircleAlert size={16} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-amber-800">
-                    You already requested time away on {clashesInsideRange.length === 1 ? "a day" : `${clashesInsideRange.length} days`} inside this range.
+                    {clashesInsideRange.length === 1 ? "A day" : `${clashesInsideRange.length} days`} inside this range
+                    {" "}would go over the {MAX_LEAVE_HOURS_PER_DAY}-hour daily leave limit.
                   </p>
                   <p className="text-xs text-amber-700 mt-0.5">
                     {clashesInsideRange.slice(0, 5).map((d) => fmtDayAndDate(d)).join(", ")}
