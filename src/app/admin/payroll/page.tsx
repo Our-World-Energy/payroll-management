@@ -1432,6 +1432,13 @@ function PayrollVoucherModal({
             <p><span className="text-slate-500">Monthly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.monthlyRate)}</span></p>
             <p><span className="text-slate-500">Role</span> <span className="font-semibold ml-2">{figures.role}</span></p>
             <p><span className="text-slate-500">Weekly Contract Rate</span> <span className="font-semibold ml-2">{fmtRate(figures.weeklyRate)}</span></p>
+            {/* Empty left cell so the three rates stay stacked in the right
+                column instead of Hourly landing under Role. */}
+            <p />
+            {/* Two decimals, not fmtRate: the hourly rate is Monthly × 12 ÷ 52
+                ÷ 40, which recurs — fmtRate would print 819.2307692307692.
+                Pay is still calculated from the unrounded value. */}
+            <p><span className="text-slate-500">Hourly Contract Rate</span> <span className="font-semibold ml-2">{money(figures.hourlyRate)}</span></p>
           </div>
 
           {/* Gross Pay */}
