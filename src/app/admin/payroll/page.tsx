@@ -816,7 +816,10 @@ export default function PayrollPage() {
               <option value="All">All Shift Types</option>
               {shiftTypeOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </FilterSelect>
-            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(5.5rem,9vw,8.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
+            {/* Wider than its neighbours on purpose: team names run to 23
+                characters ("Supply Chain Operations"), which the 8.5rem the
+                other filters use cut off mid-word. */}
+            <FilterSelect className="w-[calc(50%-0.25rem)] sm:w-[clamp(7rem,13.3vw,12.5rem)]" value={departmentFilter} onChange={setDepartmentFilter} label="Filter by assigned team">
               <option value="All">All Assigned Teams</option>
               {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
             </FilterSelect>
