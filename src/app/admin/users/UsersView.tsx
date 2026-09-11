@@ -4,9 +4,9 @@ import { useEffect, useState, useTransition } from "react";
 import {
   LuUsers, LuPlus, LuTrash2, LuX, LuLoader, LuShieldCheck, LuUser,
   LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
-  LuHeartHandshake, LuBriefcaseBusiness, LuPencil, LuBan,
+  LuHeartHandshake, LuBriefcaseBusiness, LuPencil, LuBan, LuUserX,
 } from "react-icons/lu";
-import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, updateUserPages, setUserEnabled } from "./actions";
+import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, type ContractorStatus, updateUserPages, setUserEnabled } from "./actions";
 import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL } from "@/lib/roles";
 import { ACCOUNT_PAGES, ACCOUNT_PAGE_GROUPS } from "@/lib/accountPages";
 
@@ -71,6 +71,23 @@ function StatusChip({ enabled }: { enabled: boolean }) {
     }`}>
       {enabled ? <LuCircleCheck size={11} /> : <LuBan size={11} />}
       {enabled ? "Enabled" : "Disabled"}
+    </span>
+  );
+}
+
+// The engagement status from Contractor Details. An account with no
+// contractor record — an admin-only login — gets a dash rather than a chip,
+// since "not on file" is not the same as being dismissed.
+function ContractorStatusChip({ status }: { status: ContractorStatus | null }) {
+  if (status === null) return <span className="text-sm text-slate-300">—</span>;
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border whitespace-nowrap ${
+      status === "Active"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+        : "bg-slate-100 text-slate-500 border-slate-200"
+    }`}>
+      {status === "Active" ? <LuCircleCheck size={11} /> : <LuUserX size={11} />}
+      {status}
     </span>
   );
 }
@@ -368,7 +385,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
           <table className="w-full text-left" style={{ borderCollapse: "separate", borderSpacing: 0 }}>
             <thead>
               <tr style={{ background: "#003527" }}>
-                {["Full Name", "Email", "Role", "Status", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
+                {["Full Name", "Email", "Role", "Status", "Contractor Status", "Email Confirmed", "Created", "Last Sign In", "Actions"].map((h) => (
                   <th key={h} className="px-5 py-3.5 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -380,12 +397,12 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="px-5 py-4"><div className="flex items-center gap-3"><div className="size-8 rounded-full bg-slate-100" /><div className="h-3 bg-slate-100 rounded w-36" /></div></td>
-                    {[1,2,3,4,5,6,7].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
+                    {[1,2,3,4,5,6,7,8].map((j) => <td key={j} className="px-5 py-4"><div className="h-3 bg-slate-100 rounded w-20" /></td>)}
                   </tr>
                 ))
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-5 py-16 text-center text-sm text-slate-400">
+                  <td colSpan={9} className="px-5 py-16 text-center text-sm text-slate-400">
                     <LuUsers size={28} className="mx-auto mb-2 text-slate-200" strokeWidth={1.5} />
                     {users.length === 0 ? "No users found." : "No users match your search or filter."}
                   </td>
@@ -413,6 +430,9 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                   </td>
                   <td className="px-5 py-4">
                     <StatusChip enabled={user.enabled} />
+                  </td>
+                  <td className="px-5 py-4">
+                    <ContractorStatusChip status={user.contractorStatus} />
                   </td>
                   <td className="px-5 py-4">
                     {user.confirmed ? (
