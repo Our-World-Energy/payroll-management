@@ -316,7 +316,11 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      {/* Wider than the app's small dialogs: this form carries three-column
+          grids and a four-column rate row, which 3xl left cramped. 5xl gives
+          each column room to breathe without the sheet spanning a wide
+          monitor, and max-h keeps it scrolling rather than overflowing. */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-100 bg-linear-to-b from-slate-50 to-white rounded-t-2xl">
           <div className="flex items-center gap-3 min-w-0">
