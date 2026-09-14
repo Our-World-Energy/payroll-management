@@ -138,6 +138,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
     useState<"All" | ContractorStatus | "None">("All");
 
   // Create form
+  const [newName,     setNewName]     = useState("");
   const [newEmail,    setNewEmail]    = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole,     setNewRole]     = useState<AppRole>("user");
@@ -175,17 +176,20 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
 
   function closeModal() {
     setModal(null);
-    setNewEmail(""); setNewPassword(""); setNewRole("user"); setFormError("");
+    setNewName(""); setNewEmail(""); setNewPassword(""); setNewRole("user"); setFormError("");
     setResetPw(""); setResetError("");
   }
 
   function handleCreate() {
+    // Checked in the order the fields appear, so the message points at the
+    // first thing the reader would look at.
+    if (!newName.trim()) { setFormError("Name is required."); return; }
     if (!newEmail.trim()) { setFormError("Email is required."); return; }
     if (!newPassword || newPassword.length < 6) { setFormError("Password must be at least 6 characters."); return; }
     setFormError("");
     startTransition(async () => {
       try {
-        const created = await createUser(newEmail.trim(), newPassword, newRole);
+        const created = await createUser(newEmail.trim(), newPassword, newRole, newName);
         setUsers((prev) => [created, ...prev]);
         closeModal();
       } catch (e) {
@@ -563,6 +567,10 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
               </button>
             </div>
             <div className="px-6 py-5 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Name</label>
+                <input className={INPUT} type="text" placeholder="Full name" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              </div>
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Email</label>
                 <input className={INPUT} type="email" placeholder="user@company.com" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />

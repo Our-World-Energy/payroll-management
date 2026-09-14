@@ -108,13 +108,22 @@ export async function fetchUsers(): Promise<AppUser[]> {
   );
 }
 
-export async function createUser(email: string, password: string, role: AppRole): Promise<AppUser> {
+export async function createUser(
+  email: string,
+  password: string,
+  role: AppRole,
+  fullName = "",
+): Promise<AppUser> {
   const sb = getSupabase();
+  const name = fullName.trim();
   const { data, error } = await sb.auth.admin.createUser({
     email,
     password,
     email_confirm: true,
-    user_metadata: { role },
+    // fullName is what the Full Name column reads for an account with no
+    // contractor record; omitted entirely when blank rather than stored as ""
+    // so it doesn't shadow a name a later contractor_profiles match supplies.
+    user_metadata: name ? { role, fullName: name } : { role },
   });
   if (error) throw new Error(error.message);
   return toAppUser(data.user as unknown as Record<string, unknown>);

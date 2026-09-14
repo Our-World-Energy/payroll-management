@@ -107,6 +107,13 @@ function formatMinutesAsMins(minutes: number) {
 // minutes — "8h / 480 mins" — because a week is judged in hours (the 2,700-min
 // standard is 45h) while every stored figure is minutes. Only whole hours drop
 // the minute part, so 500 reads "8h 20m / 500 mins" rather than a bare "8h".
+// Decimal hours for the "Hours" column — the same minutes-over-60 the
+// payroll voucher uses, so 440 min reads 7.33 in both places. A dash when
+// there is no time, matching the Worksnap Time cell beside it.
+function formatMinutesAsDecimalHours(minutes: number) {
+  return minutes > 0 ? (minutes / 60).toFixed(2) : "-";
+}
+
 function formatMinutesWithHours(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -253,9 +260,37 @@ function isFullTimeOffStatus(timeOffStatus: string) {
 
 // Portal leave request (if any) covering this date — "PTO" | "PTO Half Day" |
 // "Sick Leave" | "Sick Leave Half Day", from contractor_leave_requests.type.
+// Every request covering `date`. A date can legitimately hold two half-day
+// requests (PTO Half Day + Sick Leave Half Day = a normal 8-hour day), so
+// these columns sum and combine rather than reporting whichever request
+// happened to be found first.
+function requestsCoveringDate(date: string, leaveRequests: AdminLeaveRequest[]) {
+  return leaveRequests.filter((r) => date >= r.startDate && date <= r.endDate);
+}
+
+function totalRequestMinutes(requests: AdminLeaveRequest[]) {
+  return requests.reduce((sum, r) => sum + Math.round(hoursForLeaveRequest(r) * 60), 0);
+}
+
+/**
+ * What was requested for this date. Two half-days read as one combined label —
+ * "PTO/Sick Leave Half Day" — with the parts sorted so the text doesn't depend
+ * on the order the rows came back in.
+ */
 function timeOffRequestTypeFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
-  return match?.type ?? "-";
+  const matches = requestsCoveringDate(date, leaveRequests);
+  if (matches.length === 0) return "-";
+  if (matches.length === 1) return matches[0].type;
+
+  const kinds = Array.from(new Set(matches.map((r) => r.type)));
+  const allHalfDay = matches.every((r) => r.type.endsWith("Half Day"));
+  if (allHalfDay) {
+    const parts = Array.from(new Set(kinds.map((t) => t.replace(/ Half Day$/, "")))).sort();
+    return `${parts.join("/")} Half Day`;
+  }
+  // Not the half-day pattern — list them plainly rather than inventing a
+  // label that would imply they add up to one day.
+  return kinds.sort().join(" + ");
 }
 
 // Hours stamped on a leave request for its own type's bucket — PTO types read
@@ -272,9 +307,11 @@ function hoursForLeaveRequest(r: AdminLeaveRequest): number {
 // e.g. a full-day Special Leave request reads its stamped 8h as 480 mins,
 // same as a full-day PTO/Sick Leave request.
 function timeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => date >= r.startDate && date <= r.endDate);
-  if (!match) return "-";
-  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
+  const matches = requestsCoveringDate(date, leaveRequests);
+  if (matches.length === 0) return "-";
+  // Two half-days sum to the full 480, which is what makes the combined label
+  // above and this figure agree.
+  return `${totalRequestMinutes(matches)} mins`;
 }
 
 // Minutes for the APPROVED request covering this date only — unlike
@@ -292,15 +329,20 @@ function isSickLeaveType(type: string) {
  * 2,400-min target and sick leave is the absence that still pays.
  */
 function sickLeaveMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) =>
-    r.status === "Approved" && isSickLeaveType(r.type) && date >= r.startDate && date <= r.endDate);
-  return match ? Math.round(hoursForLeaveRequest(match) * 60) : 0;
+  return totalRequestMinutes(
+    requestsCoveringDate(date, leaveRequests)
+      .filter((r) => r.status === "Approved" && isSickLeaveType(r.type)),
+  );
 }
 
 function approvedTimeOffRequestMinutesFor(date: string, leaveRequests: AdminLeaveRequest[]) {
-  const match = leaveRequests.find((r) => r.status === "Approved" && date >= r.startDate && date <= r.endDate);
-  if (!match) return "-";
-  return `${Math.round(hoursForLeaveRequest(match) * 60)} mins`;
+  const matches = requestsCoveringDate(date, leaveRequests).filter((r) => r.status === "Approved");
+  if (matches.length === 0) return "-";
+  // Summed, so two approved half-days reach 480 and
+  // isApprovedFullTimeOffRequestDay below recognises the day as fully
+  // credited. Reporting only the first would leave it at 240 and treat a
+  // contractor who was away all day as half-present.
+  return `${totalRequestMinutes(matches)} mins`;
 }
 
 // Whether an APPROVED portal request covering `date` is worth a full day
@@ -1351,7 +1393,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? regularOtMinutes : 0);
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
       }, 0);
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Hours", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
     // Only Decision is hidden for Fixed-Ind: they have no per-day decision, and
     // the evaluation rules depend on that. Time Away Request is shown — an
     // approved leave day is as relevant to their week as anyone else's.
@@ -1550,7 +1592,15 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     setOffsetCredit(credit);
   }
 
-  async function handleSaveClick() {
+  // Takes the credit back off this week. Saving then stores 0, so the
+  // following week stops owing a repayment too — next week's figure is read
+  // from this week's stored offsetCreditMinutes, not from anything cached.
+  // Like Apply, this only takes effect once Save is pressed.
+  function reverseTimeCredit() {
+    setOffsetCredit(0);
+  }
+
+  async function handleSaveClick(markProcessed = false) {
     const finalCompletionMinutes = isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes;
     const finalOffsetCredit = isIndia ? offsetCredit : 0;
 
@@ -1619,6 +1669,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             // next week knows what it owes back without relying on React state.
             offsetCreditMinutes: finalOffsetCredit,
             days,
+            // Stamps weeklyStatus "Processed", the same flag Process
+            // Attendance sets in bulk.
+            processed: markProcessed,
           }),
         });
         if (!response.ok) {
@@ -1763,7 +1816,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           </div>
           <div>
             <div className="overflow-x-scroll rounded-xl border border-slate-200">
-              <table className="w-full text-left text-sm" style={{ minWidth: "1580px", borderCollapse: "separate", borderSpacing: 0 }}>
+              <table className="w-full text-left text-sm" style={{ minWidth: "1680px", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead className="bg-slate-50 sticky top-0 z-30">
                   <tr>
                     {weeklyDayHeadings.map((heading) => (
@@ -1776,7 +1829,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         } ${
                           heading === "Worksnap Time" ? `sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
                         } ${
-                          heading === "Adjusted Time" ? `sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
+                          heading === "Hours" ? `sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[100px] min-w-[100px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
+                        } ${
+                          heading === "Adjusted Time" ? `sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
                         } ${
                           heading === "Approval Status" ? "sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 shadow-[-1px_0_0_0_#e2e8f0]" : ""
                         } ${
@@ -1894,7 +1949,15 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         }`}>
                           {rawWorksnapTime}
                         </td>
-                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                        {/* Worksnap Time in decimal hours. Read from the same
+                            rawWorksnapTime the cell to the left shows, so the
+                            two can never disagree. */}
+                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[100px] min-w-[100px] px-4 py-2 tabular-nums border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
+                        }`}>
+                          {formatMinutesAsDecimalHours(timeValueToMinutes(rawWorksnapTime))}
+                        </td>
+                        <td className={`sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                           hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
                         }`}>
                           {isIndia ? "-" : isEditingAdjustedTime ? (
@@ -2005,7 +2068,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       {formatMinutesWithHours(worksnapTotalMinutes)}
                     </td>
-                    <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                    <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 font-bold tabular-nums text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                      {formatMinutesAsDecimalHours(worksnapTotalMinutes)}
+                    </td>
+                    <td className={`sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       -
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
@@ -2064,7 +2130,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           Offset Credit
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[296px] z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[396px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
                         {/* Regular Time, Evaluated Regular Time, Regular OT Time, RD OT Time,
                             Evaluated Time, US HO Time, HO OT Time, Local HO, Local HO Time,
                             Time Away Request, Time Away Request Time — 11 placeholder
@@ -2091,7 +2158,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           Net Time
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[296px] z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[396px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
                         {/* Same 11 placeholder cells as the Offset Credit row above. */}
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
@@ -2171,17 +2239,35 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           >
             Close
           </button>
-          {isIndia && appliedOffsetCredit === 0 && offsetCredit === 0 && completionTotalMinutes < 2400 && (
-            <button
-              type="button"
-              onClick={applyTimeCredit}
-              disabled={!isWeekEnded}
-              title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
-            >
-              <LuCircleCheck size={15} strokeWidth={2} />
-              Apply Time Credit
-            </button>
+          {/* appliedOffsetCredit is a repayment owed from the PREVIOUS week, so
+              neither button applies to it — that credit is undone by reversing
+              it on the week it was granted on, not here. */}
+          {isIndia && appliedOffsetCredit === 0 && (
+            offsetCredit > 0 ? (
+              <button
+                type="button"
+                onClick={reverseTimeCredit}
+                disabled={!isWeekEnded}
+                title={!isWeekEnded
+                  ? "Reverse Offset is only available once the selected week has ended"
+                  : `Take the ${formatMinutesAsMins(offsetCredit)} of Time Credit back off this week`}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-50"
+              >
+                <LuRefreshCw size={15} strokeWidth={2} />
+                Reverse Offset
+              </button>
+            ) : completionTotalMinutes < 2400 ? (
+              <button
+                type="button"
+                onClick={applyTimeCredit}
+                disabled={!isWeekEnded}
+                title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
+              >
+                <LuCircleCheck size={15} strokeWidth={2} />
+                Apply Time Credit
+              </button>
+            ) : null
           )}
           {!isIndia && (
             <button
@@ -2195,9 +2281,28 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               Approve All
             </button>
           )}
+          {/* Only while this week is actually flagged — the same condition
+              the Need Attention badge above uses. It stays a deliberate,
+              per-contractor decision: the conflict is real (leave filed and
+              more than half a day worked), so an admin is accepting it rather
+              than having it silently pass. */}
+          {record.weeklyStatus === "Reviewed" && weekHasLeaveWorkConflict && (
+            <button
+              type="button"
+              onClick={() => handleSaveClick(true)}
+              disabled={isSaving || isLoadingReviewData || !isWeekEnded}
+              title={!isWeekEnded
+                ? "Processing is only available once the selected week has ended"
+                : "Accept this week despite the conflict and mark it Processed"}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              <LuListChecks size={15} strokeWidth={2} />
+              {isSaving ? "Processing…" : "Push to Processed"}
+            </button>
+          )}
           <button
             type="button"
-            onClick={handleSaveClick}
+            onClick={() => handleSaveClick()}
             disabled={isSaving || isLoadingReviewData}
             title={isLoadingReviewData ? "Waiting for saved review data to finish loading…" : undefined}
             className="px-4 py-2 text-sm font-semibold text-white bg-[#003527] rounded-lg hover:bg-[#064E3B] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3399,7 +3504,11 @@ export default function AttendancePage() {
           // happened to be left in React state. Keyed by contractorId to match
           // appliedOffsetCreditFor.
           const priorCredits = (weekStatusResult.priorOffsetCredits ?? []) as { worksnapUserId: number; offsetCreditMinutes: number }[];
-          if (priorCredits.length) {
+          // Written unconditionally, even when the list is empty. Skipping the
+          // empty case left a stale repayment in state after a credit was
+          // reversed on the preceding week — the database said nothing was
+          // owed, but the optimistic entry from the earlier save survived.
+          {
             const creditByUserId = new Map(priorCredits.map((c) => [c.worksnapUserId, c.offsetCreditMinutes]));
             const forThisWeek: Record<string, number> = {};
             for (const row of rows) {
@@ -4017,7 +4126,7 @@ export default function AttendancePage() {
             <thead className="sticky top-0 z-30" style={{ background: "#003527" }}>
               <tr>
                 {[
-                  "Contractor", "Assigned Team", "Actual Time",
+                  "Contractor", "Assigned Team", "Actual Time", "Hours",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
                   "Total Local HO Time", "Total Time Away Request Time", "Ind Time",
                   "Variance", "Status", "Actions",
@@ -4046,7 +4155,7 @@ export default function AttendancePage() {
             <tbody>
               {isLoadingWorksnap && attendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
+                  <td colSpan={16} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     <span className="inline-flex items-center gap-1.5">
                       <LuRefreshCw size={14} className="animate-spin" /> Loading attendance data…
                     </span>
@@ -4055,7 +4164,7 @@ export default function AttendancePage() {
               )}
               {!isLoadingWorksnap && filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
+                  <td colSpan={16} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     {worksnapError ? (
                       <span className="inline-flex items-center gap-2 text-red-600">
                         Unable to load attendance data. {worksnapError}
@@ -4124,6 +4233,18 @@ export default function AttendancePage() {
                       ) : (
                         <span className={`text-sm font-bold ${isForReview ? "text-red-500" : dark ? "text-white/85" : "text-slate-900"}`}>
                           {row.actualMinutes.toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Hours — Actual Time in decimal hours, from the same
+                        actualMinutes the cell above renders. */}
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
+                      {isOnLeave ? (
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
+                      ) : (
+                        <span className={`text-sm font-semibold tabular-nums ${isForReview ? "text-red-500" : dark ? "text-white/85" : "text-slate-900"}`}>
+                          {formatMinutesAsDecimalHours(row.actualMinutes)}
                         </span>
                       )}
                     </td>

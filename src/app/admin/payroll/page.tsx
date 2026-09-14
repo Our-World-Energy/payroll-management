@@ -564,38 +564,49 @@ export default function PayrollPage() {
     const headers = [
       "Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-      "Completion Time", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
+    // Plain 2dp, no currency prefix and no thousands separators: currency is
+    // its own column now, and "PHP 1,234.56" imports as text, so a
+    // spreadsheet can neither sum nor sort the column.
+    const decimal = (n: number) => n.toFixed(2);
+    // Decimal hours rather than "36h 00m", for the same reason: a spreadsheet
+    // cannot total a duration written as text. Same minutes-over-60 the
+    // voucher's own hour figures use, so 440 min reads 7.33 in both places.
+    const hours = (minutes: number) => (minutes / 60).toFixed(2);
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
         r.name, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
-        r.localHolidayMinutes ? formatMinutesAsHours(r.localHolidayMinutes) : "",
-        r.totalEvaluatedRegularMinutes ? formatMinutesAsHours(r.totalEvaluatedRegularMinutes) : "",
-        r.totalUsHoMinutes ? formatMinutesAsHours(r.totalUsHoMinutes) : "",
-        r.totalRegularOtMinutes ? formatMinutesAsHours(r.totalRegularOtMinutes) : "",
-        r.totalRdOtMinutes ? formatMinutesAsHours(r.totalRdOtMinutes) : "",
-        r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "",
-        r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "",
-        r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "",
+        r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
+        r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
+        r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
+        r.totalRegularOtMinutes ? hours(r.totalRegularOtMinutes) : "",
+        r.totalRdOtMinutes ? hours(r.totalRdOtMinutes) : "",
+        r.totalHoOtMinutes ? hours(r.totalHoOtMinutes) : "",
+        r.totalTimeOffRequestMinutes > 0 ? hours(r.totalTimeOffRequestMinutes) : "",
+        r.completionMinutes != null ? hours(r.completionMinutes) : "",
+        r.currency,
         `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
-        r.earnings != null ? fmtMoney(r.earnings, r.currency) : "",
-        r.ptoPay ? fmtMoney(r.ptoPay, r.currency) : "",
-        r.sickPay ? fmtMoney(r.sickPay, r.currency) : "",
-        r.specialPay ? fmtMoney(r.specialPay, r.currency) : "",
-        r.advancePay ? fmtMoney(r.advancePay, r.currency) : "",
+        r.earnings != null ? decimal(r.earnings) : "",
+        r.ptoPay ? decimal(r.ptoPay) : "",
+        r.sickPay ? decimal(r.sickPay) : "",
+        r.specialPay ? decimal(r.specialPay) : "",
+        r.advancePay ? decimal(r.advancePay) : "",
         // Blank rather than 0.00 when an adjustment wasn't entered, so a real
         // zero stays distinguishable from "nothing recorded" in a spreadsheet.
-        r.bonus ? fmtMoney(r.bonus, r.currency) : "",
-        r.misc ? fmtMoney(r.misc, r.currency) : "",
-        r.retroPay ? fmtMoney(r.retroPay, r.currency) : "",
-        r.reim ? fmtMoney(r.reim, r.currency) : "",
-        r.gross != null ? fmtMoney(r.gross, r.currency) : "",
-        r.cashAdvance ? fmtMoney(r.cashAdvance, r.currency) : "",
-        r.hmo ? fmtMoney(r.hmo, r.currency) : "",
-        r.deductions != null ? `-${fmtMoney(r.deductions, r.currency)}` : "",
-        r.net != null ? fmtMoney(r.net, r.currency) : "",
+        r.bonus ? decimal(r.bonus) : "",
+        r.misc ? decimal(r.misc) : "",
+        r.retroPay ? decimal(r.retroPay) : "",
+        r.reim ? decimal(r.reim) : "",
+        r.gross != null ? decimal(r.gross) : "",
+        r.cashAdvance ? decimal(r.cashAdvance) : "",
+        r.hmo ? decimal(r.hmo) : "",
+        // Kept negative — it is a deduction, and the sign is what makes the
+        // column reconcile against Gross and Net.
+        r.deductions != null ? decimal(-r.deductions) : "",
+        r.net != null ? decimal(r.net) : "",
         r.status,
       ].map(escape).join(",")),
     ];
@@ -864,12 +875,12 @@ export default function PayrollPage() {
 
         {/* Table */}
         <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]">
-          <table className="w-full text-left text-sm" style={{ minWidth: "2340px", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left text-sm" style={{ minWidth: "2700px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-                  "Completion Time", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
+                  "Completion Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
@@ -894,7 +905,7 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={32} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
+                  <td colSpan={34} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
@@ -926,6 +937,12 @@ export default function PayrollPage() {
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
+                  {/* Contract rates, shown to 2dp. The stored values are
+                      deliberately unrounded (Monthly x 12 / 52 recurs), so
+                      fmtRate would print a 16-digit weekly rate here. Pay is
+                      still derived from the unrounded figure. */}
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(r.monthlyRate ? fmtMoney(r.monthlyRate, r.currency) : "—")}</td>
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(r.weeklyRate ? fmtMoney(r.weeklyRate, r.currency) : "—")}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(`${r.currency} ${fmtRate(r.hourlyRate)}`)}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{m(fmtRate(r.hourlyRate))}</td>
                   {/* Earnings is the time-derived pay; the four that follow are

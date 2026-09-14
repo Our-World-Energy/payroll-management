@@ -33,12 +33,30 @@ GROUP BY "worksnapUserId",
          "projectId", "taskId";
 `;
 
+// A numeric character reference, or the match itself when the code point is
+// unusable — a lone surrogate or out of range would make String.fromCodePoint
+// throw, and mangling a name is better than failing a whole sync.
+function numericRef(match: string, code: number): string {
+  if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return match;
+  if (code >= 0xd800 && code <= 0xdfff) return match;
+  return String.fromCodePoint(code);
+}
+
 function decode(s: string): string {
   return s
+    // Numeric character references first. Worksnaps sends accented letters
+    // this way — "Ma&#xF1;ibo" for Mañibo — and without this they were stored
+    // verbatim, so Attendance showed the escape while Contractor Details (which
+    // never goes through here) showed the real name.
+    //
+    // Before &amp; deliberately: a literal "&amp;#xF1;" has no "&#" sequence to
+    // match, so it survives this pass and then unescapes to the text "&#xF1;"
+    // rather than being turned into ñ.
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, hex) => numericRef(m, parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (m, dec) => numericRef(m, parseInt(dec, 10)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&");
 }

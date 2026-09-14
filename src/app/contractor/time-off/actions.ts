@@ -1,7 +1,11 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved } from "@/lib/timeOffBalances";
+import {
+  leaveTypeHours, isPtoLeaveType, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved,
+  bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange, leaveHoursPerCoveredDate,
+  isHalfDayLeaveType, MAX_LEAVE_HOURS_PER_DAY,
+} from "@/lib/timeOffBalances";
 import { fetchCutOffTime, fetchTimeAwayRequestsEnabled } from "../../admin/settings/actions";
 
 function getSupabase() {
@@ -155,23 +159,74 @@ export async function submitLeaveRequest(params: {
     return { ok: false, error: "Time Away requests are currently disabled by your administrator." };
   }
 
+  // Only half days may share a date, and only while the day total stays within
+  // 8 hours — see canAddLeaveOnDate. This is the real enforcement; the portal
+  // greys the dates out, but a disabled control is a hint, not a guarantee.
+  {
+    const { data: existing } = await sb
+      .from(LEAVE_TABLE)
+      .select("type, startDate, endDate, status")
+      .eq("email", params.email);
+    const booked = bookedLeaveByDate(
+      (existing ?? []).map((r) => ({
+        type: String(r.type), startDate: String(r.startDate),
+        endDate: String(r.endDate), status: String(r.status ?? "Pending"),
+      })),
+    );
+    // A half-day only ever occupies its start date, whatever range was sent.
+    const lastDate = isHalfDayLeaveType(params.type) ? params.startDate : params.endDate;
+    const refused = datesCoveredByRange(params.startDate, lastDate)
+      .filter((d) => !canAddLeaveOnDate(booked.get(d), params.type));
+    if (refused.length > 0) {
+      const held = booked.get(refused[0]);
+      const reason = !isHalfDayLeaveType(params.type)
+        ? "only half-day leave can share a date that already has leave on it"
+        : held && !held.allHalfDay
+        ? "a full-day leave already covers it"
+        : `it already holds ${held?.hours ?? 0}h, and adding ${leaveHoursPerCoveredDate(params.type)}h would pass the ${MAX_LEAVE_HOURS_PER_DAY}h daily limit`;
+      return {
+        ok: false,
+        error: refused.length === 1
+          ? `Cannot add leave on ${refused[0]} - ${reason}.`
+          : `${refused.length} dates in this range already have leave that cannot be shared.`,
+      };
+    }
+  }
+
   const now = new Date().toISOString();
   const hours = leaveTypeHours(params.type);
   const isPto = isPtoLeaveType(params.type);
-  const { error } = await sb.from(LEAVE_TABLE).insert({
+
+  // One row per day, not one row spanning the range: picking 22nd–23rd files
+  // two single-day requests. Each is then approved, declined, cancelled and
+  // deducted on its own, and the per-date views no longer have to unpack a
+  // range to know what a given day holds.
+  //
+  // A half-day only ever occupies its start date, so it stays a single row
+  // however the range was submitted.
+  const lastDate = isHalfDayLeaveType(params.type) ? params.startDate : params.endDate;
+  const dates = datesCoveredByRange(params.startDate, lastDate);
+  if (dates.length === 0) return { ok: false, error: "Select a start date." };
+
+  const rows = dates.map((date) => ({
     id:                 crypto.randomUUID(),
     email:              params.email,
     type:               params.type,
-    startDate:          params.startDate,
-    endDate:            params.endDate,
-    durationDays:       params.durationDays,
+    startDate:          date,
+    endDate:            date,
+    // Each row is one day. The column is an integer and a half day is stored
+    // as 1 by existing convention — the "* Half Day" type is what encodes the
+    // half, and leaveTypeHours already reads 4h from it.
+    durationDays:       1,
     reason:             params.reason,
     status:             "Pending",
     ptoUsedHours:       isPto ? hours : 0,
     sickLeaveUsedHours: isPto ? 0 : hours,
     createdAt:          now,
     updatedAt:          now,
-  });
+  }));
+
+  const { error } = await sb.from(LEAVE_TABLE).insert(rows);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };

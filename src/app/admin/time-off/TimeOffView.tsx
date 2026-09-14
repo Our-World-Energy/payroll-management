@@ -15,9 +15,9 @@ import {
   updateLeaveRequestStatus,
 } from "../contractors/actions";
 import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
-import { CalendarDateInput, parseDate, toDateStr } from "@/components/CalendarDateInput";
+import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -1084,18 +1084,30 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       setOverrideError(result.error ?? "Failed to create override.");
                       return;
                     }
-                    const req = result.request;
+                    // One request per day, so the local balance has to add up
+                    // every day's hours — adding just the first showed 8h
+                    // deducted for a two-day override until a refresh
+                    // replaced it with the 16h actually taken.
+                    const newRequests = result.requests ?? [result.request];
+                    const added = newRequests.reduce(
+                      (sum, r) => ({
+                        pto: sum.pto + r.ptoUsedHours,
+                        sick: sum.sick + r.sickLeaveUsedHours,
+                        special: sum.special + r.specialLeaveUsedHours,
+                      }),
+                      { pto: 0, sick: 0, special: 0 },
+                    );
                     setContractors((prev) => prev.map((c) =>
                       c.uid === selectedRow.id
                         ? {
                             ...c,
-                            ptoUsed: c.ptoUsed + req.ptoUsedHours,
-                            sickLeaveUsed: c.sickLeaveUsed + req.sickLeaveUsedHours,
-                            specialLeaveUsed: c.specialLeaveUsed + req.specialLeaveUsedHours,
+                            ptoUsed: c.ptoUsed + added.pto,
+                            sickLeaveUsed: c.sickLeaveUsed + added.sick,
+                            specialLeaveUsed: c.specialLeaveUsed + added.special,
                           }
                         : c
                     ));
-                    setLeaveRequests((prev) => [req, ...prev]);
+                    setLeaveRequests((prev) => [...newRequests, ...prev]);
                     // Hourly/Fixed-Ind Special Leave can span multiple grants —
                     // cheaper and more reliable to refetch than to reconstruct
                     // the server's FIFO deduction client-side.
@@ -1172,7 +1184,17 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       return;
                     }
 
-                    const requiredHours = leaveTypeHours(overrideType);
+                    // An override now files one request per day, each drawing
+                    // its own hours, so the check has to cover every day in
+                    // the range — otherwise a 2-day override would pass on
+                    // one day's balance and overdraw on apply.
+                    const overrideDayCount = Math.max(
+                      1,
+                      overrideType.endsWith("Half Day")
+                        ? 1
+                        : datesCoveredByRange(overrideStartDate, overrideEndDate).length,
+                    );
+                    const requiredHours = leaveTypeHours(overrideType) * overrideDayCount;
                     const overrideBucket = leaveBucketFor(overrideType);
                     const availableHours =
                       overrideBucket === "pto" ? selectedRow.ptoAvailable :
@@ -1221,17 +1243,20 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   // request for this contractor, so the Start/End Date calendars can
                   // red it out. Rejected/Archived requests are excluded — they never
                   // actually consumed these dates, so those dates stay selectable.
-                  const requestedDates = new Set<string>();
-                  for (const r of leaveRequests) {
-                    if (r.email !== selectedRow.email) continue;
-                    if (r.status === "Rejected" || r.status === "Archived") continue;
-                    const start = parseDate(r.startDate);
-                    const end = parseDate(r.endDate);
-                    if (!start || !end) continue;
-                    for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-                      requestedDates.add(toDateStr(d));
-                    }
-                  }
+                  // Same 8-hour daily rule the Contractor Portal applies: a
+                  // date is only refused once the leave already on it plus
+                  // what this override would add passes 8. That lets a day
+                  // holding a 4h half day still take a second half day, which
+                  // a presence check made impossible. The soft duplicate
+                  // warning still fires, so an admin keeps the final say.
+                  const overrideBooked = bookedLeaveByDate(
+                    leaveRequests
+                      .filter((r) => r.email === selectedRow.email)
+                      .map((r) => ({ type: r.type, startDate: r.startDate, endDate: r.endDate, status: r.status })),
+                  );
+                  const requestedDates = new Set(
+                    [...overrideBooked.keys()].filter((d) => !canAddLeaveOnDate(overrideBooked.get(d), overrideType)),
+                  );
 
                   return (
                     <div className="space-y-4">

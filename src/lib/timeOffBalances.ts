@@ -54,6 +54,109 @@ export function leaveTypeHours(type: string): number {
   return LEAVE_TYPE_HOURS[type] ?? 8;
 }
 
+/**
+ * How much leave a day may carry in total. Two half-days on one date is
+ * allowed — PTO Half Day plus Sick Leave Half Day is a normal 8-hour day —
+ * so the rule is a total, not "one request per date".
+ */
+export const MAX_LEAVE_HOURS_PER_DAY = HOURS_PER_DAY;
+
+/** Half-day leave types are the only ones that may share a date. */
+export function isHalfDayLeaveType(type: string): boolean {
+  return type.endsWith("Half Day");
+}
+
+/**
+ * What a request contributes to ONE of the dates it covers.
+ *
+ * Deliberately not leaveTypeHours ÷ days: leaveTypeHours is a fixed
+ * per-request deduction (see above), whereas a multi-day full-day request
+ * occupies a whole 8 hours on every date it spans. A half-day only ever
+ * covers its single start date.
+ */
+export function leaveHoursPerCoveredDate(type: string): number {
+  return isHalfDayLeaveType(type) ? 4 : leaveTypeHours(type);
+}
+
+/** Whether a request is still holding its dates. */
+export function leaveRequestHoldsDates(status: string): boolean {
+  return status !== "Rejected" && status !== "Archived";
+}
+
+/** What a date is already holding. */
+export type DateLeaveHold = {
+  /** Hours held. Unpaid Leave contributes 0 but still holds the date. */
+  hours: number;
+  /** True only if EVERY request holding this date is a half day. */
+  allHalfDay: boolean;
+};
+
+/**
+ * What each date is already holding, keyed by date. Rejected and Archived
+ * requests release their dates.
+ *
+ * Tracks half-day-ness as well as hours because hours alone cannot express
+ * the rule: Unpaid Leave is a full-day type worth 0 hours, so an hours-only
+ * test would let anything stack on top of it.
+ */
+export function bookedLeaveByDate(
+  requests: Array<{ type: string; startDate: string; endDate: string; status: string }>,
+): Map<string, DateLeaveHold> {
+  const byDate = new Map<string, DateLeaveHold>();
+  for (const r of requests) {
+    if (!leaveRequestHoldsDates(r.status)) continue;
+    const perDate = leaveHoursPerCoveredDate(r.type);
+    const half = isHalfDayLeaveType(r.type);
+    // A half-day covers only its start date, however the range was saved.
+    const last = half ? r.startDate : r.endDate;
+    for (const d of datesCoveredByRange(r.startDate, last)) {
+      const held = byDate.get(d);
+      if (held) {
+        held.hours += perDate;
+        held.allHalfDay = held.allHalfDay && half;
+      } else {
+        byDate.set(d, { hours: perDate, allHalfDay: half });
+      }
+    }
+  }
+  return byDate;
+}
+
+/** Hours held per date — the totals, without the half-day detail. */
+export function bookedLeaveHoursByDate(
+  requests: Array<{ type: string; startDate: string; endDate: string; status: string }>,
+): Map<string, number> {
+  return new Map([...bookedLeaveByDate(requests)].map(([d, h]) => [d, h.hours]));
+}
+
+/**
+ * Whether a request of `type` may be added to a date already holding `held`.
+ *
+ * Sharing a date is a half-day-only allowance: a half day may join other half
+ * days while the day's total stays within 8 hours. A full-day type never
+ * shares — not even with a half day, and not even Unpaid Leave, which is a
+ * full-day type that happens to deduct nothing.
+ */
+export function canAddLeaveOnDate(held: DateLeaveHold | undefined, type: string): boolean {
+  if (!held) return true; // nothing there yet — any type is fine
+  if (!isHalfDayLeaveType(type)) return false;
+  if (!held.allHalfDay) return false;
+  return held.hours + leaveHoursPerCoveredDate(type) <= MAX_LEAVE_HOURS_PER_DAY;
+}
+
+/** Inclusive list of "YYYY-MM-DD" dates from `from` to `to`. */
+export function datesCoveredByRange(from: string, to: string): string[] {
+  if (!from) return [];
+  const start = parseDate(from);
+  const end = parseDate(to || from);
+  if (!start || !end || end < start) return from ? [from] : [];
+  const out: string[] = [];
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    out.push(formatDateIso(d));
+  }
+  return out;
+}
+
 export function isPtoLeaveType(type: string): boolean {
   return type.startsWith("PTO");
 }
