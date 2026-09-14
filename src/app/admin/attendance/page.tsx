@@ -4126,7 +4126,7 @@ export default function AttendancePage() {
             <thead className="sticky top-0 z-30" style={{ background: "#003527" }}>
               <tr>
                 {[
-                  "Contractor", "Assigned Team", "Actual Time",
+                  "Contractor", "Assigned Team", "Actual Time", "Hours",
                   "Total Evaluated Regular Time", "Total Regular OT Time", "Total RD OT Time", "Total Evaluated Time", "Total US HO Time", "Total HO OT Time",
                   "Total Local HO Time", "Total Time Away Request Time", "Ind Time",
                   "Variance", "Status", "Actions",
@@ -4155,7 +4155,7 @@ export default function AttendancePage() {
             <tbody>
               {isLoadingWorksnap && attendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
+                  <td colSpan={16} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     <span className="inline-flex items-center gap-1.5">
                       <LuRefreshCw size={14} className="animate-spin" /> Loading attendance data…
                     </span>
@@ -4164,7 +4164,7 @@ export default function AttendancePage() {
               )}
               {!isLoadingWorksnap && filteredAttendanceRows.length === 0 && (
                 <tr>
-                  <td colSpan={15} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
+                  <td colSpan={16} className={`px-6 py-10 text-center text-sm font-medium ${dark ? "text-white/35" : "text-slate-500"}`}>
                     {worksnapError ? (
                       <span className="inline-flex items-center gap-2 text-red-600">
                         Unable to load attendance data. {worksnapError}
@@ -4233,6 +4233,18 @@ export default function AttendancePage() {
                       ) : (
                         <span className={`text-sm font-bold ${isForReview ? "text-red-500" : dark ? "text-white/85" : "text-slate-900"}`}>
                           {row.actualMinutes.toLocaleString()}
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Hours — Actual Time in decimal hours, from the same
+                        actualMinutes the cell above renders. */}
+                    <td className={`px-4 md:px-6 py-3 md:py-4 border-r border-b ${dark ? "border-white/8" : "border-slate-100"}`}>
+                      {isOnLeave ? (
+                        <span className={`text-sm ${dark ? "text-white/30" : "text-slate-400"}`}>—</span>
+                      ) : (
+                        <span className={`text-sm font-semibold tabular-nums ${isForReview ? "text-red-500" : dark ? "text-white/85" : "text-slate-900"}`}>
+                          {formatMinutesAsDecimalHours(row.actualMinutes)}
                         </span>
                       )}
                     </td>
