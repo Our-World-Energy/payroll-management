@@ -562,7 +562,7 @@ export default function PayrollPage() {
 
   function handleExportCSV() {
     const headers = [
-      "Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+      "Name", "Email", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
       "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
@@ -578,7 +578,7 @@ export default function PayrollPage() {
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
-        r.name, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
+        r.name, r.email, r.country, r.department, r.payCategory, r.shiftType, r.localHoliday,
         r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
         r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
         r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
