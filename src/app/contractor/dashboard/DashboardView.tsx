@@ -15,6 +15,59 @@ import {
   LuX, LuChevronLeft,
 } from "react-icons/lu";
 
+// ── Solar motifs ──────────────────────────────────────────────────────────────
+// Inline SVG rather than image files: these are decoration that has to match
+// the brand green, so they take currentColor and cost no request. Both are
+// aria-hidden and non-interactive — a screen reader gains nothing from them.
+
+/** A rayed sun, used as a watermark behind the nameplate. */
+function SolarSunMark({ className = "" }: { className?: string }) {
+  const rays = Array.from({ length: 12 }, (_, i) => {
+    const angle = (i * 30 * Math.PI) / 180;
+    return {
+      x1: 100 + Math.cos(angle) * 54, y1: 100 + Math.sin(angle) * 54,
+      x2: 100 + Math.cos(angle) * 82, y2: 100 + Math.sin(angle) * 82,
+    };
+  });
+  return (
+    <svg viewBox="0 0 200 200" fill="none" aria-hidden className={className}>
+      <circle cx="100" cy="100" r="40" stroke="currentColor" strokeWidth="7" />
+      <circle cx="100" cy="100" r="24" fill="currentColor" opacity="0.35" />
+      {rays.map((r, i) => (
+        <line key={i} {...r} stroke="currentColor" strokeWidth="7" strokeLinecap="round" />
+      ))}
+    </svg>
+  );
+}
+
+/**
+ * A two-panel array on a stand, centred under the nameplate in place of a
+ * plain dingbat — the flourish a newspaper would use to close its masthead.
+ */
+function SolarPanelMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 120 40" fill="none" aria-hidden className={className}>
+      {/* Panel array, skewed so it reads as tilted toward the sun. */}
+      <g stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round">
+        <path d="M14 22 L26 6 L58 6 L50 22 Z" />
+        <path d="M52 22 L60 6 L92 6 L96 22 Z" />
+      </g>
+      {/* Cell divisions. */}
+      <g stroke="currentColor" strokeWidth="1.2" opacity="0.55">
+        <line x1="20" y1="14" x2="54" y2="14" />
+        <line x1="56" y1="14" x2="94" y2="14" />
+        <line x1="38" y1="6" x2="30" y2="22" />
+        <line x1="74" y1="6" x2="78" y2="22" />
+      </g>
+      {/* Stand and ground line. */}
+      <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+        <line x1="55" y1="22" x2="55" y2="32" />
+        <line x1="34" y1="32" x2="86" y2="32" />
+      </g>
+    </svg>
+  );
+}
+
 // ── Calendar helpers ──────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -492,19 +545,31 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       </div>
 
       {/* ── Masthead: the nameplate ── */}
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b-2 border-[#003527] py-4 px-1">
-        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36">
+      <div className="relative overflow-hidden grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b-2 border-[#003527] py-4 px-1">
+        {/* Sun behind the nameplate. Faint enough to read as paper texture
+            rather than an illustration, and pointer-events-none so it never
+            interferes with the text over it. */}
+        <SolarSunMark className="pointer-events-none absolute -top-14 left-1/2 -translate-x-1/2 w-56 text-amber-500/15 md:w-64" />
+
+        <p className="relative hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36">
           &ldquo;Together<br />We Power<br />Possibilities&rdquo;
         </p>
-        <div className="text-center">
+        <div className="relative text-center">
           <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
             OWE DAILY
           </h1>
           <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
             News &middot; Announcements &middot; People &middot; Updates
           </p>
+          {/* Panels as the masthead's closing flourish, flanked by rules the
+              way a newspaper sets a dingbat. */}
+          <div className="mt-2 flex items-center justify-center gap-2">
+            <span className="h-px w-8 bg-[#003527]/25 sm:w-14" />
+            <SolarPanelMark className="w-14 shrink-0 text-[#003527]/70" />
+            <span className="h-px w-8 bg-[#003527]/25 sm:w-14" />
+          </div>
         </div>
-        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36">
+        <p className="relative hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36">
           {greeting},<br />{firstName}.
         </p>
       </div>
