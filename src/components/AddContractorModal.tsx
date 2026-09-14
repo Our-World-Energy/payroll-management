@@ -82,9 +82,9 @@ function getPayPeriod() {
 function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(weeklyRateFrom(m)); }
 function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(hourlyRateFrom(m)); }
 
-const FIELD = ({ label, children, required, labelClassName }: { label: string; children: React.ReactNode; required?: boolean; labelClassName?: string }) => (
+const FIELD = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
   <div className="flex flex-col gap-1">
-    <label className={labelClassName ?? "text-xs font-semibold text-slate-500 uppercase tracking-wider"}>
+    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
       {label}{required && <span className="text-red-400 ml-0.5">*</span>}
     </label>
     {children}
@@ -619,7 +619,12 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
           {/* ── Contract Rate ── */}
           <Section icon={<LuBanknote size={14} strokeWidth={2.5} />} title="Contract Rate" hint="Monthly is the entered figure; the rest derive from it">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {/* Currency needs far less room than a rate, and the three rate
+                labels need enough width not to wrap — four equal columns left
+                them wrapping, which pushed their inputs below Currency's since
+                FIELD stacks label over input. items-end keeps every box on one
+                baseline even if a label does wrap on a narrow viewport. */}
+            <div className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_1.1fr_1.1fr] gap-4 items-end">
               <FIELD label="Currency">
                 <select className={SELECT} value={form.currency} onChange={(e) => set("currency", e.target.value)}>
                   {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
@@ -627,21 +632,21 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
 
               {/* Monthly rate — main source */}
-              <FIELD label="Monthly Contract Rate" required={!ratesLocked} labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              <FIELD label="Monthly Contract Rate" required={!ratesLocked}>
                 <input type={ratesLocked ? "text" : "number"} className={ratesLocked ? READONLY : INPUT} value={ratesLocked ? "••••••" : form.monthlyRate}
                   disabled={ratesLocked}
                   onChange={(e) => set("monthlyRate", e.target.value)} placeholder="5200" />
               </FIELD>
 
               {/* Weekly & Hourly — auto-calculated */}
-              <FIELD label="Weekly Contract Rate" labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              <FIELD label="Weekly Contract Rate">
                 <input className={READONLY} readOnly
-value={ratesLocked ? "••••••" : form.weeklyRate}
+                  value={ratesLocked ? "••••••" : form.weeklyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
-              <FIELD label="Hourly Rate (auto)">
+              <FIELD label="Hourly Contract Rate">
                 <input className={READONLY} readOnly
-value={ratesLocked ? "••••••" : form.hourlyRate}
+                  value={ratesLocked ? "••••••" : form.hourlyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
             </div>
