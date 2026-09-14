@@ -22,23 +22,29 @@ import {
 // behind text it must never intercept a click from.
 
 /**
- * Soft hills along the bottom of the band.
+ * Two hills, one anchored at each edge, with the centre left open beneath the
+ * wordmark.
  *
- * A continuous ground band edge to edge, with two broad domes over it. The
- * domes alone were not enough: each is a quadratic arc that meets the baseline
- * at its ends, so the silhouette tapered to almost nothing at the left and
- * right and read as separate blobs stopping short of the edge. The ground
- * keeps a floor under the whole width; the domes only shape what sits above it.
+ * Each side is a pair of layers: the back one taller and paler, the front one
+ * lower and slightly stronger, which is what gives the overlap its depth. Both
+ * start on a vertical at their own edge rather than on the baseline, so the
+ * fill reaches the left and right sides at full height instead of tapering to
+ * a point the way a plain dome does.
  */
 function HillsBackdrop({ className = "" }: { className?: string }) {
+  const hills = [
+    // Left: back, then front.
+    { d: "M-220 120 L-220 88 Q 120 38 480 120 Z", opacity: 0.45 },
+    { d: "M-220 120 L-220 102 Q 60 64 380 120 Z", opacity: 0.6 },
+    // Right: mirrored, so the pair reads as the same landscape.
+    { d: "M720 120 Q 1080 38 1420 88 L1420 120 Z", opacity: 0.45 },
+    { d: "M820 120 Q 1140 64 1420 102 L1420 120 Z", opacity: 0.6 },
+  ];
   return (
     // preserveAspectRatio none: abstract curves, so stretching them to any
     // masthead width reads fine and avoids a seam at the edges.
     <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
-      <rect x="0" y="94" width="1200" height="26" fill="currentColor" opacity="0.55" />
-      {/* Overhanging the viewBox on both sides so neither dome ends on screen. */}
-      <path d="M-140 120 Q 260 44 660 120 Z" fill="currentColor" opacity="0.5" />
-      <path d="M440 120 Q 900 30 1380 120 Z" fill="currentColor" opacity="0.45" />
+      {hills.map((h, i) => <path key={i} d={h.d} fill="currentColor" opacity={h.opacity} />)}
     </svg>
   );
 }
