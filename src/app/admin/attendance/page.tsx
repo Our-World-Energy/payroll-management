@@ -1585,6 +1585,14 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     setOffsetCredit(credit);
   }
 
+  // Takes the credit back off this week. Saving then stores 0, so the
+  // following week stops owing a repayment too — next week's figure is read
+  // from this week's stored offsetCreditMinutes, not from anything cached.
+  // Like Apply, this only takes effect once Save is pressed.
+  function reverseTimeCredit() {
+    setOffsetCredit(0);
+  }
+
   async function handleSaveClick(markProcessed = false) {
     const finalCompletionMinutes = isIndia ? completionTotalMinutes + offsetCredit : completionTotalMinutes;
     const finalOffsetCredit = isIndia ? offsetCredit : 0;
@@ -2209,17 +2217,35 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           >
             Close
           </button>
-          {isIndia && appliedOffsetCredit === 0 && offsetCredit === 0 && completionTotalMinutes < 2400 && (
-            <button
-              type="button"
-              onClick={applyTimeCredit}
-              disabled={!isWeekEnded}
-              title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
-            >
-              <LuCircleCheck size={15} strokeWidth={2} />
-              Apply Time Credit
-            </button>
+          {/* appliedOffsetCredit is a repayment owed from the PREVIOUS week, so
+              neither button applies to it — that credit is undone by reversing
+              it on the week it was granted on, not here. */}
+          {isIndia && appliedOffsetCredit === 0 && (
+            offsetCredit > 0 ? (
+              <button
+                type="button"
+                onClick={reverseTimeCredit}
+                disabled={!isWeekEnded}
+                title={!isWeekEnded
+                  ? "Reverse Offset is only available once the selected week has ended"
+                  : `Take the ${formatMinutesAsMins(offsetCredit)} of Time Credit back off this week`}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-50"
+              >
+                <LuRefreshCw size={15} strokeWidth={2} />
+                Reverse Offset
+              </button>
+            ) : completionTotalMinutes < 2400 ? (
+              <button
+                type="button"
+                onClick={applyTimeCredit}
+                disabled={!isWeekEnded}
+                title={!isWeekEnded ? "Apply Time Credit is only available once the selected week has ended" : undefined}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-50"
+              >
+                <LuCircleCheck size={15} strokeWidth={2} />
+                Apply Time Credit
+              </button>
+            ) : null
           )}
           {!isIndia && (
             <button
@@ -3456,7 +3482,11 @@ export default function AttendancePage() {
           // happened to be left in React state. Keyed by contractorId to match
           // appliedOffsetCreditFor.
           const priorCredits = (weekStatusResult.priorOffsetCredits ?? []) as { worksnapUserId: number; offsetCreditMinutes: number }[];
-          if (priorCredits.length) {
+          // Written unconditionally, even when the list is empty. Skipping the
+          // empty case left a stale repayment in state after a credit was
+          // reversed on the preceding week — the database said nothing was
+          // owed, but the optimistic entry from the earlier save survived.
+          {
             const creditByUserId = new Map(priorCredits.map((c) => [c.worksnapUserId, c.offsetCreditMinutes]));
             const forThisWeek: Record<string, number> = {};
             for (const row of rows) {
