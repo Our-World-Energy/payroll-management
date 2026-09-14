@@ -21,20 +21,25 @@ import {
 // pointer-events-none — decoration a screen reader gains nothing from, laid
 // behind text it must never intercept a click from.
 
-/** Layered hills along the bottom of the band. */
+/**
+ * Soft overlapping mounds along the bottom of the band.
+ *
+ * Each is a single quadratic arc sitting on the baseline, so it comes out as a
+ * clean dome — a continuous ridge line reads as ripples rather than hills, and
+ * the overlaps are what give the layered look. The first and last extend past
+ * the viewBox on purpose so neither ends in a visible edge.
+ */
 function HillsBackdrop({ className = "" }: { className?: string }) {
+  const mounds = [
+    { d: "M-80 120 Q 190 52 470 120 Z", opacity: 0.55 },
+    { d: "M300 120 Q 760 34 1230 120 Z", opacity: 0.5 },
+    { d: "M860 120 Q 1080 66 1320 120 Z", opacity: 0.6 },
+  ];
   return (
-    // preserveAspectRatio none: these are abstract curves, so stretching them
-    // to any masthead width reads fine and avoids a seam at the edges.
+    // preserveAspectRatio none: abstract curves, so stretching them to any
+    // masthead width reads fine and avoids a seam at the edges.
     <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
-      <path
-        d="M0 58 C 260 12 520 76 820 50 C 1000 34 1110 58 1200 46 L1200 120 L0 120 Z"
-        fill="currentColor" opacity="0.45"
-      />
-      <path
-        d="M0 90 C 300 46 600 100 900 74 C 1050 61 1130 82 1200 74 L1200 120 L0 120 Z"
-        fill="currentColor" opacity="0.8"
-      />
+      {mounds.map((m, i) => <path key={i} d={m.d} fill="currentColor" opacity={m.opacity} />)}
     </svg>
   );
 }
@@ -608,7 +613,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
             height left them flatter and flatter as the screen grew — the
             hills appeared to shrink even though they were the same size.
             Growing the height with the width keeps the curve's proportions. */}
-        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(5rem,7vw,8rem)] text-emerald-200/70" />
+        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(3.5rem,5vw,6rem)] text-emerald-200/60" />
         <SproutMark className="pointer-events-none absolute bottom-1 left-2 w-[clamp(2.5rem,3.2vw,4rem)] text-emerald-300/80" />
         {/* Right of centre so it clears the wordmark, and hidden on small
             screens where there is no room for it beside the type. */}
