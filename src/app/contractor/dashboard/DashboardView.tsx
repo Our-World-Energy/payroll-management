@@ -15,55 +15,110 @@ import {
   LuX, LuChevronLeft,
 } from "react-icons/lu";
 
-// ── Solar motifs ──────────────────────────────────────────────────────────────
-// Inline SVG rather than image files: these are decoration that has to match
-// the brand green, so they take currentColor and cost no request. Both are
-// aria-hidden and non-interactive — a screen reader gains nothing from them.
+// ── Masthead artwork ─────────────────────────────────────────────────────────
+// All inline SVG: it has to take the brand green, it costs no request, and
+// there is no asset to lose. Every piece is aria-hidden and
+// pointer-events-none — decoration a screen reader gains nothing from, laid
+// behind text it must never intercept a click from.
 
-/** A rayed sun, used as a watermark behind the nameplate. */
-function SolarSunMark({ className = "" }: { className?: string }) {
-  const rays = Array.from({ length: 12 }, (_, i) => {
-    const angle = (i * 30 * Math.PI) / 180;
-    return {
-      x1: 100 + Math.cos(angle) * 54, y1: 100 + Math.sin(angle) * 54,
-      x2: 100 + Math.cos(angle) * 82, y2: 100 + Math.sin(angle) * 82,
-    };
-  });
+/** Layered hills along the bottom of the band. */
+function HillsBackdrop({ className = "" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 200 200" fill="none" aria-hidden className={className}>
-      <circle cx="100" cy="100" r="40" stroke="currentColor" strokeWidth="7" />
-      <circle cx="100" cy="100" r="24" fill="currentColor" opacity="0.35" />
-      {rays.map((r, i) => (
-        <line key={i} {...r} stroke="currentColor" strokeWidth="7" strokeLinecap="round" />
-      ))}
+    // preserveAspectRatio none: these are abstract curves, so stretching them
+    // to any masthead width reads fine and avoids a seam at the edges.
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
+      <path
+        d="M0 62 C 170 34 320 84 480 62 C 650 38 790 82 970 58 C 1080 44 1150 62 1200 54 L1200 120 L0 120 Z"
+        fill="currentColor" opacity="0.45"
+      />
+      <path
+        d="M0 88 C 190 64 350 104 530 86 C 710 68 870 102 1050 82 C 1130 73 1175 86 1200 82 L1200 120 L0 120 Z"
+        fill="currentColor" opacity="0.8"
+      />
+    </svg>
+  );
+}
+
+/** Two-leaf sprout, sitting on the hills at the far left. */
+function SproutMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden className={className}>
+      <path d="M32 62 V26" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" />
+      {/* Left leaf, then right — the right slightly lighter so they read as
+          two separate leaves rather than one blob. */}
+      <path d="M32 34 C 18 34 7 25 4 11 C 20 11 31 21 32 34 Z" fill="currentColor" />
+      <path d="M32 28 C 46 28 57 19 60 5 C 44 5 33 15 32 28 Z" fill="currentColor" opacity="0.7" />
     </svg>
   );
 }
 
 /**
- * A two-panel array on a stand, centred under the nameplate in place of a
- * plain dingbat — the flourish a newspaper would use to close its masthead.
+ * Sun and a three-panel array on a stand.
+ *
+ * Each panel face is a parallelogram — a rectangle would read as flat-on,
+ * where the whole point is that the array is angled toward the sun. The cell
+ * lines are interpolated across that shape rather than drawn as a straight
+ * grid, so they follow the tilt instead of cutting across it.
  */
-function SolarPanelMark({ className = "" }: { className?: string }) {
+function SolarArrayScene({ className = "" }: { className?: string }) {
+  const GROUND = 132;
+
+  // One panel, as corner points. Top edge sits right of the bottom edge, which
+  // is what gives the lean.
+  function panel(x: number, y: number, w: number, h: number, lean: number) {
+    const tl = [x + lean, y], tr = [x + lean + w, y];
+    const br = [x + w, y + h], bl = [x, y + h];
+    const lerp = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    // 3 columns x 2 rows of cells.
+    const cols = [1, 2].map((i) => [lerp(tl, tr, i / 3), lerp(bl, br, i / 3)]);
+    const rows = [1].map((i) => [lerp(tl, bl, i / 2), lerp(tr, br, i / 2)]);
+    return { face: [tl, tr, br, bl], cols, rows, mid: lerp(bl, br, 0.5) };
+  }
+
+  const panels = [panel(4, 58, 52, 40, 16), panel(62, 50, 52, 40, 16), panel(120, 42, 52, 40, 16)];
+
   return (
-    <svg viewBox="0 0 120 40" fill="none" aria-hidden className={className}>
-      {/* Panel array, skewed so it reads as tilted toward the sun. */}
-      <g stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round">
-        <path d="M14 22 L26 6 L58 6 L50 22 Z" />
-        <path d="M52 22 L60 6 L92 6 L96 22 Z" />
+    <svg viewBox="0 0 220 150" fill="none" aria-hidden className={className}>
+      {/* Sun: a pale disc with short rays, warm against all the green. */}
+      <g>
+        {/* cy 40 with rays reaching 34: at cy 30 the top ray landed at y -5
+            and was clipped by the viewBox. */}
+        <circle cx="52" cy="40" r="19" fill="#FBD38D" opacity="0.85" />
+        <g stroke="#F6AD55" strokeWidth="3.5" strokeLinecap="round" opacity="0.8">
+          {Array.from({ length: 8 }, (_, i) => {
+            const a = (i * 45 * Math.PI) / 180;
+            return (
+              <line
+                key={i}
+                x1={52 + Math.cos(a) * 26} y1={40 + Math.sin(a) * 26}
+                x2={52 + Math.cos(a) * 34} y2={40 + Math.sin(a) * 34}
+              />
+            );
+          })}
+        </g>
       </g>
-      {/* Cell divisions. */}
-      <g stroke="currentColor" strokeWidth="1.2" opacity="0.55">
-        <line x1="20" y1="14" x2="54" y2="14" />
-        <line x1="56" y1="14" x2="94" y2="14" />
-        <line x1="38" y1="6" x2="30" y2="22" />
-        <line x1="74" y1="6" x2="78" y2="22" />
+
+      {/* Stands, drawn before the faces so the posts sit behind them. */}
+      <g stroke="currentColor" strokeWidth="3" strokeLinecap="round" opacity="0.9">
+        {panels.map((p, i) => (
+          <line key={i} x1={p.mid[0]} y1={p.mid[1]} x2={p.mid[0]} y2={GROUND} />
+        ))}
+        <line x1={panels[0].face[3][0] - 2} y1={GROUND} x2={panels[2].face[2][0] + 2} y2={GROUND} />
       </g>
-      {/* Stand and ground line. */}
-      <g stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-        <line x1="55" y1="22" x2="55" y2="32" />
-        <line x1="34" y1="32" x2="86" y2="32" />
-      </g>
+
+      {panels.map((p, i) => (
+        <g key={i}>
+          <polygon points={p.face.map((pt) => pt.join(",")).join(" ")} fill="currentColor" />
+          <g stroke="#ffffff" strokeWidth="1.4" opacity="0.5">
+            {p.cols.map(([a, b], j) => <line key={`c${j}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />)}
+            {p.rows.map(([a, b], j) => <line key={`r${j}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />)}
+          </g>
+          <polygon
+            points={p.face.map((pt) => pt.join(",")).join(" ")}
+            fill="none" stroke="#ffffff" strokeWidth="1.6" opacity="0.85"
+          />
+        </g>
+      ))}
     </svg>
   );
 }
@@ -545,33 +600,33 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       </div>
 
       {/* ── Masthead: the nameplate ── */}
-      <div className="relative overflow-hidden grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b-2 border-[#003527] py-4 px-1">
-        {/* Sun behind the nameplate. Faint enough to read as paper texture
-            rather than an illustration, and pointer-events-none so it never
-            interferes with the text over it. */}
-        <SolarSunMark className="pointer-events-none absolute -top-14 left-1/2 -translate-x-1/2 w-56 text-amber-500/15 md:w-64" />
+      <div className="relative overflow-hidden border-b-2 border-[#003527] bg-linear-to-b from-white to-emerald-50/40">
+        {/* Artwork layer. Hills anchor the band, the sprout and the array stand
+            on them, and all of it sits behind the type. */}
+        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-20 text-emerald-200/70 sm:h-24" />
+        <SproutMark className="pointer-events-none absolute bottom-1 left-2 w-10 text-emerald-300/80 sm:w-12" />
+        {/* Right of centre so it clears the wordmark, and hidden on small
+            screens where there is no room for it beside the type. */}
+        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-36 text-[#0B4F3A] md:block lg:w-44" />
 
-        <p className="relative hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36">
-          &ldquo;Together<br />We Power<br />Possibilities&rdquo;
-        </p>
-        <div className="relative text-center">
-          <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
-            OWE DAILY
-          </h1>
-          <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
-            News &middot; Announcements &middot; People &middot; Updates
+        <div className="relative grid grid-cols-1 items-center gap-4 px-1 py-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:py-7">
+          <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
+            &ldquo;Together<br />We Power<br />Possibilities&rdquo;
           </p>
-          {/* Panels as the masthead's closing flourish, flanked by rules the
-              way a newspaper sets a dingbat. */}
-          <div className="mt-2 flex items-center justify-center gap-2">
-            <span className="h-px w-8 bg-[#003527]/25 sm:w-14" />
-            <SolarPanelMark className="w-14 shrink-0 text-[#003527]/70" />
-            <span className="h-px w-8 bg-[#003527]/25 sm:w-14" />
+          <div className="text-center">
+            <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
+              OWE DAILY
+            </h1>
+            <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
+              News &middot; Announcements &middot; People &middot; Updates
+            </p>
+            {/* Short rule closing the nameplate. */}
+            <span className="mt-3 mx-auto block h-[3px] w-24 rounded-full bg-emerald-600/70" />
           </div>
+          <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36 border-l-2 border-emerald-200 pl-3">
+            {greeting},<br />{firstName}.
+          </p>
         </div>
-        <p className="relative hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36">
-          {greeting},<br />{firstName}.
-        </p>
       </div>
 
       {loading ? (
