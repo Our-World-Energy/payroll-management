@@ -1714,7 +1714,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
             </div>
             <div>
               <h2 className="text-[clamp(1rem,1.45vw,1.25rem)] font-bold text-[#003527] tracking-tight">{pageTitle}</h2>
-              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
+              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and Medical Unavailability balances across your contractor workforce.</p>
             </div>
           </div>
         </div>
