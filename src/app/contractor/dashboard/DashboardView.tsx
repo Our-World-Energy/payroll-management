@@ -36,9 +36,11 @@ function HillsBackdrop({ className = "" }: { className?: string }) {
     // Left: back, then front.
     { d: "M-220 120 L-220 88 Q 120 38 480 120 Z", opacity: 0.45 },
     { d: "M-220 120 L-220 102 Q 60 64 380 120 Z", opacity: 0.6 },
-    // Right: mirrored, so the pair reads as the same landscape.
-    { d: "M720 120 Q 1080 38 1420 88 L1420 120 Z", opacity: 0.45 },
-    { d: "M820 120 Q 1140 64 1420 102 L1420 120 Z", opacity: 0.6 },
+    // Right: pushed out to the far edge so it sits behind the panel array,
+    // which lands at roughly x 948-1104 in these units. Starting it at 720
+    // put the hill beside the array instead of under it.
+    { d: "M860 120 Q 1140 40 1420 86 L1420 120 Z", opacity: 0.45 },
+    { d: "M960 120 Q 1210 66 1420 102 L1420 120 Z", opacity: 0.6 },
   ];
   return (
     // preserveAspectRatio none: abstract curves, so stretching them to any
