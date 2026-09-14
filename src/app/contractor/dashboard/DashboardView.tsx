@@ -22,25 +22,18 @@ import {
 // behind text it must never intercept a click from.
 
 /**
- * Two hills, one anchored at each edge, with the centre left open beneath the
- * wordmark.
+ * A single hill on the left, falling away to nothing by the middle. The right
+ * side is deliberately bare, leaving the panel array standing on open ground.
  *
- * Each side is a pair of layers: the back one taller and paler, the front one
- * lower and slightly stronger, which is what gives the overlap its depth. Both
- * start on a vertical at their own edge rather than on the baseline, so the
- * fill reaches the left and right sides at full height instead of tapering to
- * a point the way a plain dome does.
+ * Two layers: the back one taller and paler, the front one lower and slightly
+ * stronger, which is what gives the overlap its depth. Both start on a vertical
+ * at the left edge rather than on the baseline, so the fill reaches the side at
+ * full height instead of tapering to a point the way a plain dome does.
  */
 function HillsBackdrop({ className = "" }: { className?: string }) {
   const hills = [
-    // Left: back, then front.
     { d: "M-220 120 L-220 88 Q 120 38 480 120 Z", opacity: 0.45 },
     { d: "M-220 120 L-220 102 Q 60 64 380 120 Z", opacity: 0.6 },
-    // Right: pushed out to the far edge so it sits behind the panel array,
-    // which lands at roughly x 948-1104 in these units. Starting it at 720
-    // put the hill beside the array instead of under it.
-    { d: "M860 120 Q 1140 40 1420 86 L1420 120 Z", opacity: 0.45 },
-    { d: "M960 120 Q 1210 66 1420 102 L1420 120 Z", opacity: 0.6 },
   ];
   return (
     // preserveAspectRatio none: abstract curves, so stretching them to any
