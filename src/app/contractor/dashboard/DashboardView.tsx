@@ -284,7 +284,7 @@ function HolidayCalendarModal({
               {/* Day headers */}
               <div className="grid grid-cols-7 mb-1">
                 {DAYS.map(d => (
-                  <div key={d} className="text-center text-[10px] font-bold text-slate-300 uppercase tracking-wider py-0.5">{d}</div>
+                  <div key={d} className="text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider py-1">{d}</div>
                 ))}
               </div>
 
@@ -303,19 +303,20 @@ function HolidayCalendarModal({
 
                   return (
                     <div key={i} title={dots.map(h => h.name).join(" · ")}
-                      className={`aspect-square rounded-xl p-1 flex flex-col border transition-all cursor-default ${cellCls}`}>
-                      <span className={`text-[11px] tabular-nums leading-none ${isToday ? "font-black" : "font-medium"}`}>{day}</span>
+                      className={`min-h-[3.75rem] sm:min-h-[4.25rem] rounded-xl p-1.5 flex flex-col border transition-all cursor-default ${cellCls}`}>
+                      <div className="flex items-center gap-1">
+                        <span className={`text-sm tabular-nums leading-none ${isToday ? "font-black" : "font-semibold"}`}>{day}</span>
+                        {hasHol && dots.slice(0, 2).map((h, di) => (
+                          <span key={di} className={`size-1.5 rounded-full shrink-0 ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
+                        ))}
+                      </div>
                       {hasHol && (
-                        <>
-                          <div className="flex gap-0.5 mt-0.5">
-                            {dots.slice(0, 2).map((h, di) => (
-                              <span key={di} className={`w-1 h-1 rounded-full ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
-                            ))}
-                          </div>
-                          <span className={`mt-auto text-[7px] leading-tight w-full truncate font-semibold ${isToday ? "text-white/60" : "text-teal-600"}`}>
-                            {dots[0].name}
-                          </span>
-                        </>
+                        // Two lines before clamping: most holiday names do not
+                        // fit a calendar cell on one, and the tooltip carries
+                        // the full text either way.
+                        <span className={`mt-auto text-[10px] leading-[1.15] w-full font-semibold line-clamp-2 ${isToday ? "text-white/75" : "text-teal-700"}`}>
+                          {dots[0].name}
+                        </span>
                       )}
                     </div>
                   );
