@@ -28,11 +28,11 @@ function HillsBackdrop({ className = "" }: { className?: string }) {
     // to any masthead width reads fine and avoids a seam at the edges.
     <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
       <path
-        d="M0 62 C 170 34 320 84 480 62 C 650 38 790 82 970 58 C 1080 44 1150 62 1200 54 L1200 120 L0 120 Z"
+        d="M0 58 C 260 12 520 76 820 50 C 1000 34 1110 58 1200 46 L1200 120 L0 120 Z"
         fill="currentColor" opacity="0.45"
       />
       <path
-        d="M0 88 C 190 64 350 104 530 86 C 710 68 870 102 1050 82 C 1130 73 1175 86 1200 82 L1200 120 L0 120 Z"
+        d="M0 90 C 300 46 600 100 900 74 C 1050 61 1130 82 1200 74 L1200 120 L0 120 Z"
         fill="currentColor" opacity="0.8"
       />
     </svg>
@@ -603,13 +603,18 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       <div className="relative overflow-hidden border-b-2 border-[#003527] bg-linear-to-b from-white to-emerald-50/40">
         {/* Artwork layer. Hills anchor the band, the sprout and the array stand
             on them, and all of it sits behind the type. */}
-        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-20 text-emerald-200/70 sm:h-24" />
-        <SproutMark className="pointer-events-none absolute bottom-1 left-2 w-10 text-emerald-300/80 sm:w-12" />
+        {/* Height scales with the viewport, not fixed. preserveAspectRatio
+            none stretches these curves to the band's width, so a fixed pixel
+            height left them flatter and flatter as the screen grew — the
+            hills appeared to shrink even though they were the same size.
+            Growing the height with the width keeps the curve's proportions. */}
+        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(5rem,7vw,8rem)] text-emerald-200/70" />
+        <SproutMark className="pointer-events-none absolute bottom-1 left-2 w-[clamp(2.5rem,3.2vw,4rem)] text-emerald-300/80" />
         {/* Right of centre so it clears the wordmark, and hidden on small
             screens where there is no room for it beside the type. */}
-        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-36 text-[#0B4F3A] md:block lg:w-44" />
+        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(9rem,13vw,15rem)] text-[#0B4F3A] md:block" />
 
-        <div className="relative grid grid-cols-1 items-center gap-4 px-1 py-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:py-7">
+        <div className="relative grid grid-cols-1 items-center gap-4 px-1 py-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:py-7 lg:py-9 xl:py-11">
           <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
             &ldquo;Together<br />We Power<br />Possibilities&rdquo;
           </p>
