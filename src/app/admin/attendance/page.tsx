@@ -1128,6 +1128,15 @@ function computeWeeklyStatus(dailyWorksnapMinutes: Record<string, number>, weekD
     if (total < 2400 || total > 2700) return "For Review";
     return "Standard Met";
   }
+  // Hourly: the week has to reach the 2,400-min (40h) standard as well as
+  // having every worked day land on 480.
+  //
+  // The per-day loop below skips a day with no time at all, so a week of four
+  // exact 480s and one blank working day used to read "Standard Met" at 1,920
+  // — the blank day was never judged. This floor catches that.
+  const total = weekDates.reduce((sum, date) => sum + (dailyWorksnapMinutes[date] ?? 0), 0);
+  if (total < 2400) return "For Review";
+
   for (const date of weekDates) {
     if (isRestDayDate(date, restDaysStr)) continue;
     const mins = dailyWorksnapMinutes[date] ?? 0;
