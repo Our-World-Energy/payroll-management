@@ -22,24 +22,23 @@ import {
 // behind text it must never intercept a click from.
 
 /**
- * Soft overlapping mounds along the bottom of the band.
+ * Soft hills along the bottom of the band.
  *
- * Each is a single quadratic arc sitting on the baseline, so it comes out as a
- * clean dome — a continuous ridge line reads as ripples rather than hills, and
- * the overlaps are what give the layered look. The first and last extend past
- * the viewBox on purpose so neither ends in a visible edge.
+ * A continuous ground band edge to edge, with two broad domes over it. The
+ * domes alone were not enough: each is a quadratic arc that meets the baseline
+ * at its ends, so the silhouette tapered to almost nothing at the left and
+ * right and read as separate blobs stopping short of the edge. The ground
+ * keeps a floor under the whole width; the domes only shape what sits above it.
  */
 function HillsBackdrop({ className = "" }: { className?: string }) {
-  const mounds = [
-    { d: "M-80 120 Q 190 52 470 120 Z", opacity: 0.55 },
-    { d: "M300 120 Q 760 34 1230 120 Z", opacity: 0.5 },
-    { d: "M860 120 Q 1080 66 1320 120 Z", opacity: 0.6 },
-  ];
   return (
     // preserveAspectRatio none: abstract curves, so stretching them to any
     // masthead width reads fine and avoids a seam at the edges.
     <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
-      {mounds.map((m, i) => <path key={i} d={m.d} fill="currentColor" opacity={m.opacity} />)}
+      <rect x="0" y="94" width="1200" height="26" fill="currentColor" opacity="0.55" />
+      {/* Overhanging the viewBox on both sides so neither dome ends on screen. */}
+      <path d="M-140 120 Q 260 44 660 120 Z" fill="currentColor" opacity="0.5" />
+      <path d="M440 120 Q 900 30 1380 120 Z" fill="currentColor" opacity="0.45" />
     </svg>
   );
 }
