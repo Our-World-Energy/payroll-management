@@ -196,8 +196,14 @@ function HolidayCalendarModal({
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 
-  // Show contractor's country + Global
-  const visible = holidays.filter(h => h.country === country || h.country === "Global");
+  // The contractor's own country, Global, and the US.
+  //
+  // US holidays are included for everyone deliberately: Attendance credits US
+  // HO Time to every contractor whatever their country (see holidayTimeFor),
+  // so a US holiday affects their week's pay and belongs on their calendar.
+  // Filtering to their own country alone hid a day they are paid for.
+  const scope = Array.from(new Set([country, "Global", "United States"].filter(Boolean)));
+  const visible = holidays.filter(h => scope.includes(h.country));
 
   const cells = buildCalendar(calYear, calMonth);
 
@@ -236,7 +242,7 @@ function HolidayCalendarModal({
           <div className="flex items-center gap-2">
             <LuCalendarDays size={15} className="text-white/70" strokeWidth={2} />
             <h2 className="text-sm font-bold text-white">Holiday Calendar</h2>
-            <span className="text-xs text-white/40 ml-1">· {country} &amp; Global</span>
+            <span className="text-xs text-white/40 ml-1">· {scope.join(" · ")}</span>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
             <LuX size={14} strokeWidth={2.5} />
@@ -318,7 +324,7 @@ function HolidayCalendarModal({
 
               {/* Legend */}
               <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
-                {[country, "Global"].filter(Boolean).map(c => (
+                {scope.map(c => (
                   <div key={c} className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full ${COUNTRY_COLORS[c] ?? "bg-slate-400"}`} />
                     <span className="text-[11px] text-slate-400">{c}</span>
