@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LuX, LuUserPlus, LuPencil, LuCalendarDays } from "react-icons/lu";
+import { LuX, LuUserPlus, LuPencil, LuCalendarDays, LuUser, LuMapPin, LuBriefcaseBusiness, LuBanknote, LuIdCard } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
 import { useSalaryAccess } from "@/components/SalaryAccessContext";
@@ -94,6 +94,33 @@ const FIELD = ({ label, children, required, labelClassName }: { label: string; c
 const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all bg-white";
 const SELECT = INPUT + " cursor-pointer";
 const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm text-slate-500 bg-slate-50 cursor-not-allowed";
+
+/**
+ * One group of fields. The four sections were previously a bare caption above
+ * a grid, which left the form reading as one long undifferentiated column —
+ * this gives each a card and an icon so the eye can find a group at a glance.
+ */
+function Section({ icon, title, hint, children }: {
+  icon: React.ReactNode;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden">
+      <div className="flex items-center gap-2.5 px-4 py-2.5 bg-white border-b border-slate-200">
+        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-700">
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="text-xs font-bold uppercase tracking-widest text-[#003527]">{title}</p>
+          {hint && <p className="text-[11px] text-slate-400 mt-0.5 truncate">{hint}</p>}
+        </div>
+      </div>
+      <div className="p-4">{children}</div>
+    </section>
+  );
+}
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
@@ -278,23 +305,49 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const subDepts = Object.keys(deptTree[form.department] ?? {});
   const roles    = deptTree[form.department]?.[form.subDepartment] ?? [];
 
+  // Initials for the header avatar when editing. Taken from the form rather
+  // than `initial`, so renaming someone updates the avatar as they type.
+  const editInitials = [form.firstName, form.surname]
+    .map((part) => part.trim()[0] ?? "")
+    .join("")
+    .toUpperCase();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="size-9 rounded-xl bg-[#003527] text-white grid place-items-center">
-              {isEdit ? <LuPencil size={17} strokeWidth={2} /> : <LuUserPlus size={18} strokeWidth={2} />}
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-slate-100 bg-linear-to-b from-slate-50 to-white rounded-t-2xl">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Editing shows who is being edited, rather than a generic icon. */}
+            <div className="size-10 shrink-0 rounded-xl bg-[#003527] text-white grid place-items-center shadow-sm">
+              {isEdit
+                ? <span className="text-sm font-black tracking-tight">{editInitials || "?"}</span>
+                : <LuUserPlus size={18} strokeWidth={2} />}
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-[#003527]">{isEdit ? "Edit Contractor" : "Add New Contractor"}</h3>
-              <p className="text-xs text-slate-400">{isEdit ? `Editing ${initial?.fullName}` : "Fill in the details below"}</p>
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold text-[#003527] truncate">{isEdit ? "Edit Contractor" : "Add New Contractor"}</h3>
+              {isEdit ? (
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  <span className="text-xs font-semibold text-slate-600 truncate max-w-[16rem]">{initial?.fullName}</span>
+                  {initial?.contractorId && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      <LuIdCard size={11} strokeWidth={2.5} /> {initial.contractorId}
+                    </span>
+                  )}
+                  {initial?.payCategory && (
+                    <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700">
+                      {initial.payCategory}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 mt-0.5">Fill in the details below</p>
+              )}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+          <button onClick={onClose} className="p-2 shrink-0 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
             <LuX size={18} />
           </button>
         </div>
@@ -303,8 +356,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
 
           {/* ── Personal Info ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Personal Information</p>
+          <Section icon={<LuUser size={14} strokeWidth={2.5} />} title="Personal Information" hint="Name, contact and identity">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <FIELD label="First Name" required>
                 <input className={INPUT} value={form.firstName} onChange={(e) => set("firstName", e.target.value)} placeholder="Marcus" />
@@ -348,11 +400,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
 
             </div>
-          </section>
+          </Section>
 
           {/* ── Role & Location ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Role & Location</p>
+          <Section icon={<LuMapPin size={14} strokeWidth={2.5} />} title="Role & Location" hint="Team, role and where they work from">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Department → resets sub + role */}
               <FIELD label="Assigned Team">
@@ -402,11 +453,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
             </div>
-          </section>
+          </Section>
 
           {/* ── Employment ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
+          <Section icon={<LuBriefcaseBusiness size={14} strokeWidth={2.5} />} title="Employment" hint="Engagement, schedule and status">
 
             {/* Row 1: Engagement Start Date · Pay Category · Pay Cycle */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
@@ -565,11 +615,10 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </div>
                 {errors.restDays && <span className="text-xs text-red-500">{errors.restDays}</span>}
               </div>
-          </section>
+          </Section>
 
           {/* ── Contract Rate ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Contract Rate</p>
+          <Section icon={<LuBanknote size={14} strokeWidth={2.5} />} title="Contract Rate" hint="Monthly is the entered figure; the rest derive from it">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <FIELD label="Currency">
                 <select className={SELECT} value={form.currency} onChange={(e) => set("currency", e.target.value)}>
@@ -601,7 +650,7 @@ value={ratesLocked ? "••••••" : form.hourlyRate}
             ) : (
               <p className="text-xs text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
             )}
-          </section>
+          </Section>
         </form>
 
         {/* Footer */}
