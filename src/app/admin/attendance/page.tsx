@@ -107,6 +107,13 @@ function formatMinutesAsMins(minutes: number) {
 // minutes — "8h / 480 mins" — because a week is judged in hours (the 2,700-min
 // standard is 45h) while every stored figure is minutes. Only whole hours drop
 // the minute part, so 500 reads "8h 20m / 500 mins" rather than a bare "8h".
+// Decimal hours for the "Hours" column — the same minutes-over-60 the
+// payroll voucher uses, so 440 min reads 7.33 in both places. A dash when
+// there is no time, matching the Worksnap Time cell beside it.
+function formatMinutesAsDecimalHours(minutes: number) {
+  return minutes > 0 ? (minutes / 60).toFixed(2) : "-";
+}
+
 function formatMinutesWithHours(minutes: number) {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -1386,7 +1393,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
         const otMinutesToFold = rdOtMinutes + (isFullTimeOffDay ? regularOtMinutes : 0);
         return total + timeValueToMinutes(completionTimeFor(evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold)));
       }, 0);
-  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
+  const weeklyDayHeadings = ["Days", "Decision", "Worksnap Time", "Hours", "Adjusted Time", "Regular Time", "Evaluated Regular Time", "Regular OT Time", "RD OT Time", "Evaluated Time", "US HO Time", "HO OT Time", "Local HO", "Local HO Time", "Time Away Request", "Time Away Request Time", "Ind Time", "Total Completion Time", "Approval Status"]
     // Only Decision is hidden for Fixed-Ind: they have no per-day decision, and
     // the evaluation rules depend on that. Time Away Request is shown — an
     // approved leave day is as relevant to their week as anyone else's.
@@ -1809,7 +1816,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
           </div>
           <div>
             <div className="overflow-x-scroll rounded-xl border border-slate-200">
-              <table className="w-full text-left text-sm" style={{ minWidth: "1580px", borderCollapse: "separate", borderSpacing: 0 }}>
+              <table className="w-full text-left text-sm" style={{ minWidth: "1680px", borderCollapse: "separate", borderSpacing: 0 }}>
                 <thead className="bg-slate-50 sticky top-0 z-30">
                   <tr>
                     {weeklyDayHeadings.map((heading) => (
@@ -1822,7 +1829,9 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         } ${
                           heading === "Worksnap Time" ? `sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
                         } ${
-                          heading === "Adjusted Time" ? `sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
+                          heading === "Hours" ? `sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[100px] min-w-[100px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
+                        } ${
+                          heading === "Adjusted Time" ? `sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 shadow-[1px_0_0_0_#e2e8f0]` : ""
                         } ${
                           heading === "Approval Status" ? "sticky right-0 z-20 w-[140px] min-w-[140px] bg-slate-50 shadow-[-1px_0_0_0_#e2e8f0]" : ""
                         } ${
@@ -1940,7 +1949,15 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         }`}>
                           {rawWorksnapTime}
                         </td>
-                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                        {/* Worksnap Time in decimal hours. Read from the same
+                            rawWorksnapTime the cell to the left shows, so the
+                            two can never disagree. */}
+                        <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-10 w-[100px] min-w-[100px] px-4 py-2 tabular-nums border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
+                          hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
+                        }`}>
+                          {formatMinutesAsDecimalHours(timeValueToMinutes(rawWorksnapTime))}
+                        </td>
+                        <td className={`sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-10 w-[160px] min-w-[160px] px-4 py-2 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                           hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-600"
                         }`}>
                           {isIndia ? "-" : isEditingAdjustedTime ? (
@@ -2051,7 +2068,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                     <td className={`sticky ${isIndia ? "left-[156px]" : "left-[268px]"} z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 font-bold text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       {formatMinutesWithHours(worksnapTotalMinutes)}
                     </td>
-                    <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                    <td className={`sticky ${isIndia ? "left-[296px]" : "left-[408px]"} z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 font-bold tabular-nums text-slate-900 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
+                      {formatMinutesAsDecimalHours(worksnapTotalMinutes)}
+                    </td>
+                    <td className={`sticky ${isIndia ? "left-[396px]" : "left-[508px]"} z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>
                       -
                     </td>
                     <td className="px-4 py-2 font-bold text-slate-900 border-r border-slate-100 bg-red-50">
@@ -2110,7 +2130,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           Offset Credit
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[296px] z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[396px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
                         {/* Regular Time, Evaluated Regular Time, Regular OT Time, RD OT Time,
                             Evaluated Time, US HO Time, HO OT Time, Local HO, Local HO Time,
                             Time Away Request, Time Away Request Time — 11 placeholder
@@ -2137,7 +2158,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           Net Time
                         </td>
                         <td className={`sticky left-[156px] z-20 w-[140px] min-w-[140px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]`}>-</td>
-                        <td className="sticky left-[296px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[296px] z-20 w-[100px] min-w-[100px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
+                        <td className="sticky left-[396px] z-20 w-[160px] min-w-[160px] bg-slate-50 px-4 py-2 text-slate-500 border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0]">-</td>
                         {/* Same 11 placeholder cells as the Offset Credit row above. */}
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
                         <td className="px-4 py-2 text-slate-500 border-r border-slate-100">-</td>
