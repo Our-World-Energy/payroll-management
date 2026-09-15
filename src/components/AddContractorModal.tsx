@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LuX, LuUserPlus, LuPencil, LuCalendarDays } from "react-icons/lu";
+import { LuX, LuUserPlus, LuPencil, LuCalendarDays, LuUser, LuMapPin, LuBriefcaseBusiness, LuBanknote, LuIdCard } from "react-icons/lu";
 import type { Contractor } from "@/app/admin/contractors/types";
 import { useContractorConfig } from "@/components/ContractorConfigContext";
 import { useSalaryAccess } from "@/components/SalaryAccessContext";
@@ -82,18 +82,45 @@ function getPayPeriod() {
 function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(weeklyRateFrom(m)); }
 function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(hourlyRateFrom(m)); }
 
-const FIELD = ({ label, children, required, labelClassName }: { label: string; children: React.ReactNode; required?: boolean; labelClassName?: string }) => (
-  <div className="flex flex-col gap-1">
-    <label className={labelClassName ?? "text-xs font-semibold text-slate-500 uppercase tracking-wider"}>
+const FIELD = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
+  <div className="flex flex-col gap-0.5">
+    <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
       {label}{required && <span className="text-red-400 ml-0.5">*</span>}
     </label>
     {children}
   </div>
 );
 
-const INPUT  = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all bg-white";
+const INPUT  = "w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all bg-white";
 const SELECT = INPUT + " cursor-pointer";
-const READONLY = "w-full border border-slate-100 rounded-lg px-3 py-2 text-sm text-slate-500 bg-slate-50 cursor-not-allowed";
+const READONLY = "w-full border border-slate-100 rounded-lg px-2.5 py-1.5 text-[13px] text-slate-500 bg-slate-50 cursor-not-allowed";
+
+/**
+ * One group of fields. The four sections were previously a bare caption above
+ * a grid, which left the form reading as one long undifferentiated column —
+ * this gives each a card and an icon so the eye can find a group at a glance.
+ */
+function Section({ icon, title, hint, children }: {
+  icon: React.ReactNode;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-slate-50/60 overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2 bg-white border-b border-slate-200">
+        <span className="grid size-6 shrink-0 place-items-center rounded-md bg-teal-50 text-teal-700">
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-[#003527]">{title}</p>
+          {hint && <p className="text-[10px] text-slate-400 truncate">{hint}</p>}
+        </div>
+      </div>
+      <div className="p-3">{children}</div>
+    </section>
+  );
+}
 
 export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const isEdit = !!initial;
@@ -278,44 +305,73 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
   const subDepts = Object.keys(deptTree[form.department] ?? {});
   const roles    = deptTree[form.department]?.[form.subDepartment] ?? [];
 
+  // Initials for the header avatar when editing. Taken from the form rather
+  // than `initial`, so renaming someone updates the avatar as they type.
+  const editInitials = [form.firstName, form.surname]
+    .map((part) => part.trim()[0] ?? "")
+    .join("")
+    .toUpperCase();
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
 
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+      {/* Wider than the app's small dialogs because this form carries
+          three-column grids and a four-column rate row, but sized with the
+          smaller type below rather than for its own sake. max-h keeps it
+          scrolling rather than overflowing. */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="size-9 rounded-xl bg-[#003527] text-white grid place-items-center">
-              {isEdit ? <LuPencil size={17} strokeWidth={2} /> : <LuUserPlus size={18} strokeWidth={2} />}
+        <div className="flex items-start justify-between gap-3 px-5 py-3 border-b border-slate-100 bg-linear-to-b from-slate-50 to-white rounded-t-2xl">
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Editing shows who is being edited, rather than a generic icon. */}
+            <div className="size-9 shrink-0 rounded-xl bg-[#003527] text-white grid place-items-center shadow-sm">
+              {isEdit
+                ? <span className="text-[13px] font-black tracking-tight">{editInitials || "?"}</span>
+                : <LuUserPlus size={16} strokeWidth={2} />}
             </div>
-            <div>
-              <h3 className="text-lg font-bold text-[#003527]">{isEdit ? "Edit Contractor" : "Add New Contractor"}</h3>
-              <p className="text-xs text-slate-400">{isEdit ? `Editing ${initial?.fullName}` : "Fill in the details below"}</p>
+            <div className="min-w-0">
+              <h3 className="text-base font-bold text-[#003527] truncate">{isEdit ? "Edit Contractor" : "Add New Contractor"}</h3>
+              {isEdit ? (
+                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                  <span className="text-[11px] font-semibold text-slate-600 truncate max-w-[16rem]">{initial?.fullName}</span>
+                  {initial?.contractorId && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                      <LuIdCard size={11} strokeWidth={2.5} /> {initial.contractorId}
+                    </span>
+                  )}
+                  {initial?.payCategory && (
+                    <span className="inline-flex items-center rounded-full bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700">
+                      {initial.payCategory}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-400 mt-0.5">Fill in the details below</p>
+              )}
             </div>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
-            <LuX size={18} />
+          <button onClick={onClose} className="p-1.5 shrink-0 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+            <LuX size={16} />
           </button>
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5">
 
           {/* ── Personal Info ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Personal Information</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Section icon={<LuUser size={14} strokeWidth={2.5} />} title="Personal Information" hint="Name, contact and identity">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FIELD label="First Name" required>
                 <input className={INPUT} value={form.firstName} onChange={(e) => set("firstName", e.target.value)} placeholder="Marcus" />
-                {errors.firstName && <span className="text-xs text-red-500">{errors.firstName}</span>}
+                {errors.firstName && <span className="text-[11px] text-red-500">{errors.firstName}</span>}
               </FIELD>
               <FIELD label="Middle Name">
                 <input className={INPUT} value={form.middleName} onChange={(e) => set("middleName", e.target.value)} placeholder="Lee" />
               </FIELD>
               <FIELD label="Surname" required>
                 <input className={INPUT} value={form.surname} onChange={(e) => set("surname", e.target.value)} placeholder="Chen" />
-                {errors.surname && <span className="text-xs text-red-500">{errors.surname}</span>}
+                {errors.surname && <span className="text-[11px] text-red-500">{errors.surname}</span>}
               </FIELD>
 
               {/* Full Name — auto-generated, read-only */}
@@ -338,22 +394,21 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
               <FIELD label="Email" required>
                 <input type="email" className={INPUT} value={form.email} onChange={(e) => set("email", e.target.value)} placeholder="name@company.com" />
-                {errors.email && <span className="text-xs text-red-500">{errors.email}</span>}
+                {errors.email && <span className="text-[11px] text-red-500">{errors.email}</span>}
               </FIELD>
 
               {/* Contractor ID — editable; uniqueness is enforced server-side on save */}
               <FIELD label="Contractor ID" required>
                 <input className={INPUT} value={form.contractorId} onChange={(e) => set("contractorId", e.target.value)} placeholder="#C-1234" />
-                {errors.contractorId && <span className="text-xs text-red-500">{errors.contractorId}</span>}
+                {errors.contractorId && <span className="text-[11px] text-red-500">{errors.contractorId}</span>}
               </FIELD>
 
             </div>
-          </section>
+          </Section>
 
           {/* ── Role & Location ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Role & Location</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Section icon={<LuMapPin size={14} strokeWidth={2.5} />} title="Role & Location" hint="Team, role and where they work from">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {/* Department → resets sub + role */}
               <FIELD label="Assigned Team">
                 <select className={SELECT} value={form.department} onChange={(e) =>
@@ -379,7 +434,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   <option value="">— Select —</option>
                   {roles.map((r) => <option key={r}>{r}</option>)}
                 </select>
-                {errors.role && <span className="text-xs text-red-500">{errors.role}</span>}
+                {errors.role && <span className="text-[11px] text-red-500">{errors.role}</span>}
               </FIELD>
 
               {/* Country */}
@@ -402,17 +457,16 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                 </select>
               </FIELD>
             </div>
-          </section>
+          </Section>
 
           {/* ── Employment ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Employment</p>
+          <Section icon={<LuBriefcaseBusiness size={14} strokeWidth={2.5} />} title="Employment" hint="Engagement, schedule and status">
 
             {/* Row 1: Engagement Start Date · Pay Category · Pay Cycle */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <FIELD label="Engagement Start Date" required>
                 <input type="date" className={INPUT} value={form.hireDate} onChange={(e) => set("hireDate", e.target.value)} />
-                {errors.hireDate && <span className="text-xs text-red-500">{errors.hireDate}</span>}
+                {errors.hireDate && <span className="text-[11px] text-red-500">{errors.hireDate}</span>}
               </FIELD>
               <FIELD label="Pay Category">
                 <select className={SELECT} value={form.payCategory} onChange={(e) => set("payCategory", e.target.value)}>
@@ -425,7 +479,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
             </div>
 
             {/* Row 2: Status · Dismissal Date · Dismissal Reason (conditional) */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <FIELD label="Status">
                 <select className={SELECT} value={form.status} onChange={(e) => set("status", e.target.value as typeof STATUSES[number])}>
                   {STATUSES.map((s) => <option key={s}>{s}</option>)}
@@ -437,7 +491,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     <input type="date" className={INPUT} value={form.dismissalDate} onChange={(e) => set("dismissalDate", e.target.value)} />
                   </FIELD>
                   <div className="flex flex-col gap-1">
-                    <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
+                    <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Dismissal Reason</label>
                     <textarea rows={3} className={INPUT + " resize-none"}
                       placeholder="Describe the reason for dismissal…"
                       value={form.dismissalReason}
@@ -448,7 +502,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
             </div>
 
             {/* Row 3: Shift Type · Shift Start · Shift End */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
               <FIELD label="Shift Type">
                 <select className={SELECT} value={form.shiftType} onChange={(e) => set("shiftType", e.target.value)}>
                   <option value="Fixed">Fixed</option>
@@ -493,7 +547,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               )}
               {form.shiftType === CROSS_DAY_SHIFT && (
                 <div className="sm:col-span-3">
-                  <p className={`text-xs rounded-lg px-3 py-2 border ${
+                  <p className={`text-[11px] rounded-lg px-2.5 py-1.5 border ${
                     isCrossDayWindow(form.shiftFrom, form.shiftTo)
                       ? "text-indigo-700 bg-indigo-50 border-indigo-100"
                       : "text-amber-700 bg-amber-50 border-amber-200"
@@ -511,12 +565,12 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                   <div className="py-2">
                     {form.email.trim() ? (
                       <button type="button" onClick={() => setShowShiftSchedule(true)}
-                        className="inline-flex items-center gap-1.5 text-sm font-semibold text-teal-700 underline decoration-teal-300 hover:text-teal-900 hover:decoration-teal-500 transition-colors">
+                        className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-teal-700 underline decoration-teal-300 hover:text-teal-900 hover:decoration-teal-500 transition-colors">
                         <LuCalendarDays size={15} strokeWidth={2} />
                         Enter Shift Schedule
                       </button>
                     ) : (
-                      <p className="text-xs text-slate-400">Enter the contractor&apos;s email first — the schedule is saved against it.</p>
+                      <p className="text-[11px] text-slate-400">Enter the contractor&apos;s email first — the schedule is saved against it.</p>
                     )}
                   </div>
                 </FIELD>
@@ -524,20 +578,20 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
             </div>
 
             {/* Row 4: Equipment Provided */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <FIELD label="Equipment Provided">
                 <div className="flex items-center gap-4 py-2">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === true}
                       onChange={() => setForm((f) => ({ ...f, equipmentProvided: true }))}
                       className="w-4 h-4 accent-teal-600" />
-                    <span className="text-sm text-slate-700 font-medium">Yes</span>
+                    <span className="text-[13px] text-slate-700 font-medium">Yes</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input type="radio" name="equipmentProvided" checked={form.equipmentProvided === false}
                       onChange={() => setForm((f) => ({ ...f, equipmentProvided: false }))}
                       className="w-4 h-4 accent-teal-600" />
-                    <span className="text-sm text-slate-700 font-medium">No</span>
+                    <span className="text-[13px] text-slate-700 font-medium">No</span>
                   </label>
                 </div>
               </FIELD>
@@ -545,7 +599,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
 
             {/* Typical Non-Working Days */}
             <div className="mt-4 flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                   Typical Non-Working Days<span className="text-red-400 ml-0.5">*</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
@@ -553,7 +607,7 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     const checked = form.restDays.includes(day);
                     return (
                       <button key={day} type="button" onClick={() => toggleRestDay(day)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all ${
                           checked
                             ? "bg-[#003527] text-white border-[#003527]"
                             : "bg-white text-slate-600 border-slate-200 hover:border-teal-400 hover:text-teal-700"
@@ -563,14 +617,18 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
                     );
                   })}
                 </div>
-                {errors.restDays && <span className="text-xs text-red-500">{errors.restDays}</span>}
+                {errors.restDays && <span className="text-[11px] text-red-500">{errors.restDays}</span>}
               </div>
-          </section>
+          </Section>
 
           {/* ── Contract Rate ── */}
-          <section>
-            <p className="text-xs font-bold uppercase tracking-widest text-teal-600 mb-3">Contract Rate</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <Section icon={<LuBanknote size={14} strokeWidth={2.5} />} title="Contract Rate" hint="Monthly is the entered figure; the rest derive from it">
+            {/* Currency needs far less room than a rate, and the three rate
+                labels need enough width not to wrap — four equal columns left
+                them wrapping, which pushed their inputs below Currency's since
+                FIELD stacks label over input. items-end keeps every box on one
+                baseline even if a label does wrap on a narrow viewport. */}
+            <div className="grid grid-cols-2 sm:grid-cols-[0.7fr_1.1fr_1.1fr_1.1fr] gap-3 items-end">
               <FIELD label="Currency">
                 <select className={SELECT} value={form.currency} onChange={(e) => set("currency", e.target.value)}>
                   {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
@@ -578,41 +636,41 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
               </FIELD>
 
               {/* Monthly rate — main source */}
-              <FIELD label="Monthly Contract Rate" required={!ratesLocked} labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              <FIELD label="Monthly Contract Rate" required={!ratesLocked}>
                 <input type={ratesLocked ? "text" : "number"} className={ratesLocked ? READONLY : INPUT} value={ratesLocked ? "••••••" : form.monthlyRate}
                   disabled={ratesLocked}
                   onChange={(e) => set("monthlyRate", e.target.value)} placeholder="5200" />
               </FIELD>
 
               {/* Weekly & Hourly — auto-calculated */}
-              <FIELD label="Weekly Contract Rate" labelClassName="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+              <FIELD label="Weekly Contract Rate">
                 <input className={READONLY} readOnly
-value={ratesLocked ? "••••••" : form.weeklyRate}
+                  value={ratesLocked ? "••••••" : form.weeklyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
-              <FIELD label="Hourly Rate (auto)">
+              <FIELD label="Hourly Contract Rate">
                 <input className={READONLY} readOnly
-value={ratesLocked ? "••••••" : form.hourlyRate}
+                  value={ratesLocked ? "••••••" : form.hourlyRate}
                   placeholder="Auto from monthly" />
               </FIELD>
             </div>
             {ratesLocked ? (
-              <p className="text-xs text-amber-700 mt-2">Contract rates are hidden — verify your identity (Salary locked · Verify in the top bar) to view or change them. Saving keeps the stored rates unchanged.</p>
+              <p className="text-[11px] text-amber-700 mt-2">Contract rates are hidden — verify your identity (Salary locked · Verify in the top bar) to view or change them. Saving keeps the stored rates unchanged.</p>
             ) : (
-              <p className="text-xs text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
+              <p className="text-[11px] text-slate-400 mt-2">Weekly = Monthly × 12 ÷ 52 &nbsp;·&nbsp; Hourly = Weekly ÷ 5 ÷ 8</p>
             )}
-          </section>
+          </Section>
         </form>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 flex items-center justify-end gap-3 bg-slate-50 rounded-b-2xl">
-          {saveError && <p className="mr-auto text-sm font-medium text-red-600">{saveError}</p>}
-          <button type="button" onClick={onClose} disabled={isSaving} className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+        <div className="px-5 py-3 border-t border-slate-100 flex items-center justify-end gap-2.5 bg-slate-50 rounded-b-2xl">
+          {saveError && <p className="mr-auto text-[13px] font-medium text-red-600">{saveError}</p>}
+          <button type="button" onClick={onClose} disabled={isSaving} className="px-3.5 py-1.5 text-[13px] font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
             Cancel
           </button>
           <button onClick={handleSubmit as never} disabled={isSaving}
-            className="px-5 py-2 bg-[#003527] hover:bg-[#064E3B] text-white text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-            {isEdit ? <LuPencil size={15} strokeWidth={2} /> : <LuUserPlus size={15} strokeWidth={2} />}
+            className="px-4 py-1.5 bg-[#003527] hover:bg-[#064E3B] text-white text-[13px] font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            {isEdit ? <LuPencil size={14} strokeWidth={2} /> : <LuUserPlus size={14} strokeWidth={2} />}
             {isSaving ? "Saving…" : isEdit ? "Save Changes" : "Add Contractor"}
           </button>
         </div>

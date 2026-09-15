@@ -15,6 +15,119 @@ import {
   LuX, LuChevronLeft,
 } from "react-icons/lu";
 
+// ── Masthead artwork ─────────────────────────────────────────────────────────
+// All inline SVG: it has to take the brand green, it costs no request, and
+// there is no asset to lose. Every piece is aria-hidden and
+// pointer-events-none — decoration a screen reader gains nothing from, laid
+// behind text it must never intercept a click from.
+
+/**
+ * A single hill on the left, falling away to nothing by the middle. The right
+ * side is deliberately bare, leaving the panel array standing on open ground.
+ *
+ * Two layers: the back one taller and paler, the front one lower and slightly
+ * stronger, which is what gives the overlap its depth. Both start on a vertical
+ * at the left edge rather than on the baseline, so the fill reaches the side at
+ * full height instead of tapering to a point the way a plain dome does.
+ */
+function HillsBackdrop({ className = "" }: { className?: string }) {
+  const hills = [
+    { d: "M-220 120 L-220 88 Q 120 38 480 120 Z", opacity: 0.45 },
+    { d: "M-220 120 L-220 102 Q 60 64 380 120 Z", opacity: 0.6 },
+  ];
+  return (
+    // preserveAspectRatio none: abstract curves, so stretching them to any
+    // masthead width reads fine and avoids a seam at the edges.
+    <svg viewBox="0 0 1200 120" preserveAspectRatio="none" fill="none" aria-hidden className={className}>
+      {hills.map((h, i) => <path key={i} d={h.d} fill="currentColor" opacity={h.opacity} />)}
+    </svg>
+  );
+}
+
+/** Two-leaf sprout, sitting on the hills at the far left. */
+function SproutMark({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 64" fill="none" aria-hidden className={className}>
+      <path d="M32 62 V26" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" />
+      {/* Left leaf, then right — the right slightly lighter so they read as
+          two separate leaves rather than one blob. */}
+      <path d="M32 34 C 18 34 7 25 4 11 C 20 11 31 21 32 34 Z" fill="currentColor" />
+      <path d="M32 28 C 46 28 57 19 60 5 C 44 5 33 15 32 28 Z" fill="currentColor" opacity="0.7" />
+    </svg>
+  );
+}
+
+/**
+ * Sun and a three-panel array on a stand.
+ *
+ * Each panel face is a parallelogram — a rectangle would read as flat-on,
+ * where the whole point is that the array is angled toward the sun. The cell
+ * lines are interpolated across that shape rather than drawn as a straight
+ * grid, so they follow the tilt instead of cutting across it.
+ */
+function SolarArrayScene({ className = "" }: { className?: string }) {
+  const GROUND = 132;
+
+  // One panel, as corner points. Top edge sits right of the bottom edge, which
+  // is what gives the lean.
+  function panel(x: number, y: number, w: number, h: number, lean: number) {
+    const tl = [x + lean, y], tr = [x + lean + w, y];
+    const br = [x + w, y + h], bl = [x, y + h];
+    const lerp = (a: number[], b: number[], t: number) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    // 3 columns x 2 rows of cells.
+    const cols = [1, 2].map((i) => [lerp(tl, tr, i / 3), lerp(bl, br, i / 3)]);
+    const rows = [1].map((i) => [lerp(tl, bl, i / 2), lerp(tr, br, i / 2)]);
+    return { face: [tl, tr, br, bl], cols, rows, mid: lerp(bl, br, 0.5) };
+  }
+
+  const panels = [panel(4, 58, 52, 40, 16), panel(62, 50, 52, 40, 16), panel(120, 42, 52, 40, 16)];
+
+  return (
+    <svg viewBox="0 0 220 150" fill="none" aria-hidden className={className}>
+      {/* Sun: a pale disc with short rays, warm against all the green. */}
+      <g>
+        {/* cy 40 with rays reaching 34: at cy 30 the top ray landed at y -5
+            and was clipped by the viewBox. */}
+        <circle cx="52" cy="40" r="19" fill="#FBD38D" opacity="0.85" />
+        <g stroke="#F6AD55" strokeWidth="3.5" strokeLinecap="round" opacity="0.8">
+          {Array.from({ length: 8 }, (_, i) => {
+            const a = (i * 45 * Math.PI) / 180;
+            return (
+              <line
+                key={i}
+                x1={52 + Math.cos(a) * 26} y1={40 + Math.sin(a) * 26}
+                x2={52 + Math.cos(a) * 34} y2={40 + Math.sin(a) * 34}
+              />
+            );
+          })}
+        </g>
+      </g>
+
+      {/* Stands, drawn before the faces so the posts sit behind them. */}
+      <g stroke="currentColor" strokeWidth="3" strokeLinecap="round" opacity="0.9">
+        {panels.map((p, i) => (
+          <line key={i} x1={p.mid[0]} y1={p.mid[1]} x2={p.mid[0]} y2={GROUND} />
+        ))}
+        <line x1={panels[0].face[3][0] - 2} y1={GROUND} x2={panels[2].face[2][0] + 2} y2={GROUND} />
+      </g>
+
+      {panels.map((p, i) => (
+        <g key={i}>
+          <polygon points={p.face.map((pt) => pt.join(",")).join(" ")} fill="currentColor" />
+          <g stroke="#ffffff" strokeWidth="1.4" opacity="0.5">
+            {p.cols.map(([a, b], j) => <line key={`c${j}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />)}
+            {p.rows.map(([a, b], j) => <line key={`r${j}`} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} />)}
+          </g>
+          <polygon
+            points={p.face.map((pt) => pt.join(",")).join(" ")}
+            fill="none" stroke="#ffffff" strokeWidth="1.6" opacity="0.85"
+          />
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 // ── Calendar helpers ──────────────────────────────────────────────────────────
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAYS   = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
@@ -83,8 +196,14 @@ function HolidayCalendarModal({
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const todayStr = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
 
-  // Show contractor's country + Global
-  const visible = holidays.filter(h => h.country === country || h.country === "Global");
+  // The contractor's own country, Global, and the US.
+  //
+  // US holidays are included for everyone deliberately: Attendance credits US
+  // HO Time to every contractor whatever their country (see holidayTimeFor),
+  // so a US holiday affects their week's pay and belongs on their calendar.
+  // Filtering to their own country alone hid a day they are paid for.
+  const scope = Array.from(new Set([country, "Global", "United States"].filter(Boolean)));
+  const visible = holidays.filter(h => scope.includes(h.country));
 
   const cells = buildCalendar(calYear, calMonth);
 
@@ -123,7 +242,7 @@ function HolidayCalendarModal({
           <div className="flex items-center gap-2">
             <LuCalendarDays size={15} className="text-white/70" strokeWidth={2} />
             <h2 className="text-sm font-bold text-white">Holiday Calendar</h2>
-            <span className="text-xs text-white/40 ml-1">· {country} &amp; Global</span>
+            <span className="text-xs text-white/40 ml-1">· {scope.join(" · ")}</span>
           </div>
           <button onClick={onClose} className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors">
             <LuX size={14} strokeWidth={2.5} />
@@ -165,7 +284,7 @@ function HolidayCalendarModal({
               {/* Day headers */}
               <div className="grid grid-cols-7 mb-1">
                 {DAYS.map(d => (
-                  <div key={d} className="text-center text-[10px] font-bold text-slate-300 uppercase tracking-wider py-0.5">{d}</div>
+                  <div key={d} className="text-center text-[11px] font-bold text-slate-400 uppercase tracking-wider py-1">{d}</div>
                 ))}
               </div>
 
@@ -184,19 +303,20 @@ function HolidayCalendarModal({
 
                   return (
                     <div key={i} title={dots.map(h => h.name).join(" · ")}
-                      className={`aspect-square rounded-xl p-1 flex flex-col border transition-all cursor-default ${cellCls}`}>
-                      <span className={`text-[11px] tabular-nums leading-none ${isToday ? "font-black" : "font-medium"}`}>{day}</span>
+                      className={`min-h-[3.75rem] sm:min-h-[4.25rem] rounded-xl p-1.5 flex flex-col border transition-all cursor-default ${cellCls}`}>
+                      <div className="flex items-center gap-1">
+                        <span className={`text-sm tabular-nums leading-none ${isToday ? "font-black" : "font-semibold"}`}>{day}</span>
+                        {hasHol && dots.slice(0, 2).map((h, di) => (
+                          <span key={di} className={`size-1.5 rounded-full shrink-0 ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
+                        ))}
+                      </div>
                       {hasHol && (
-                        <>
-                          <div className="flex gap-0.5 mt-0.5">
-                            {dots.slice(0, 2).map((h, di) => (
-                              <span key={di} className={`w-1 h-1 rounded-full ${COUNTRY_COLORS[h.country] ?? "bg-slate-400"}`} />
-                            ))}
-                          </div>
-                          <span className={`mt-auto text-[7px] leading-tight w-full truncate font-semibold ${isToday ? "text-white/60" : "text-teal-600"}`}>
-                            {dots[0].name}
-                          </span>
-                        </>
+                        // Two lines before clamping: most holiday names do not
+                        // fit a calendar cell on one, and the tooltip carries
+                        // the full text either way.
+                        <span className={`mt-auto text-[10px] leading-[1.15] w-full font-semibold line-clamp-2 ${isToday ? "text-white/75" : "text-teal-700"}`}>
+                          {dots[0].name}
+                        </span>
                       )}
                     </div>
                   );
@@ -205,7 +325,7 @@ function HolidayCalendarModal({
 
               {/* Legend */}
               <div className="flex items-center gap-3 mt-3 pt-3 border-t border-slate-100">
-                {[country, "Global"].filter(Boolean).map(c => (
+                {scope.map(c => (
                   <div key={c} className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full ${COUNTRY_COLORS[c] ?? "bg-slate-400"}`} />
                     <span className="text-[11px] text-slate-400">{c}</span>
@@ -479,7 +599,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       )}
 
       {/* ── Masthead: top rule ── */}
-      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-y-2 border-[#003527] py-1.5 px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-[#003527]">
+      <div className="-mx-4 sm:-mx-5 md:-mx-6 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-y-2 border-[#003527] py-1.5 px-4 sm:px-5 md:px-6 text-[10px] font-bold uppercase tracking-[0.18em] text-[#003527]">
         <span className="inline-flex items-center gap-2 min-w-0 justify-self-start truncate">
           <LuGlobe size={13} strokeWidth={2} className="text-emerald-700" />
           Our World Energy
@@ -492,21 +612,38 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       </div>
 
       {/* ── Masthead: the nameplate ── */}
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4 border-b-2 border-[#003527] py-4 px-1">
-        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36">
-          &ldquo;Together<br />We Power<br />Possibilities&rdquo;
-        </p>
-        <div className="text-center">
-          <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
-            OWE DAILY
-          </h1>
-          <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
-            News &middot; Announcements &middot; People &middot; Updates
+      <div className="relative -mx-4 sm:-mx-5 md:-mx-6 overflow-hidden border-b-2 border-[#003527] bg-linear-to-b from-white to-emerald-50/40">
+        {/* Artwork layer. Hills anchor the band, the sprout and the array stand
+            on them, and all of it sits behind the type. */}
+        {/* Height scales with the viewport, not fixed. preserveAspectRatio
+            none stretches these curves to the band's width, so a fixed pixel
+            height left them flatter and flatter as the screen grew — the
+            hills appeared to shrink even though they were the same size.
+            Growing the height with the width keeps the curve's proportions. */}
+        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(3.5rem,5vw,6rem)] text-emerald-200/60" />
+        <SproutMark className="pointer-events-none absolute bottom-1 left-4 w-[clamp(2.5rem,3.2vw,4rem)] text-emerald-300/80 sm:left-5 md:left-6" />
+        {/* Right of centre so it clears the wordmark, and hidden on small
+            screens where there is no room for it beside the type. */}
+        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(9rem,13vw,15rem)] text-[#0B4F3A] md:block" />
+
+        <div className="relative grid grid-cols-1 items-center gap-4 px-4 py-5 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-7 lg:py-9 xl:py-11">
+          <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
+            &ldquo;Together<br />We Power<br />Possibilities&rdquo;
+          </p>
+          <div className="text-center">
+            <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
+              OWE DAILY
+            </h1>
+            <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
+              News &middot; Announcements &middot; People &middot; Updates
+            </p>
+            {/* Short rule closing the nameplate. */}
+            <span className="mt-3 mx-auto block h-[3px] w-24 rounded-full bg-emerald-600/70" />
+          </div>
+          <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36 border-l-2 border-emerald-200 pl-3">
+            {greeting},<br />{firstName}.
           </p>
         </div>
-        <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36">
-          {greeting},<br />{firstName}.
-        </p>
       </div>
 
       {loading ? (

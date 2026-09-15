@@ -586,15 +586,34 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   // updateLeaveRequestStatus owns the balance side effects (deducting from the
   // right pool, and putting hours back when a prior decision is reversed), so
   // this only reloads afterwards rather than adjusting anything itself.
-  async function handleReviewDecision(requestId: string, status: "Approved" | "Rejected") {
+  /**
+   * Decide every request passed in. A date range is filed as one request per
+   * day, so a two-day request is two rows that were submitted together and
+   * have to be decided together — approving one and leaving the other pending
+   * is not a state anyone asked for.
+   *
+   * Sequential, not Promise.all: each decision reads the contractor's balance
+   * and writes it back, so running them together would have both read the same
+   * starting figure and the second would overwrite the first's deduction.
+   */
+  async function handleReviewDecision(requestIds: string[], status: "Approved" | "Rejected") {
     setDecisionBusy(status);
     setDecisionError("");
-    const res = await updateLeaveRequestStatus(requestId, status);
-    setDecisionBusy(null);
-    if (!res.ok) {
-      setDecisionError(res.error ?? "Could not save the decision. Please try again.");
-      return;
+    for (const [index, id] of requestIds.entries()) {
+      const res = await updateLeaveRequestStatus(id, status);
+      if (!res.ok) {
+        setDecisionBusy(null);
+        // Say how far it got: the earlier days are already decided, so the
+        // reader needs to know this was partial rather than a no-op.
+        setDecisionError(
+          (res.error ?? "Could not save the decision. Please try again.")
+          + (index > 0 ? ` (${index} of ${requestIds.length} already ${status.toLowerCase()})` : ""),
+        );
+        await reloadData();
+        return;
+      }
     }
+    setDecisionBusy(null);
     setReviewRowId(null);
     await reloadData();
   }
@@ -1714,7 +1733,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
             </div>
             <div>
               <h2 className="text-[clamp(1rem,1.45vw,1.25rem)] font-bold text-[#003527] tracking-tight">{pageTitle}</h2>
-              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and sick leave balances across your contractor workforce.</p>
+              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and Medical Unavailability balances across your contractor workforce.</p>
             </div>
           </div>
         </div>
@@ -2104,13 +2123,28 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
       {/* Review popup: what the contractor has now, beside what they are
           asking for. Read-only, like the rest of this view. */}
       {reviewRow && (() => {
-        const req = reviewRow.pendingRequest ?? reviewRow.latestRequest;
-        const isPending = !!reviewRow.pendingRequest;
-        const requestedHours = req ? leaveTypeHours(req.type) * (req.type.endsWith("Half Day") ? 1 : req.durationDays) : 0;
+        // Every day still awaiting a decision, oldest first so a range reads
+        // in date order. A date range is filed as one request per day, so
+        // showing only the newest hid the rest of the range here and left them
+        // to appear under Historical instead.
+        const pendingReqs = leaveRequests
+          .filter((r) => r.email === reviewRow.email && r.status === "Pending")
+          .slice()
+          .sort((a, b) => a.startDate.localeCompare(b.startDate));
+        const isPending = pendingReqs.length > 0;
+        // Falls back to the latest request of any status when nothing is
+        // pending, so the tab still shows what was last filed.
+        const shownReqs = isPending
+          ? pendingReqs
+          : (reviewRow.latestRequest ? [reviewRow.latestRequest] : []);
+        const req = shownReqs[0];
+        const requestedHours = shownReqs.reduce(
+          (sum, r) => sum + leaveTypeHours(r.type) * (r.type.endsWith("Half Day") ? 1 : r.durationDays), 0);
+        const shownIds = new Set(shownReqs.map((r) => r.id));
         // leaveRequests arrives newest-first, so this preserves that order.
-        // The request shown on the New tab is excluded so the two tabs never
-        // show the same row twice.
-        const history = leaveRequests.filter((r) => r.email === reviewRow.email && r.id !== req?.id);
+        // Everything on the New tab is excluded so the two tabs never show the
+        // same row twice.
+        const history = leaveRequests.filter((r) => r.email === reviewRow.email && !shownIds.has(r.id));
         const Line = ({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) => (
           <div className="flex items-baseline justify-between gap-4 py-1.5 border-b border-dotted border-slate-200 last:border-b-0">
             <span className="text-xs text-slate-500">{label}</span>
@@ -2139,7 +2173,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
 
               <div className="flex items-center gap-1 px-6 pt-3 border-b border-slate-100">
                 {([
-                  { key: "new" as const, label: isPending ? "New" : "Latest", count: req ? 1 : 0 },
+                  { key: "new" as const, label: isPending ? "New" : "Latest", count: shownReqs.length },
                   { key: "history" as const, label: "Historical", count: history.length },
                 ]).map((t) => (
                   <button
@@ -2204,33 +2238,52 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
               <div className="px-6 py-5 space-y-4">
                 <section>
                   <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-2">
-                    {isPending ? "New Request" : "Last Request"}
+                    {isPending
+                      ? shownReqs.length > 1 ? `New Request · ${shownReqs.length} days` : "New Request"
+                      : "Last Request"}
                   </p>
-                  <div className="rounded-xl border border-slate-200 px-4 py-3">
-                    {req ? (<>
-                      <Line label="Type" value={leaveTypeDisplayLabel(req.type)} />
-                      <Line label="Dates" value={
-                        req.endDate && req.endDate !== req.startDate
-                          ? `${fmtDate(req.startDate)} – ${fmtDate(req.endDate)}`
-                          : fmtDate(req.startDate)
-                      } />
-                      <Line label="Duration" value={req.type.endsWith("Half Day") ? "Half day" : `${req.durationDays} day${req.durationDays !== 1 ? "s" : ""}`} />
-                      <Line label="Hours Requested" value={`${fmtBalance(requestedHours)}h`} strong />
-                      <Line label="Status" value={
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                          req.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                          req.status === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
-                          "bg-amber-50 text-amber-700 border-amber-200"
-                        }`}>
-                          {req.status === "Approved" ? <LuCircleCheck size={11} /> : req.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                          {req.status}
-                        </span>
-                      } />
-                      <Line label="Filed" value={fmtDate(String(req.createdAt).slice(0, 10))} />
-                    </>) : (
+                  {shownReqs.length === 0 ? (
+                    <div className="rounded-xl border border-slate-200 px-4 py-3">
                       <p className="py-6 text-center text-sm text-slate-400">No time away request on file.</p>
-                    )}
-                  </div>
+                    </div>
+                  ) : (<>
+                    {/* One block per day. A range arrives as separate rows, so
+                        this lists them rather than collapsing them into a span
+                        no single row actually holds. */}
+                    <div className="space-y-2">
+                      {shownReqs.map((r) => (
+                        <div key={r.id} className="rounded-xl border border-slate-200 px-4 py-3">
+                          <Line label="Type" value={leaveTypeDisplayLabel(r.type)} />
+                          <Line label="Date" value={
+                            r.endDate && r.endDate !== r.startDate
+                              ? `${fmtDate(r.startDate)} – ${fmtDate(r.endDate)}`
+                              : fmtDate(r.startDate)
+                          } />
+                          <Line label="Duration" value={r.type.endsWith("Half Day") ? "Half day" : `${r.durationDays} day${r.durationDays !== 1 ? "s" : ""}`} />
+                          <Line label="Status" value={
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                              r.status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                              r.status === "Rejected" ? "bg-red-50 text-red-600 border-red-200" :
+                              "bg-amber-50 text-amber-700 border-amber-200"
+                            }`}>
+                              {r.status === "Approved" ? <LuCircleCheck size={11} /> : r.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
+                              {r.status}
+                            </span>
+                          } />
+                          <Line label="Filed" value={fmtDate(String(r.createdAt).slice(0, 10))} />
+                        </div>
+                      ))}
+                    </div>
+                    {/* The figure that matters for the decision is the total
+                        across every day being decided, not any one day. */}
+                    <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5">
+                      <Line
+                        label={shownReqs.length > 1 ? `Hours Requested · ${shownReqs.length} days` : "Hours Requested"}
+                        value={`${fmtBalance(requestedHours)}h`}
+                        strong
+                      />
+                    </div>
+                  </>)}
                 </section>
 
                 <section>
@@ -2258,27 +2311,27 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   </button>
                   {/* Only a request still awaiting a decision can be decided
                       here; an already-approved or declined one is read-only. */}
-                  {req && isPending && reviewTab === "new" ? (
+                  {isPending && reviewTab === "new" ? (
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleReviewDecision(req.id, "Rejected")}
+                        onClick={() => handleReviewDecision(shownReqs.map((r) => r.id), "Rejected")}
                         disabled={decisionBusy !== null}
                         className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {decisionBusy === "Rejected"
                           ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
                           : <LuCircleX size={13} strokeWidth={2} />}
-                        {decisionBusy === "Rejected" ? "Declining…" : "Decline"}
+                        {decisionBusy === "Rejected" ? "Declining…" : shownReqs.length > 1 ? `Decline all ${shownReqs.length}` : "Decline"}
                       </button>
                       <button
-                        onClick={() => handleReviewDecision(req.id, "Approved")}
+                        onClick={() => handleReviewDecision(shownReqs.map((r) => r.id), "Approved")}
                         disabled={decisionBusy !== null}
                         className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {decisionBusy === "Approved"
                           ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
                           : <LuCircleCheck size={13} strokeWidth={2} />}
-                        {decisionBusy === "Approved" ? "Approving…" : "Approve"}
+                        {decisionBusy === "Approved" ? "Approving…" : shownReqs.length > 1 ? `Approve all ${shownReqs.length}` : "Approve"}
                       </button>
                     </div>
                   ) : (
