@@ -1649,9 +1649,19 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     // Time Credit"-style fix for excess hours, so it stays "For Review" until
     // resolved some other way. Hourly contractors always save as "APPROVED"
     // (original behavior) regardless of per-day decisions.
-    const requestStatus = isIndia
-      ? (finalCompletionMinutes >= 2400 && finalCompletionMinutes <= 2700 ? "APPROVED" : "OPEN")
-      : "APPROVED";
+    //
+    // Pushing to Processed is itself the decision, so it approves the week
+    // regardless of the band. Without this, "Push Process" left the week OPEN
+    // and Payroll — which treats only an APPROVED week as reviewed — ignored
+    // the saved Completion Time and fell back to Evaluated Regular Time. For
+    // Fixed-Ind that silently dropped the week's OT minutes from Reg HRS (they
+    // belong in Completion Time, since the category pays no separate OT), so a
+    // 1,930-min week paid as 31.83 hrs instead of 32.17.
+    const requestStatus = markProcessed
+      ? "APPROVED"
+      : isIndia
+        ? (finalCompletionMinutes >= 2400 && finalCompletionMinutes <= 2700 ? "APPROVED" : "OPEN")
+        : "APPROVED";
 
     if (record.worksnapUserId != null) {
       setIsSaving(true);
