@@ -620,25 +620,25 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
             height left them flatter and flatter as the screen grew — the
             hills appeared to shrink even though they were the same size.
             Growing the height with the width keeps the curve's proportions. */}
-        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(2.5rem,3.6vw,4.5rem)] text-emerald-200/60" />
-        <SproutMark className="pointer-events-none absolute bottom-1 left-4 w-[clamp(2rem,2.4vw,3rem)] text-emerald-300/80 sm:left-5 md:left-6" />
+        <HillsBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 h-[clamp(3.5rem,5vw,6rem)] text-emerald-200/60" />
+        <SproutMark className="pointer-events-none absolute bottom-1 left-4 w-[clamp(2.5rem,3.2vw,4rem)] text-emerald-300/80 sm:left-5 md:left-6" />
         {/* Right of centre so it clears the wordmark, and hidden on small
             screens where there is no room for it beside the type. */}
-        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(7rem,9.5vw,11rem)] text-[#0B4F3A] md:block" />
+        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(9rem,13vw,15rem)] text-[#0B4F3A] md:block" />
 
-        <div className="relative grid grid-cols-1 items-center gap-3 px-4 py-3 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-4 lg:py-5">
+        <div className="relative grid grid-cols-1 items-center gap-4 px-4 py-5 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-7 lg:py-9 xl:py-11">
           <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
             &ldquo;Together<br />We Power<br />Possibilities&rdquo;
           </p>
           <div className="text-center">
-            <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(1.75rem,4.4vw,3.25rem)]">
+            <h1 className="font-serif font-bold text-[#003527] leading-none tracking-tight text-[clamp(2.25rem,6vw,4.25rem)]">
               OWE DAILY
             </h1>
             <p className="mt-1.5 text-[9px] md:text-[10px] font-bold uppercase tracking-[0.28em] text-slate-500">
               News &middot; Announcements &middot; People &middot; Updates
             </p>
             {/* Short rule closing the nameplate. */}
-            <span className="mt-2 mx-auto block h-[3px] w-20 rounded-full bg-emerald-600/70" />
+            <span className="mt-3 mx-auto block h-[3px] w-24 rounded-full bg-emerald-600/70" />
           </div>
           <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 text-right justify-self-end w-36 border-l-2 border-emerald-200 pl-3">
             {greeting},<br />{firstName}.
@@ -679,7 +679,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       {isMyBirthdayToday && (
         <>
           <Confetti />
-          <div className="mt-3 rounded-lg border-2 border-[#003527] bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-800 text-white px-5 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-4 rounded-lg border-2 border-[#003527] bg-linear-to-r from-emerald-600 via-teal-600 to-emerald-800 text-white px-5 py-4 flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-white/75">Special Edition</p>
               <h2 className="font-serif text-2xl md:text-3xl font-bold mt-0.5">Happy Birthday, {firstName}! &#127881;</h2>
@@ -693,7 +693,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       {globalBanners.map((a, i) => (
         <div
           key={a.id}
-          className="mt-3 overflow-hidden rounded-lg border-2 border-[#003527] bg-[#003527] text-white animate-announcement-slide-in"
+          className="mt-4 overflow-hidden rounded-lg border-2 border-[#003527] bg-[#003527] text-white animate-announcement-slide-in"
         >
           <div className="grid grid-cols-1 md:grid-cols-[7rem_1fr_auto]">
             {a.imageUrl ? (
@@ -716,12 +716,12 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       ))}
 
       {/* ── Two columns: announcements | holidays ── */}
-      <div className="mt-3 grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-0 lg:gap-5 border-t-2 border-[#003527] pt-2.5">
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-0 lg:gap-6 border-t-2 border-[#003527] pt-3">
 
         {/* Left column — the news */}
         <div className="lg:pr-6 lg:border-r border-slate-200 min-w-0">
           <div className="flex items-end justify-between gap-4 border-b border-slate-300 pb-1.5 mb-3">
-            <h3 className="font-serif text-xl font-bold text-[#003527] leading-none">Latest Announcements</h3>
+            <h3 className="font-serif text-2xl font-bold text-[#003527] leading-none">Latest Announcements</h3>
             <button
               onClick={() => setNewsOpen(true)}
               className="text-[10px] font-bold uppercase tracking-[0.18em] text-emerald-700 whitespace-nowrap hover:underline"
@@ -733,7 +733,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
           {announcements.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">No announcements yet.</p>
           ) : (
-            <div className="divide-y divide-slate-200 max-h-[clamp(12rem,34vh,26rem)] overflow-y-auto pr-1">
+            <div className="divide-y divide-slate-200 max-h-[30rem] overflow-y-auto pr-1">
               {announcements.map((a, i) => (
                 <article key={a.id} className="flex gap-4 py-3">
                   {a.imageUrl ? (
@@ -761,9 +761,9 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
         </div>
 
         {/* Right column — the almanac */}
-        <aside className="mt-4 lg:mt-0 min-w-0">
+        <aside className="mt-6 lg:mt-0 min-w-0">
           <div className="flex items-end justify-between gap-3 border-b border-slate-300 pb-1.5 mb-3">
-            <h3 className="font-serif text-lg font-bold text-[#003527] leading-none">{MONTHS[new Date().getMonth()]} Holidays</h3>
+            <h3 className="font-serif text-xl font-bold text-[#003527] leading-none">{MONTHS[new Date().getMonth()]} Holidays</h3>
             <span className="inline-flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-400 whitespace-nowrap">
               <LuCalendarDays size={12} strokeWidth={2} /> Mark your calendar
             </span>
@@ -772,7 +772,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
           {upcomingHols.length === 0 ? (
             <p className="py-6 text-center text-sm text-slate-400">No holidays this month.</p>
           ) : (
-            <div className="space-y-2 max-h-[clamp(8rem,22vh,18rem)] overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-[20rem] overflow-y-auto pr-1">
               {upcomingHols.map((h) => {
                 const iso = h.date.slice(0, 10);
                 const [, mm, dd] = iso.split("-").map(Number);
@@ -803,18 +803,18 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
 
           <button
             onClick={() => setCalOpen(true)}
-            className="mt-2.5 w-full inline-flex items-center justify-center gap-2 rounded-md bg-[#003527] hover:bg-[#064E3B] text-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] transition-colors"
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 rounded-md bg-[#003527] hover:bg-[#064E3B] text-white px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.16em] transition-colors"
           >
             <LuCalendarDays size={13} strokeWidth={2} /> View Full Holiday Calendar &rarr;
           </button>
 
-          <figure className="mt-3 border-y border-slate-200 py-3 text-center">
+          <figure className="mt-4 border-y border-slate-200 py-4 text-center">
             <blockquote className="font-serif italic text-lg text-[#003527] leading-snug">
               Take time to rest and recharge.
             </blockquote>
           </figure>
 
-          <div className="mt-3 rounded-md bg-[#003527] text-white px-4 py-2.5 flex items-center justify-between gap-3">
+          <div className="mt-4 rounded-md bg-[#003527] text-white px-4 py-3 flex items-center justify-between gap-3">
             <span className="text-[10px] font-bold uppercase tracking-[0.18em]">Our World Energy</span>
             <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-emerald-200/80 text-right leading-relaxed">
               People<br />Progress<br />Possibilities
