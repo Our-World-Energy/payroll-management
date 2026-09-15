@@ -116,15 +116,26 @@ function totalTimeOffRequestMinutesFor(
     ) * 60, 0);
 }
 
-/** "Aug 30 - Sep 5" for the exported range, dropping the repeated month. */
+/**
+ * "Aug 30 - Sep 5, 2026" for the exported range.
+ *
+ * The month is dropped when both ends share one ("Sep 6 - 12, 2026") and the
+ * year is written once at the end — except across a year boundary, where each
+ * end carries its own ("Dec 27, 2026 - Jan 2, 2027"), since one trailing year
+ * would be wrong for the start date.
+ */
 function fmtPayPeriod(from: string, to: string) {
   if (!from || !to) return "";
   const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
   const mon = (x: Date) => x.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
   const start = d(from), end = d(to);
+  if (start.getUTCFullYear() !== end.getUTCFullYear()) {
+    return `${mon(start)} ${start.getUTCDate()}, ${start.getUTCFullYear()}`
+      + ` - ${mon(end)} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+  }
   const left = `${mon(start)} ${start.getUTCDate()}`;
   const right = mon(start) === mon(end) ? `${end.getUTCDate()}` : `${mon(end)} ${end.getUTCDate()}`;
-  return `${left} - ${right}`;
+  return `${left} - ${right}, ${end.getUTCFullYear()}`;
 }
 
 function fmtVoucherDate(iso: string) {
