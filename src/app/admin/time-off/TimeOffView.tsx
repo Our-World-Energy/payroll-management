@@ -2268,6 +2268,18 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                             </span>
                           } />
                           <Line label="Filed" value={fmtDate(String(r.createdAt).slice(0, 10))} />
+                          {/* The day's own reason, the way the Historical
+                              cards show theirs. A range carries the same text
+                              on each of its days, but separate single-day
+                              requests can differ — and the reason belongs with
+                              the day being decided, not in a panel below that
+                              could only ever show one of them. */}
+                          <div className="mt-2 pt-2 border-t border-dotted border-slate-200">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Reason</p>
+                            <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap break-words">
+                              {r.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
+                            </p>
+                          </div>
                           {/* Decided per day. Only a day still awaiting a
                               decision gets buttons — an already-approved or
                               declined one is read-only. */}
@@ -2310,14 +2322,6 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   </>)}
                 </section>
 
-                <section>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-2">Reason</p>
-                  <div className="rounded-xl border border-slate-200 px-4 py-3 min-h-[5.5rem]">
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
-                      {req?.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
-                    </p>
-                  </div>
-                </section>
               </div>
               )}
 
