@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminTheme } from "@/components/AdminThemeContext";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer, LuCalendarDays, LuBanknote } from "react-icons/lu";
@@ -919,7 +919,22 @@ function buildBulkApproveDaySnapshots(
   dailyLogs: DailyLogEntry[],
   allHolidays: HolidayEntry[],
   adjustedDaily?: Record<string, number>,
-  leaveRequests: AdminLeaveRequest[] = []
+  leaveRequests: AdminLeaveRequest[] = [],
+  /**
+   * Per-day decisions already saved for this contractor's week, in UI form
+   * ("Approved" / "Rejected" / "No Status"). Any day present here keeps what
+   * an admin chose in Attendance Review instead of being re-approved.
+   */
+  savedDecisions: Record<string, string> = {},
+  /**
+   * Whether a day with no saved decision may be approved.
+   *
+   * True for Bulk Approve, which exists to approve. False for Process
+   * Attendance, which must record the week exactly as it was reviewed and only
+   * mark it Processed — approving on the way through changed decisions nobody
+   * asked it to touch.
+   */
+  approveUnsetDays = true,
 ) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
@@ -939,10 +954,16 @@ function buildBulkApproveDaySnapshots(
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
-    // Matches exactly which days Attendance Review's own "Approve All" targets
-    // (every non-rest day, plus any rest day with logged time) — so a Bulk
-    // Approve save leaves the same per-day decisions "Approve All" would.
-    const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
+    // A decision already saved for this day wins. Without this, Bulk Approve
+    // and Process Attendance rewrote every non-rest day to "Approved", so a
+    // day an admin had deliberately set back to "No Status" in Attendance
+    // Review returned to Approved the next time either action ran.
+    //
+    // Where nothing is saved, this still matches exactly which days Attendance
+    // Review's own "Approve All" targets — every non-rest day, plus any rest
+    // day with logged time.
+    const dailyDecisionStatus = savedDecisions[date]
+      ?? (approveUnsetDays && (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
     const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedContractor(row.payCategory), restDaysStr, dailyDecisionStatus === "Approved");
@@ -1023,9 +1044,11 @@ function rowWeeklyTotals(
   dailyLogs: DailyLogEntry[],
   allHolidays: HolidayEntry[],
   adjustedDaily?: Record<string, number>,
-  leaveRequests: AdminLeaveRequest[] = []
+  leaveRequests: AdminLeaveRequest[] = [],
+  savedDecisions: Record<string, string> = {},
+  approveUnsetDays = true,
 ) {
-  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, leaveRequests);
+  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, leaveRequests, savedDecisions, approveUnsetDays);
   return days.reduce(
     (totals, d) => ({
       totalEvaluatedRegularMinutes: totals.totalEvaluatedRegularMinutes + d.evaluatedRegularMinutes,
@@ -1092,7 +1115,6 @@ type AttendanceRow = AttendanceRecord & {
   totalRegularOtMinutes?: number | null;
   totalRdOtMinutes?: number | null;
   totalHoOtMinutes?: number | null;
-  savedDailyDecisionStatuses?: Record<string, string>;
   hasContractorProfile?: boolean;
 };
 
@@ -1490,18 +1512,24 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   // contractor/week is opened (or the carried-over offset credit changes).
   // Kept separate from the data-loading effect below so clicking "Retry"
   // after a failed load doesn't wipe out edits the admin already made.
+  //
+  // Keyed on the contractor id and the week, NOT on the `record` object.
+  // The page swaps in a fresh row object on every refetch (see the effect that
+  // keeps this modal in sync with its week selector), so depending on the
+  // object's identity re-ran this on every refetch — resetting every day to
+  // "No Status" while the loader below, keyed on user and week, did not re-run
+  // to put the saved values back. Saving from that state wrote "No Status"
+  // over genuinely approved days.
+  const recordContractorId = record.contractorId;
+  const recordOffsetCreditMinutes = (record as AttendanceRow).offsetCreditMinutes ?? 0;
   useEffect(() => {
-    const savedStatuses = (record as AttendanceRow).savedDailyDecisionStatuses;
-    const defaultStatuses = savedStatuses
-      ? { ...defaultDailyDecisionStatuses(weekDates), ...savedStatuses }
-      : defaultDailyDecisionStatuses(weekDates);
-    setDailyDecisionStatuses(defaultStatuses);
+    setDailyDecisionStatuses(defaultDailyDecisionStatuses(weekDates));
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
     // Back to what's persisted for this week, not to zero — otherwise switching
     // week or contractor would discard a saved credit on re-render.
-    setOffsetCredit((record as AttendanceRow).offsetCreditMinutes ?? 0);
-  }, [record, weekDates, appliedOffsetCredit]);
+    setOffsetCredit(recordOffsetCreditMinutes);
+  }, [recordContractorId, recordOffsetCreditMinutes, weekDates, appliedOffsetCredit]);
 
   // Loads the saved per-day review overlay (day-status) and the raw
   // firstIn/lastOut instants (daily-log, for Local HO Time) together. Both
@@ -1697,8 +1725,18 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       setIsSaving(false);
     }
 
+    // Stays open on purpose. Saving used to dismiss the review, so checking
+    // what was written meant reopening the contractor and finding the week
+    // again — and anyone saving several times in a row lost their place after
+    // each one. onSave still refreshes the table behind it, and the toast is
+    // what confirms the write, since the dialog no longer disappearing is no
+    // longer the signal.
     onSave(record.contractorId, finalOffsetCredit);
-    onClose();
+    toast.success(
+      markProcessed
+        ? `${name} — week processed`
+        : `${name} — review saved`,
+    );
   }
 
   return (
@@ -2278,6 +2316,25 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               </button>
             ) : null
           )}
+          {/* Fixed-Ind, still short of the 2,400-min target: accept the week as
+              it stands. Sits beside Apply Time Credit as the other way out of
+              a short week — top the time up, or process it incomplete.
+              Independent of the credit buttons, so it is offered whether or not
+              a credit has been applied. */}
+          {isIndia && completionTotalMinutes < 2400 && (
+            <button
+              type="button"
+              onClick={() => handleSaveClick(true)}
+              disabled={isSaving || isLoadingReviewData || !isWeekEnded}
+              title={!isWeekEnded
+                ? "Push Process is only available once the selected week has ended"
+                : `Process this week at ${formatMinutesAsMins(completionTotalMinutes)}, short of the 2,400-min target`}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              <LuListChecks size={15} strokeWidth={2} />
+              {isSaving ? "Processing…" : "Push Process"}
+            </button>
+          )}
           {!isIndia && (
             <button
               type="button"
@@ -2340,7 +2397,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
   const [deptFilter, setDeptFilter] = useState("All");
   const [shiftTypeFilter, setShiftTypeFilter] = useState("All");
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
-  const [dayStatusDays, setDayStatusDays] = useState<Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>>([]);
+  const [dayStatusDays, setDayStatusDays] = useState<Array<{ email?: string; date?: string; adjustedMinutes?: number | null; decisionStatus?: string | null }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [processedApprovals, setProcessedApprovals] = useState<Map<string, number>>(new Map());
@@ -2400,7 +2457,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         if (isCancelled) return;
 
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
-        setDayStatusDays((dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>);
+        setDayStatusDays((dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null; decisionStatus?: string | null }>);
       } catch {
         if (isCancelled) return;
         setLoadError("Unable to load contractors for bulk approval. Please try again.");
@@ -2438,6 +2495,23 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
     }));
   }, [dayStatusDays, candidateRows]);
 
+  // Decisions already saved per day, so a bulk save preserves them instead of
+  // re-approving a day an admin deliberately set back to "No Status".
+  const savedDecisionsByContractor = useMemo(() => {
+    const byEmail = new Map<string, Record<string, string>>();
+    for (const d of dayStatusDays) {
+      const email = String(d.email ?? "").trim().toLowerCase();
+      if (!email || !d.decisionStatus) continue;
+      const map = byEmail.get(email) ?? {};
+      map[String(d.date ?? "")] = decisionStatusFromApi(d.decisionStatus);
+      byEmail.set(email, map);
+    }
+    return new Map(candidateRows.map((r) => {
+      const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+      return [r.contractorId, byEmail.get(email) ?? {}];
+    }));
+  }, [dayStatusDays, candidateRows]);
+
   const filteredRows = useMemo(() => worksnapRows
     .filter((r) =>
       r.weeklyStatus === "For Review" &&
@@ -2468,14 +2542,14 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
       const rowRestDays = restDaysForAttendanceRow(r);
       const userLogs = dailyLogs.filter((l) => l.worksnapUserId === r.worksnapUserId);
       cache.set(r.contractorId, {
-        weeklyTotals: rowWeeklyTotals(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), rowLeave),
+        weeklyTotals: rowWeeklyTotals(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), rowLeave, savedDecisionsByContractor.get(r.contractorId)),
         holidayBonusMins: modalWeekDates.reduce((sum, date) => sum + timeValueToMinutes(holidayTimeFor(date, usaHolidays, rowDailyMins, rowRestDays, modalWeekDates, r.hireDate, r.region, allHolidays)), 0),
         localHolidayMins: modalWeekDates.reduce((sum, date) => sum + (localHolidayMinutesFor(date, userLogs, r.region, allHolidays, isFixedContractor(r.payCategory), rowRestDays, worksnapTimeForDate(rowDailyMins, date) !== "-") ?? 0), 0),
         timeOffRequestMins: email ? totalTimeOffRequestMinutesFor(modalWeekDates, rowLeave) : 0,
       });
     }
     return cache;
-  }, [filteredRows, leaveRequests, dailyLogs, adjustedByContractor, modalWeekDates, usaHolidays, allHolidays]);
+  }, [filteredRows, leaveRequests, dailyLogs, adjustedByContractor, savedDecisionsByContractor, modalWeekDates, usaHolidays, allHolidays]);
 
   const allSelected = filteredRows.length > 0 && filteredRows.every((r) => selectedIds.has(r.contractorId));
 
@@ -2530,7 +2604,7 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
           ? fixedIndNetMinutes(rawCompletion, repaymentFor(r)) + grantedCredit
           : rawCompletion,
         offsetCreditMinutes: grantedCredit,
-        days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email)),
+        days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email), savedDecisionsByContractor.get(r.contractorId)),
       };
     });
 
@@ -2940,6 +3014,8 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
 }) {
   const [dailyLogs, setDailyLogs] = useState<DailyLogEntry[]>([]);
   const [adjustedByContractor, setAdjustedByContractor] = useState<Map<string, Record<string, number>>>(new Map());
+  // Same purpose as in Bulk Approve: processing must not undo a saved decision.
+  const [savedDecisionsByContractor, setSavedDecisionsByContractor] = useState<Map<string, Record<string, string>>>(new Map());
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -2999,6 +3075,15 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
         setDailyLogs((dailyLogResult.logs ?? []) as DailyLogEntry[]);
 
         const adjustedByEmail = new Map<string, Record<string, number>>();
+        const decisionByEmail = new Map<string, Record<string, string>>();
+        for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null; decisionStatus?: string | null }>) {
+          const em = String(d.email ?? "").trim().toLowerCase();
+          if (em && d.decisionStatus) {
+            const dm = decisionByEmail.get(em) ?? {};
+            dm[String(d.date ?? "")] = decisionStatusFromApi(d.decisionStatus);
+            decisionByEmail.set(em, dm);
+          }
+        }
         for (const d of (dayStatusResult.days ?? []) as Array<{ email?: string; date?: string; adjustedMinutes?: number | null }>) {
           const email = String(d.email ?? "").trim().toLowerCase();
           if (!email || d.adjustedMinutes == null) continue;
@@ -3011,6 +3096,10 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
           return [r.contractorId, adjustedByEmail.get(email) ?? {}];
         });
         setAdjustedByContractor(new Map(entries));
+        setSavedDecisionsByContractor(new Map(eligibleRows.map((r) => {
+          const email = r.role.includes("@") ? r.role.trim().toLowerCase() : "";
+          return [r.contractorId, decisionByEmail.get(email) ?? {}];
+        })));
       } catch {
         if (isCancelled) return;
         setLoadError("Unable to load supporting data for processing. Please try again.");
@@ -3045,7 +3134,9 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       const email = r.role.includes("@") ? r.role : "";
       const rowLeaveRequests = leaveRequests.filter((req) => req.email === email);
       const adjustedDaily = adjustedByContractor.get(r.contractorId);
-      const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests);
+      const savedDecisions = savedDecisionsByContractor.get(r.contractorId);
+      // false: processing records the week as reviewed, it does not review it.
+      const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions, false);
       // Fixed-Ind follows the same Net Time rule Attendance Review saves —
       // repay first, cap at 2,400, then add the credit granted on this week —
       // so processing a week can't record a different figure than reviewing it
@@ -3064,7 +3155,7 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
         // Carried through explicitly: the ops builder writes whatever it is
         // given, so omitting it would zero a credit that had been applied.
         offsetCreditMinutes: grantedCredit,
-        days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests),
+        days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions, false),
         processed: true,
       };
     });
@@ -3360,7 +3451,6 @@ export default function AttendancePage() {
   const [worksnapError, setWorksnapError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [breakdownTarget, setBreakdownTarget] = useState<AttendanceRow | null>(null);
   const [nameSearch, setNameSearch] = useState("");
@@ -3875,19 +3965,13 @@ export default function AttendancePage() {
     }));
   }
 
-  // Pick up changes made outside this tab — another admin approving, or the
-  // Worksnap sync landing — without anyone reaching for the browser refresh.
-  // Keyed to the tab becoming visible/focused rather than a timer, so an idle
-  // tab costs nothing and a returning one is always current.
-  useEffect(() => {
-    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refresh]);
+  // Deliberately no focus/visibility auto-refresh here.
+  //
+  // It refetched on every window focus, which fires each time you come back
+  // from another window — so simply alternating between this tab and anything
+  // else reloaded the table repeatedly while you were working in it. The
+  // explicit refreshes (save, Approve All, Bulk Approve, Process, and the
+  // error banner's Retry) already cover the cases that matter.
 
   function handleBulkApprove() {
     // Re-fetch from Supabase rather than trust a local mutation, so the table

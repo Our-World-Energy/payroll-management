@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAdminTheme } from "@/components/AdminThemeContext";
@@ -27,6 +27,8 @@ function formatElapsedSeconds(totalSeconds: number) {
 type PayrollRow = {
   email: string;
   name: string;
+  /** "Contractor ID" from Contractor Details. */
+  contractorId: string;
   role: string;
   restDay: string;
   country: string;
@@ -112,6 +114,28 @@ function totalTimeOffRequestMinutesFor(
       r.type === "Special Leave" ? r.specialLeaveUsedHours :
       r.sickLeaveUsedHours
     ) * 60, 0);
+}
+
+/**
+ * "Aug 30 - Sep 5, 2026" for the exported range.
+ *
+ * The month is dropped when both ends share one ("Sep 6 - 12, 2026") and the
+ * year is written once at the end — except across a year boundary, where each
+ * end carries its own ("Dec 27, 2026 - Jan 2, 2027"), since one trailing year
+ * would be wrong for the start date.
+ */
+function fmtPayPeriod(from: string, to: string) {
+  if (!from || !to) return "";
+  const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const mon = (x: Date) => x.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const start = d(from), end = d(to);
+  if (start.getUTCFullYear() !== end.getUTCFullYear()) {
+    return `${mon(start)} ${start.getUTCDate()}, ${start.getUTCFullYear()}`
+      + ` - ${mon(end)} ${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+  }
+  const left = `${mon(start)} ${start.getUTCDate()}`;
+  const right = mon(start) === mon(end) ? `${end.getUTCDate()}` : `${mon(end)} ${end.getUTCDate()}`;
+  return `${left} - ${right}, ${end.getUTCFullYear()}`;
 }
 
 function fmtVoucherDate(iso: string) {
@@ -365,7 +389,10 @@ export default function PayrollPage() {
             // button on Attendance Management (fixed_time table) is this
             // contractor's Completion Time for the week, taking priority over
             // the normal Worksnap-review-derived value.
-            const isFixedMex = (c.payCategory || "").trim().toLowerCase() === "fixed-mex";
+            const payCategoryKey = (c.payCategory || "").trim().toLowerCase();
+            const isFixedMex = payCategoryKey === "fixed-mex";
+            // Same two categories payComponentsFor treats as fixed.
+            const isFixedCategory = isFixedMex || payCategoryKey === "fixed-ind";
             const fixedMinutes = fixedTimeByEmail[email];
             const completionMinutes = isFixedMex && fixedMinutes != null
               ? fixedMinutes
@@ -465,16 +492,23 @@ export default function PayrollPage() {
             return {
               email,
               name: c.fullName || email,
+              contractorId: c.contractorId || "-",
               role: c.role || "-",
               restDay: c.restDay || "",
               country,
               localHoliday,
               localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
               totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
-              totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
-              totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
+              // Blank for the fixed categories. Their whole week is Completion
+              // Time x Hourly Rate — payComponentsFor already returns zero for
+              // every OT bucket, so showing the minutes Attendance happened to
+              // record implied pay that is not part of the policy and never
+              // appeared in Gross. Blank rather than 0 so it reads as
+              // "does not apply" instead of "worked none".
+              totalRegularOtMinutes: isFixedCategory ? null : saved?.totalRegularOtMinutes ?? null,
+              totalRdOtMinutes: isFixedCategory ? null : saved?.totalRdOtMinutes ?? null,
               totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
-              totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
+              totalHoOtMinutes: isFixedCategory ? null : saved?.totalHoOtMinutes ?? null,
               totalTimeOffRequestMinutes,
               ptoHours,
               sickHours: leaveHours.sick,
@@ -565,15 +599,16 @@ export default function PayrollPage() {
 
   function handleExportCSV() {
     const headers = [
-      "Name", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+      "Pay Period", "Name", "Contractor ID", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-      "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     // Plain 2dp, no currency prefix and no thousands separators: currency is
     // its own column now, and "PHP 1,234.56" imports as text, so a
     // spreadsheet can neither sum nor sort the column.
     const decimal = (n: number) => n.toFixed(2);
+    const payPeriod = fmtPayPeriod(rangeFrom, rangeTo);
     // Decimal hours rather than "36h 00m", for the same reason: a spreadsheet
     // cannot total a duration written as text. Same minutes-over-60 the
     // voucher's own hour figures use, so 440 min reads 7.33 in both places.
@@ -581,7 +616,7 @@ export default function PayrollPage() {
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
-        r.name, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
+        payPeriod, r.name, r.contractorId, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
         r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
         r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
         r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
@@ -589,7 +624,6 @@ export default function PayrollPage() {
         r.totalRdOtMinutes ? hours(r.totalRdOtMinutes) : "",
         r.totalHoOtMinutes ? hours(r.totalHoOtMinutes) : "",
         r.totalTimeOffRequestMinutes > 0 ? hours(r.totalTimeOffRequestMinutes) : "",
-        r.completionMinutes != null ? hours(r.completionMinutes) : "",
         r.currency,
         `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
         r.earnings != null ? decimal(r.earnings) : "",
@@ -621,7 +655,7 @@ export default function PayrollPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `payroll_${rangeFrom || "export"}.csv`;
+    a.download = rangeFrom && rangeTo ? `payroll_${rangeFrom}_to_${rangeTo}.csv` : "payroll_export.csv";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -703,9 +737,28 @@ export default function PayrollPage() {
   // status and the changed-since-processed icon always reflect exactly
   // what's persisted — used by both bulk Process Payroll and the single-
   // contractor Process/Re-Process button on the Voucher.
+  const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
+
   function handleProcessed() {
-    setReloadKey((key) => key + 1);
+    refresh();
   }
+
+  // Process and Re-Process write the figures held in the row, and that row was
+  // fetched when the page loaded. Editing Attendance elsewhere and coming back
+  // to re-process therefore wrote the pre-edit numbers back into the snapshot,
+  // and the voucher showed no change — the button had worked, on stale data.
+  //
+  // visibilitychange only, deliberately: a window "focus" listener also fires
+  // every time you return from another application, which reloaded the table
+  // constantly while someone was simply switching between windows. This fires
+  // when the tab itself was hidden and comes back — which is the case that
+  // matters, since that is what happens when Attendance is edited in another
+  // tab.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [refresh]);
 
   // Same fluid scale as Attendance Management: every clamp() maxes out at its
   // intended desktop size (reached around 1500px) and shrinks from there, so a
@@ -1224,9 +1277,12 @@ function PayrollVoucherModal({
         setSaveError(result.failed[0]?.error ?? "Failed to process. Please try again.");
         return;
       }
+      // Stays open, like Attendance Review: the voucher is what you were
+      // reading, and dismissing it meant reopening the contractor to see the
+      // figures that had just been written. onProcessed refreshes the table
+      // behind it and the toast confirms the write.
       toast.success(`${row.name} ${isReprocess ? "re-processed" : "processed"} successfully`);
       onProcessed();
-      onClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to process. Please try again.");
     } finally {

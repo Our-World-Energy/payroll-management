@@ -82,6 +82,31 @@ function getPayPeriod() {
 function calcWeekly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(weeklyRateFrom(m)); }
 function calcHourly(monthly: string)  { const m = parseFloat(monthly); return isNaN(m) ? "" : String(hourlyRateFrom(m)); }
 
+/**
+ * A stored shift time, in the exact form the Shift Start/End pickers offer.
+ *
+ * contractor_profiles.shiftHours holds "8:00:00 am to 5:00:00 pm" on rows that
+ * came in through the import, while this modal writes "8:00 AM to 5:00 PM".
+ * Feeding the raw "8:00:00 am" into a <select> matched no <option>, so the
+ * browser fell back to showing the first one — which is why a Fixed shift read
+ * 12:00 AM instead of its real start and end.
+ *
+ * Returns null for anything unparseable ("Flexible", blank), letting the caller
+ * keep its own default.
+ */
+function shiftTimeOption(raw?: string): string | null {
+  if (!raw) return null;
+  const m = raw.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP])\.?M\.?$/i);
+  if (!m) return null;
+  const total = ((Number(m[1]) % 12) + (m[3].toUpperCase() === "P" ? 12 : 0)) * 60 + Number(m[2]);
+  // The pickers only offer half-hour slots, so snap — a stored :15 would
+  // otherwise match no option and fall back to 12:00 AM all over again.
+  const snapped = (Math.round(total / 30) * 30) % 1440;
+  const hour24 = Math.floor(snapped / 60);
+  const display = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return `${display}:${snapped % 60 === 0 ? "00" : "30"} ${hour24 < 12 ? "AM" : "PM"}`;
+}
+
 const FIELD = ({ label, children, required }: { label: string; children: React.ReactNode; required?: boolean }) => (
   <div className="flex flex-col gap-0.5">
     <label className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
@@ -171,8 +196,8 @@ export function AddContractorModal({ onClose, onSave, initial }: Props) {
     status:         (initial?.status ?? "Active") as typeof STATUSES[number],
     payCategory:    initial?.payCategory    ?? PAY_CATEGORIES[0],
     shiftType:      initial?.shiftType ?? "Fixed",
-    shiftFrom:      initial?.shiftHours?.split(" to ")[0] ?? "9:00 AM",
-    shiftTo:        initial?.shiftHours?.split(" to ")[1] ?? "6:00 PM",
+    shiftFrom:      shiftTimeOption(initial?.shiftHours?.split(" to ")[0]) ?? "9:00 AM",
+    shiftTo:        shiftTimeOption(initial?.shiftHours?.split(" to ")[1]) ?? "6:00 PM",
     restDays:       parseRestDays(initial?.restDay),
     currency:       initial?.currency       ?? CURRENCIES[0],
     monthlyRate:    initial?.monthlyRate    ?? "",
