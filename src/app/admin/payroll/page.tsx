@@ -65,6 +65,10 @@ type PayrollRow = {
    *  category except Fixed-Ind, which pays on Ind Time — see `payableMinutes`
    *  where this is built. */
   payableMinutes: number | null;
+  /** The "IND Time" column. Fixed-Ind only — every other category has no Ind
+   *  Time, and showing payableMinutes for them would just repeat Completion
+   *  Time in the next column over. */
+  indMinutes: number | null;
   hours: number | null;
   /** Pay derived from time alone — the pay components plus PTO pay, before any
    *  Manual Payroll Adjustment. Gross is this plus Bonus/MISC/Retro Pay/REIM. */
@@ -416,6 +420,11 @@ export default function PayrollPage() {
             const payableMinutes = payCategoryKey === "fixed-ind"
               ? (isReviewed ? (saved!.totalIndMinutes ?? (saved!.completionMinutes as number)) : null)
               : completionMinutes;
+            // Shown in its own column beside Completion Time, so the two
+            // figures a Fixed-Ind week is judged on are visible together: Ind
+            // Time is what Reg Hours is paid on, Completion Time is the Net
+            // Time after any repayment and the 2,400-min cap.
+            const indMinutes = payCategoryKey === "fixed-ind" ? payableMinutes : null;
             const country = countryFromLocation(c.location || "");
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
             const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
@@ -548,6 +557,7 @@ export default function PayrollPage() {
               actualMinutes,
               completionMinutes,
               payableMinutes,
+              indMinutes,
               hours,
               earnings,
               gross,
@@ -950,12 +960,12 @@ export default function PayrollPage() {
 
         {/* Table */}
         <div className="overflow-auto max-h-[72vh] md:max-h-[60vh]">
-          <table className="w-full text-left text-sm" style={{ minWidth: "2700px", borderCollapse: "separate", borderSpacing: 0 }}>
+          <table className="w-full text-left text-sm" style={{ minWidth: "2820px", borderCollapse: "separate", borderSpacing: 0 }}>
             <thead className="sticky top-0 z-30">
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-                  "Completion Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
+                  "Completion Time", "IND Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
@@ -980,7 +990,7 @@ export default function PayrollPage() {
             <tbody className="divide-y divide-slate-100">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={34} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
+                  <td colSpan={35} className={`px-5 py-10 text-center text-sm ${dark ? "text-white/35" : "text-slate-400"}`}>
                     {isLoading ? "Loading…" : rows.length === 0 ? "No active contractors found." : "No payroll rows match your search."}
                   </td>
                 </tr>
@@ -1012,6 +1022,8 @@ export default function PayrollPage() {
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalHoOtMinutes ? formatMinutesAsHours(r.totalHoOtMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.totalTimeOffRequestMinutes > 0 ? formatMinutesAsHours(r.totalTimeOffRequestMinutes) : "—"}</td>
                   <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.completionMinutes != null ? formatMinutesAsHours(r.completionMinutes) : "—"}</td>
+                  {/* Fixed-Ind Ind Time — the figure Reg Hours is paid on. */}
+                  <td className={`px-4 md:px-6 py-3 md:py-4 tabular-nums whitespace-nowrap border-r ${dark ? "text-white/65 border-white/8" : "text-slate-600 border-slate-100"}`}>{r.indMinutes != null ? formatMinutesAsHours(r.indMinutes) : "—"}</td>
                   {/* Contract rates, shown to 2dp. The stored values are
                       deliberately unrounded (Monthly x 12 / 52 recurs), so
                       fmtRate would print a 16-digit weekly rate here. Pay is
