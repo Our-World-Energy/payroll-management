@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useAdminTheme } from "@/components/AdminThemeContext";
@@ -703,9 +703,29 @@ export default function PayrollPage() {
   // status and the changed-since-processed icon always reflect exactly
   // what's persisted — used by both bulk Process Payroll and the single-
   // contractor Process/Re-Process button on the Voucher.
+  const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
+
   function handleProcessed() {
-    setReloadKey((key) => key + 1);
+    refresh();
   }
+
+  // Pick up changes made outside this tab, the same way Attendance does.
+  //
+  // This matters more here than it looks: Process and Re-Process write the
+  // figures held in the row, which were fetched when the page loaded. Editing
+  // Attendance in another tab and coming back to re-process therefore wrote
+  // the pre-edit numbers straight back into the snapshot, and the voucher
+  // showed no change — the button had worked, on stale data. Refreshing on
+  // focus means the row is current before anyone can act on it.
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refresh]);
 
   // Same fluid scale as Attendance Management: every clamp() maxes out at its
   // intended desktop size (reached around 1500px) and shrinks from there, so a
