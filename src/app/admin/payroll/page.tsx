@@ -114,6 +114,17 @@ function totalTimeOffRequestMinutesFor(
     ) * 60, 0);
 }
 
+/** "Aug 30 - Sep 5" for the exported range, dropping the repeated month. */
+function fmtPayPeriod(from: string, to: string) {
+  if (!from || !to) return "";
+  const d = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const mon = (x: Date) => x.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+  const start = d(from), end = d(to);
+  const left = `${mon(start)} ${start.getUTCDate()}`;
+  const right = mon(start) === mon(end) ? `${end.getUTCDate()}` : `${mon(end)} ${end.getUTCDate()}`;
+  return `${left} - ${right}`;
+}
+
 function fmtVoucherDate(iso: string) {
   const [y, m, d] = iso.split("-");
   return y && m && d ? `${m}.${d}.${y.slice(2)}` : iso;
@@ -565,7 +576,7 @@ export default function PayrollPage() {
 
   function handleExportCSV() {
     const headers = [
-      "Name", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+      "Pay Period", "Name", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
       "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
@@ -574,6 +585,7 @@ export default function PayrollPage() {
     // its own column now, and "PHP 1,234.56" imports as text, so a
     // spreadsheet can neither sum nor sort the column.
     const decimal = (n: number) => n.toFixed(2);
+    const payPeriod = fmtPayPeriod(rangeFrom, rangeTo);
     // Decimal hours rather than "36h 00m", for the same reason: a spreadsheet
     // cannot total a duration written as text. Same minutes-over-60 the
     // voucher's own hour figures use, so 440 min reads 7.33 in both places.
@@ -581,7 +593,7 @@ export default function PayrollPage() {
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
-        r.name, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
+        payPeriod, r.name, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
         r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
         r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
         r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
@@ -621,7 +633,7 @@ export default function PayrollPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `payroll_${rangeFrom || "export"}.csv`;
+    a.download = rangeFrom && rangeTo ? `payroll_${rangeFrom}_to_${rangeTo}.csv` : "payroll_export.csv";
     a.click();
     URL.revokeObjectURL(url);
   }
