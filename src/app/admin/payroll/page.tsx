@@ -378,7 +378,10 @@ export default function PayrollPage() {
             // button on Attendance Management (fixed_time table) is this
             // contractor's Completion Time for the week, taking priority over
             // the normal Worksnap-review-derived value.
-            const isFixedMex = (c.payCategory || "").trim().toLowerCase() === "fixed-mex";
+            const payCategoryKey = (c.payCategory || "").trim().toLowerCase();
+            const isFixedMex = payCategoryKey === "fixed-mex";
+            // Same two categories payComponentsFor treats as fixed.
+            const isFixedCategory = isFixedMex || payCategoryKey === "fixed-ind";
             const fixedMinutes = fixedTimeByEmail[email];
             const completionMinutes = isFixedMex && fixedMinutes != null
               ? fixedMinutes
@@ -485,10 +488,16 @@ export default function PayrollPage() {
               localHoliday,
               localHolidayMinutes: saved?.totalLocalHolidayMinutes ?? null,
               totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
-              totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
-              totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
+              // Blank for the fixed categories. Their whole week is Completion
+              // Time x Hourly Rate — payComponentsFor already returns zero for
+              // every OT bucket, so showing the minutes Attendance happened to
+              // record implied pay that is not part of the policy and never
+              // appeared in Gross. Blank rather than 0 so it reads as
+              // "does not apply" instead of "worked none".
+              totalRegularOtMinutes: isFixedCategory ? null : saved?.totalRegularOtMinutes ?? null,
+              totalRdOtMinutes: isFixedCategory ? null : saved?.totalRdOtMinutes ?? null,
               totalUsHoMinutes: saved?.totalUsHoMinutes ?? null,
-              totalHoOtMinutes: saved?.totalHoOtMinutes ?? null,
+              totalHoOtMinutes: isFixedCategory ? null : saved?.totalHoOtMinutes ?? null,
               totalTimeOffRequestMinutes,
               ptoHours,
               sickHours: leaveHours.sick,
