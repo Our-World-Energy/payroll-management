@@ -160,7 +160,18 @@ export function buildAttendanceStatusOps(
       VALUES ${Prisma.join(dayRows)}
       ON CONFLICT ("worksnapUserId", "date") DO UPDATE SET
         "email" = EXCLUDED."email",
-        "decisionStatus" = EXCLUDED."decisionStatus",
+        -- A processing run records the week; it does not review it. On
+        -- processed = true the stored decision is kept, so Process can never
+        -- flip a day an admin set to No Status or Rejected back to Approved.
+        -- Enforced here rather than only in the caller: the figures are
+        -- computed client-side, so a browser running an older bundle would
+        -- otherwise still be able to send Approved for every day.
+        --
+        -- Brand-new rows are unaffected — they take the value supplied, since
+        -- ON CONFLICT only governs rows that already exist.
+        "decisionStatus" = CASE WHEN ${processed}
+          THEN "attendance_day_status"."decisionStatus"
+          ELSE EXCLUDED."decisionStatus" END,
         "evaluatedMinutes" = EXCLUDED."evaluatedMinutes",
         "adjustedMinutes" = EXCLUDED."adjustedMinutes",
         "holidayMinutes" = EXCLUDED."holidayMinutes",

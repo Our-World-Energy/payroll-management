@@ -1115,7 +1115,6 @@ type AttendanceRow = AttendanceRecord & {
   totalRegularOtMinutes?: number | null;
   totalRdOtMinutes?: number | null;
   totalHoOtMinutes?: number | null;
-  savedDailyDecisionStatuses?: Record<string, string>;
   hasContractorProfile?: boolean;
 };
 
@@ -1513,18 +1512,24 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
   // contractor/week is opened (or the carried-over offset credit changes).
   // Kept separate from the data-loading effect below so clicking "Retry"
   // after a failed load doesn't wipe out edits the admin already made.
+  //
+  // Keyed on the contractor id and the week, NOT on the `record` object.
+  // The page swaps in a fresh row object on every refetch (see the effect that
+  // keeps this modal in sync with its week selector), so depending on the
+  // object's identity re-ran this on every refetch — resetting every day to
+  // "No Status" while the loader below, keyed on user and week, did not re-run
+  // to put the saved values back. Saving from that state wrote "No Status"
+  // over genuinely approved days.
+  const recordContractorId = record.contractorId;
+  const recordOffsetCreditMinutes = (record as AttendanceRow).offsetCreditMinutes ?? 0;
   useEffect(() => {
-    const savedStatuses = (record as AttendanceRow).savedDailyDecisionStatuses;
-    const defaultStatuses = savedStatuses
-      ? { ...defaultDailyDecisionStatuses(weekDates), ...savedStatuses }
-      : defaultDailyDecisionStatuses(weekDates);
-    setDailyDecisionStatuses(defaultStatuses);
+    setDailyDecisionStatuses(defaultDailyDecisionStatuses(weekDates));
     setAdjustedTimes(defaultAdjustedTimesFor(weekDates));
     setEditingAdjustedDate(null);
     // Back to what's persisted for this week, not to zero — otherwise switching
     // week or contractor would discard a saved credit on re-render.
-    setOffsetCredit((record as AttendanceRow).offsetCreditMinutes ?? 0);
-  }, [record, weekDates, appliedOffsetCredit]);
+    setOffsetCredit(recordOffsetCreditMinutes);
+  }, [recordContractorId, recordOffsetCreditMinutes, weekDates, appliedOffsetCredit]);
 
   // Loads the saved per-day review overlay (day-status) and the raw
   // firstIn/lastOut instants (daily-log, for Local HO Time) together. Both
