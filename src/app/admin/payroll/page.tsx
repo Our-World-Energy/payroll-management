@@ -13,6 +13,7 @@ import {
 } from "./actions";
 import { addDaysIso, sundayOf, recentWeeks, weekLabel, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
 import { payComponentsFor, leaveHoursFor, weeklyRateFrom, hourlyRateFrom } from "@/lib/payrollVoucher";
+import { isPtoLeaveType, leaveHoursPerCoveredDate, datesCoveredByRange } from "@/lib/timeOffBalances";
 import { fetchFixedTimeForWeek } from "../attendance/actions";
 import { WeekJumpDropdown } from "@/components/WeekJumpDropdown";
 import { FilterSelect } from "@/components/FilterSelect";
@@ -85,6 +86,10 @@ type PayrollRow = {
   // Saved per-day Evaluated Time (not raw Worksnap minutes) — feeds the
   // voucher's Sun→Sat grid only; all other voucher figures are unaffected.
   evaluatedDailyMinutes: Record<string, number>;
+  /** "date" -> approved PTO minutes, so the voucher's day grid can label a PTO
+   *  day instead of showing it as an empty one. Grid annotation only — PTO pay
+   *  comes from ptoHours/ptoPay, which are unaffected. */
+  ptoDailyMinutes: Record<string, number>;
   // Saved per-day Regular OT Time, for the voucher Day View grid only. The
   // paid OT total stays totalRegularOtMinutes/regOtHours — this attributes
   // that same OT to the day it was earned and feeds no calculation.
@@ -433,6 +438,20 @@ export default function PayrollPage() {
             // be excluded from pay entirely; it now pays like the rest.
             const leaveHours = leaveHoursFor(rangeFrom, rangeTo, contractorRequests);
             const ptoHours = leaveHours.pto;
+            // Which days of this week the contractor was on PTO. A full-day PTO
+            // day has no worked time, so the voucher's grid would otherwise
+            // print 0.00 and read as a day nobody accounted for.
+            //
+            // Half days are 4 h and keep the worked figure in the cell, so a
+            // day is only *labelled* PTO when no time was worked on it.
+            const ptoDailyMinutes: Record<string, number> = {};
+            for (const req of contractorRequests) {
+              if (!isPtoLeaveType(req.type)) continue;
+              for (const date of datesCoveredByRange(req.startDate, req.endDate)) {
+                if (date < rangeFrom || date > rangeTo) continue;
+                ptoDailyMinutes[date] = (ptoDailyMinutes[date] ?? 0) + leaveHoursPerCoveredDate(req.type) * 60;
+              }
+            }
 
             // Earnings and deductions both come straight from this contractor's
             // Manual Payroll Adjustment for the week, rather than a placeholder.
@@ -572,6 +591,7 @@ export default function PayrollPage() {
                 : isReviewed ? "Reviewed" : actualMinutes > 0 ? "For Review" : "No Activity",
               hasChangedSinceProcessed,
               evaluatedDailyMinutes: evaluatedDailyMinutesByEmail.get(email) ?? {},
+              ptoDailyMinutes,
               regularOtDailyMinutes: regularOtDailyMinutesByEmail.get(email) ?? {},
               usHolidayDailyMinutes: usHolidayDailyMinutesByEmail.get(email) ?? {},
               bonus,
@@ -1373,6 +1393,7 @@ function PayrollVoucherModal({
           ? processedSnapshot!.regularOtDailyMinutes
           : row.regularOtDailyMinutes,
         usHolidayDailyMinutes: row.usHolidayDailyMinutes,
+        ptoDailyMinutes: row.ptoDailyMinutes,
       }
     : (() => {
         const live = payComponentsFor(row.payCategory, row.hourlyRate, row.payableMinutes, {
@@ -1438,6 +1459,7 @@ function PayrollVoucherModal({
           evaluatedDailyMinutes: row.evaluatedDailyMinutes,
           regularOtDailyMinutes: row.regularOtDailyMinutes,
           usHolidayDailyMinutes: row.usHolidayDailyMinutes,
+          ptoDailyMinutes: row.ptoDailyMinutes,
         };
       })();
 
@@ -1577,17 +1599,32 @@ function PayrollVoucherModal({
                       // day that somehow has both still shows the worked time.
                       const usHoHours = (figures.usHolidayDailyMinutes[date] ?? 0) / 60;
                       const hoInPlaceOfZero = !isOff && !otInPlaceOfZero && hours === 0 && usHoHours > 0;
+                      // A day taken as PTO reads as "PTO" rather than 0.00. OT
+                      // and US Holiday keep precedence, and a half day that was
+                      // part-worked keeps its worked figure in the cell with
+                      // "PTO" noted underneath — the number is never hidden.
+                      const ptoHoursThisDay = (figures.ptoDailyMinutes[date] ?? 0) / 60;
+                      const ptoInPlaceOfZero = !isOff && !otInPlaceOfZero && !hoInPlaceOfZero
+                        && hours === 0 && ptoHoursThisDay > 0;
+                      const ptoNote = !isOff && !ptoInPlaceOfZero && ptoHoursThisDay > 0;
+                      const ptoTitle = `PTO — ${ptoHoursThisDay.toFixed(2)} h, counted in PTO HRS, not REG Hours`;
                       return (
                         <td key={date} className="border border-slate-200 px-1 py-1 text-center tabular-nums">
-                          <div className={otInPlaceOfZero ? "font-semibold text-amber-600" : hoInPlaceOfZero ? "font-semibold text-blue-600" : undefined}
+                          <div className={otInPlaceOfZero ? "font-semibold text-amber-600" : hoInPlaceOfZero ? "font-semibold text-blue-600" : ptoInPlaceOfZero ? "font-semibold text-emerald-600" : undefined}
                             title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours`
-                              : hoInPlaceOfZero ? `US Holiday — ${usHoHours.toFixed(2)} h credited, counted in HO HRS, not REG Hours` : undefined}>
-                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                              : hoInPlaceOfZero ? `US Holiday — ${usHoHours.toFixed(2)} h credited, counted in HO HRS, not REG Hours`
+                              : ptoInPlaceOfZero ? ptoTitle : undefined}>
+                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : ptoInPlaceOfZero ? "PTO" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
                           </div>
                           {!otInPlaceOfZero && otHours > 0 && (
                             <div className="text-[9px] font-semibold leading-tight text-amber-600"
                               title={`Regular OT earned this day — counted in REG OT HRS, not REG Hours`}>
                               +{otHours.toFixed(2)}
+                            </div>
+                          )}
+                          {ptoNote && (
+                            <div className="text-[9px] font-semibold leading-tight text-emerald-600" title={ptoTitle}>
+                              PTO
                             </div>
                           )}
                         </td>
