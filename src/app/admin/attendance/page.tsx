@@ -926,6 +926,15 @@ function buildBulkApproveDaySnapshots(
    * an admin chose in Attendance Review instead of being re-approved.
    */
   savedDecisions: Record<string, string> = {},
+  /**
+   * Whether a day with no saved decision may be approved.
+   *
+   * True for Bulk Approve, which exists to approve. False for Process
+   * Attendance, which must record the week exactly as it was reviewed and only
+   * mark it Processed — approving on the way through changed decisions nobody
+   * asked it to touch.
+   */
+  approveUnsetDays = true,
 ) {
   const dailyWorksnapMinutes = effectiveDailyMinutesFor(row, adjustedDaily);
   const restDaysStr = restDaysForAttendanceRow(row);
@@ -954,7 +963,7 @@ function buildBulkApproveDaySnapshots(
     // Review's own "Approve All" targets — every non-rest day, plus any rest
     // day with logged time.
     const dailyDecisionStatus = savedDecisions[date]
-      ?? ((!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
+      ?? (approveUnsetDays && (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
     const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
     const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedContractor(row.payCategory), restDaysStr, dailyDecisionStatus === "Approved");
@@ -1037,8 +1046,9 @@ function rowWeeklyTotals(
   adjustedDaily?: Record<string, number>,
   leaveRequests: AdminLeaveRequest[] = [],
   savedDecisions: Record<string, string> = {},
+  approveUnsetDays = true,
 ) {
-  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, leaveRequests, savedDecisions);
+  const days = buildBulkApproveDaySnapshots(row, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, leaveRequests, savedDecisions, approveUnsetDays);
   return days.reduce(
     (totals, d) => ({
       totalEvaluatedRegularMinutes: totals.totalEvaluatedRegularMinutes + d.evaluatedRegularMinutes,
@@ -3091,7 +3101,8 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       const rowLeaveRequests = leaveRequests.filter((req) => req.email === email);
       const adjustedDaily = adjustedByContractor.get(r.contractorId);
       const savedDecisions = savedDecisionsByContractor.get(r.contractorId);
-      const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions);
+      // false: processing records the week as reviewed, it does not review it.
+      const totals = rowWeeklyTotals(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions, false);
       // Fixed-Ind follows the same Net Time rule Attendance Review saves —
       // repay first, cap at 2,400, then add the credit granted on this week —
       // so processing a week can't record a different figure than reviewing it
@@ -3110,7 +3121,7 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
         // Carried through explicitly: the ops builder writes whatever it is
         // given, so omitting it would zero a credit that had been applied.
         offsetCreditMinutes: grantedCredit,
-        days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions),
+        days: buildBulkApproveDaySnapshots(r, weekDates, usaHolidays, dailyLogs, allHolidays, adjustedDaily, rowLeaveRequests, savedDecisions, false),
         processed: true,
       };
     });
