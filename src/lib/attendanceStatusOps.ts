@@ -42,6 +42,8 @@ export type AttendanceStatusInput = {
   week?: unknown;
   requestStatus?: unknown;
   completionMinutes?: unknown;
+  /** Fixed-Ind "Ind Time" — see AttendanceWeekStatus.totalIndMinutes. */
+  indMinutes?: unknown;
   offsetCreditMinutes?: unknown;
   days?: unknown;
   processed?: unknown;
@@ -60,6 +62,10 @@ export function buildAttendanceStatusOps(
   const weekStart = new Date(`${week}T00:00:00.000Z`);
   const requestStatus = asReq(body.requestStatus);
   const completionMinutes = Number.isFinite(Number(body.completionMinutes)) ? Math.trunc(Number(body.completionMinutes)) : null;
+  // Fixed-Ind Ind Time, the figure Payroll pays Reg Hours on. Null for every
+  // other pay category — they have no Ind Time — so it is stored as sent
+  // rather than coerced to 0, which Payroll would read as a zero-hour week.
+  const totalIndMinutes = asNullableInt(body.indMinutes);
   const days = Array.isArray(body.days) ? (body.days as DayInput[]) : [];
   const processed = body.processed === true;
   // Fixed-Ind Apply Time Credit, granted on this week and repaid out of the
@@ -93,14 +99,14 @@ export function buildAttendanceStatusOps(
     client.attendanceWeekStatus.upsert({
       where: { attendance_week_key: { worksnapUserId, weekStart } },
       create: {
-        worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalLocalHolidayMinutes,
+        worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalIndMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
         totalCompletionTimeMinutes,
         offsetCreditMinutes,
         processed,
       },
       update: {
-        email, requestStatus, completionMinutes, totalLocalHolidayMinutes,
+        email, requestStatus, completionMinutes, totalIndMinutes, totalLocalHolidayMinutes,
         totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
         totalCompletionTimeMinutes,
         offsetCreditMinutes,

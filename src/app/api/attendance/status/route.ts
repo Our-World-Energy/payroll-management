@@ -10,7 +10,7 @@ import { buildAttendanceStatusOps, runOpsSequentially, type AttendanceStatusInpu
  *   POST /api/attendance/status
  *   body: {
  *     worksnapUserId, email?, week: "YYYY-MM-DD",
- *     requestStatus?, completionMinutes?,
+ *     requestStatus?, completionMinutes?, indMinutes?,
  *     days: [ { date, decisionStatus?, evaluatedMinutes?, adjustedMinutes?, holidayMinutes?,
  *               localHoliday?, localHolidayMinutes?,
  *               timeOffStatus?, timeOffMinutes?, manualAdjustmentTime?, note? } ]

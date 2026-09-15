@@ -1712,6 +1712,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             week: weekDates[0],
             requestStatus,
             completionMinutes: finalCompletionMinutes,
+            // Ind Time as the cell above shows it — uncapped, before any
+            // repayment or granted credit. Payroll pays Fixed-Ind Reg Hours on
+            // this, so it is stored rather than re-derived there.
+            indMinutes: isIndia ? indiaPoolMinutes : null,
             // Persisted so reopening this week still shows the credit, and so
             // next week knows what it owes back without relying on React state.
             offsetCreditMinutes: finalOffsetCredit,
@@ -2613,6 +2617,9 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         completionMinutes: isFixedContractor(r.payCategory)
           ? fixedIndNetMinutes(rawCompletion, repaymentFor(r)) + grantedCredit
           : rawCompletion,
+        // The pre-cap pool the line above derives Net Time from — Payroll pays
+        // Fixed-Ind Reg Hours on it. Null for every other category.
+        indMinutes: isFixedContractor(r.payCategory) ? rawCompletion : null,
         offsetCreditMinutes: grantedCredit,
         days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email), savedDecisionsByContractor.get(r.contractorId)),
       };
@@ -3156,12 +3163,16 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       const completionMinutes = isFixedContractor(r.payCategory)
         ? fixedIndNetMinutes(totals.totalCompletionMinutes, repaymentFor(r)) + grantedCredit
         : totals.totalCompletionMinutes;
+      // The pre-cap pool the line above derives Net Time from — Payroll pays
+      // Fixed-Ind Reg Hours on it. Null for every other category.
+      const indMinutes = isFixedContractor(r.payCategory) ? totals.totalCompletionMinutes : null;
       return {
         worksnapUserId: r.worksnapUserId,
         email,
         week: weekDates[0],
         requestStatus: "APPROVED",
         completionMinutes,
+        indMinutes,
         // Carried through explicitly: the ops builder writes whatever it is
         // given, so omitting it would zero a credit that had been applied.
         offsetCreditMinutes: grantedCredit,
