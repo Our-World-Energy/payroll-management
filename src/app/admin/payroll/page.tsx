@@ -27,6 +27,8 @@ function formatElapsedSeconds(totalSeconds: number) {
 type PayrollRow = {
   email: string;
   name: string;
+  /** "Contractor ID" from Contractor Details. */
+  contractorId: string;
   role: string;
   restDay: string;
   country: string;
@@ -476,6 +478,7 @@ export default function PayrollPage() {
             return {
               email,
               name: c.fullName || email,
+              contractorId: c.contractorId || "-",
               role: c.role || "-",
               restDay: c.restDay || "",
               country,
@@ -576,7 +579,7 @@ export default function PayrollPage() {
 
   function handleExportCSV() {
     const headers = [
-      "Pay Period", "Name", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
+      "Pay Period", "Name", "Contractor ID", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
       "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
@@ -593,7 +596,7 @@ export default function PayrollPage() {
     const lines = [
       headers.join(","),
       ...filteredRows.map((r) => [
-        payPeriod, r.name, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
+        payPeriod, r.name, r.contractorId, r.email, r.department, r.subDepartment, r.role, r.country, r.payCategory, r.shiftType, r.localHoliday,
         r.localHolidayMinutes ? hours(r.localHolidayMinutes) : "",
         r.totalEvaluatedRegularMinutes ? hours(r.totalEvaluatedRegularMinutes) : "",
         r.totalUsHoMinutes ? hours(r.totalUsHoMinutes) : "",
