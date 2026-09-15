@@ -1725,8 +1725,18 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
       setIsSaving(false);
     }
 
+    // Stays open on purpose. Saving used to dismiss the review, so checking
+    // what was written meant reopening the contractor and finding the week
+    // again — and anyone saving several times in a row lost their place after
+    // each one. onSave still refreshes the table behind it, and the toast is
+    // what confirms the write, since the dialog no longer disappearing is no
+    // longer the signal.
     onSave(record.contractorId, finalOffsetCredit);
-    onClose();
+    toast.success(
+      markProcessed
+        ? `${name} — week processed`
+        : `${name} — review saved`,
+    );
   }
 
   return (

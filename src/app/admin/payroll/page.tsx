@@ -1266,9 +1266,12 @@ function PayrollVoucherModal({
         setSaveError(result.failed[0]?.error ?? "Failed to process. Please try again.");
         return;
       }
+      // Stays open, like Attendance Review: the voucher is what you were
+      // reading, and dismissing it meant reopening the contractor to see the
+      // figures that had just been written. onProcessed refreshes the table
+      // behind it and the toast confirms the write.
       toast.success(`${row.name} ${isReprocess ? "re-processed" : "processed"} successfully`);
       onProcessed();
-      onClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to process. Please try again.");
     } finally {
