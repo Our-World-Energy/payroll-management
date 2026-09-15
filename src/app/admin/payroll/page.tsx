@@ -709,22 +709,21 @@ export default function PayrollPage() {
     refresh();
   }
 
-  // Pick up changes made outside this tab, the same way Attendance does.
+  // Process and Re-Process write the figures held in the row, and that row was
+  // fetched when the page loaded. Editing Attendance elsewhere and coming back
+  // to re-process therefore wrote the pre-edit numbers back into the snapshot,
+  // and the voucher showed no change — the button had worked, on stale data.
   //
-  // This matters more here than it looks: Process and Re-Process write the
-  // figures held in the row, which were fetched when the page loaded. Editing
-  // Attendance in another tab and coming back to re-process therefore wrote
-  // the pre-edit numbers straight back into the snapshot, and the voucher
-  // showed no change — the button had worked, on stale data. Refreshing on
-  // focus means the row is current before anyone can act on it.
+  // visibilitychange only, deliberately: a window "focus" listener also fires
+  // every time you return from another application, which reloaded the table
+  // constantly while someone was simply switching between windows. This fires
+  // when the tab itself was hidden and comes back — which is the case that
+  // matters, since that is what happens when Attendance is edited in another
+  // tab.
   useEffect(() => {
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
+    return () => document.removeEventListener("visibilitychange", onVisible);
   }, [refresh]);
 
   // Same fluid scale as Attendance Management: every clamp() maxes out at its

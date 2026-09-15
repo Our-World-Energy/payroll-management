@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable react-hooks/exhaustive-deps */
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAdminTheme } from "@/components/AdminThemeContext";
 import { LuCircleCheck, LuCircleAlert, LuClock, LuFileText, LuRefreshCw, LuEye, LuMessageSquare, LuPencil, LuX, LuCalendar, LuSearch, LuListChecks, LuFingerprint, LuTimer, LuCalendarDays, LuBanknote } from "react-icons/lu";
@@ -3417,7 +3417,6 @@ export default function AttendancePage() {
   const [worksnapError, setWorksnapError] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const refresh = useCallback(() => setReloadKey((key) => key + 1), []);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [breakdownTarget, setBreakdownTarget] = useState<AttendanceRow | null>(null);
   const [nameSearch, setNameSearch] = useState("");
@@ -3932,19 +3931,13 @@ export default function AttendancePage() {
     }));
   }
 
-  // Pick up changes made outside this tab — another admin approving, or the
-  // Worksnap sync landing — without anyone reaching for the browser refresh.
-  // Keyed to the tab becoming visible/focused rather than a timer, so an idle
-  // tab costs nothing and a returning one is always current.
-  useEffect(() => {
-    const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
-    window.addEventListener("focus", refresh);
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.removeEventListener("focus", refresh);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [refresh]);
+  // Deliberately no focus/visibility auto-refresh here.
+  //
+  // It refetched on every window focus, which fires each time you come back
+  // from another window — so simply alternating between this tab and anything
+  // else reloaded the table repeatedly while you were working in it. The
+  // explicit refreshes (save, Approve All, Bulk Approve, Process, and the
+  // error banner's Retry) already cover the cases that matter.
 
   function handleBulkApprove() {
     // Re-fetch from Supabase rather than trust a local mutation, so the table
