@@ -72,12 +72,14 @@ export async function GET(request: Request) {
     .map((entry) => String(entry.email ?? "").trim().toLowerCase())
     .filter(Boolean)));
 
-  const { data: contractorProfiles, error: contractorError } = emails.length
-    ? await supabase
-      .from("contractor_profiles")
-      .select("email,department,restDay,location,shiftType,shiftHours,payCategory,hireDate")
-      .in("email", emails)
-    : { data: [], error: null };
+  // Every Active contractor, not just the ones with entries in this range.
+  // Selecting by the entry emails meant a contractor who logged nothing all
+  // week had no profile to attach and so produced no row at all — they simply
+  // vanished from Attendance for that week, which is exactly the week someone
+  // needs to see them.
+  const { data: contractorProfiles, error: contractorError } = await supabase
+    .from("contractor_profiles")
+    .select("email,fullName,status,department,restDay,location,shiftType,shiftHours,payCategory,hireDate");
 
   if (contractorError) {
     return NextResponse.json({ error: contractorError.message }, { status: 500 });
@@ -85,7 +87,7 @@ export async function GET(request: Request) {
 
   const profilesByEmail = new Map((contractorProfiles ?? []).map((profile) => [
     String(profile.email ?? "").trim().toLowerCase(),
-    { department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? ""), shiftHours: String(profile.shiftHours ?? ""), payCategory: String(profile.payCategory ?? ""), hireDate: String(profile.hireDate ?? "") },
+    { fullName: String(profile.fullName ?? ""), status: String(profile.status ?? ""), department: String(profile.department ?? ""), restDay: String(profile.restDay ?? ""), location: String(profile.location ?? ""), shiftType: String(profile.shiftType ?? ""), shiftHours: String(profile.shiftHours ?? ""), payCategory: String(profile.payCategory ?? ""), hireDate: String(profile.hireDate ?? "") },
   ]));
 
   const entries = data.map((entry) => {
@@ -103,5 +105,54 @@ export async function GET(request: Request) {
     };
   });
 
-  return NextResponse.json({ entries, lastSyncedAt: latestSyncResult.data?.syncedAt ?? null });
+  // Contractors with nothing logged in this range, as zero-minute rows so
+  // they appear in Attendance alongside everyone else.
+  // Active only: a dismissed contractor who logged nothing has no week to
+  // show. One who DID log time still appears, because their entries are in the
+  // list already and every profile is loaded above for the field lookup.
+  const loggedEmails = new Set(emails);
+  const missing = Array.from(profilesByEmail.entries())
+    .filter(([email, profile]) => !loggedEmails.has(email) && profile.status !== "Dismissed");
+
+  // Their Worksnap id comes from whatever they logged previously, so the row
+  // can still be reviewed and processed. Someone who has never logged any time
+  // (a Fixed-Mex contractor, say, whose hours come from the Fixed Time button)
+  // has none, and the row is display-only — which is correct, as there is no
+  // Worksnap week to review.
+  const idByEmail = new Map<string, number>();
+  if (missing.length) {
+    const { data: priorEntries } = await supabase
+      .from("worksnap_entries")
+      .select("email,worksnapUserId")
+      .in("email", missing.map(([email]) => email));
+    for (const row of priorEntries ?? []) {
+      const email = String(row.email ?? "").trim().toLowerCase();
+      if (email && row.worksnapUserId != null && !idByEmail.has(email)) {
+        idByEmail.set(email, Number(row.worksnapUserId));
+      }
+    }
+  }
+
+  // entryDate is left null on purpose: a date would add a 0 to that day's
+  // minutes, where the intent is a contractor with no logged days at all.
+  const zeroRows = missing.map(([email, profile]) => ({
+    worksnapUserId: idByEmail.get(email) ?? null,
+    userName: profile.fullName || email,
+    email,
+    durationMins: 0,
+    entryDate: null,
+    department: profile.department,
+    restDay: profile.restDay,
+    location: profile.location,
+    shiftType: profile.shiftType,
+    shiftHours: profile.shiftHours,
+    payCategory: profile.payCategory,
+    hireDate: profile.hireDate,
+    hasContractorProfile: true,
+  }));
+
+  return NextResponse.json({
+    entries: [...entries, ...zeroRows],
+    lastSyncedAt: latestSyncResult.data?.syncedAt ?? null,
+  });
 }
