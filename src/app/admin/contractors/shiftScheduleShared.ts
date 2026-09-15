@@ -63,7 +63,11 @@ export function effectiveShiftOn(newestFirst: ShiftScheduleDay[], dateIso: strin
 // the leading start time out of it. Shared so the shift-schedule rows and the
 // Fixed-shift string are parsed by exactly the same rule.
 export function parseShiftTime(value: string): { hour: number; minute: number } | null {
-  const m = value.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  // Seconds are optional: contractor_profiles.shiftHours holds
+  // "8:00:00 am to 5:00:00 pm" on rows that came in through the import, while
+  // this modal writes "8:00 AM to 5:00 PM". Requiring no seconds meant every
+  // imported row parsed as null, so its shift window was simply unknown.
+  const m = value.trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i);
   if (!m) return null;
   let hour = Number(m[1]) % 12;
   if (m[3].toUpperCase() === "PM") hour += 12;
