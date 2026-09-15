@@ -2306,6 +2306,25 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
               </button>
             ) : null
           )}
+          {/* Fixed-Ind, still short of the 2,400-min target: accept the week as
+              it stands. Sits beside Apply Time Credit as the other way out of
+              a short week — top the time up, or process it incomplete.
+              Independent of the credit buttons, so it is offered whether or not
+              a credit has been applied. */}
+          {isIndia && completionTotalMinutes < 2400 && (
+            <button
+              type="button"
+              onClick={() => handleSaveClick(true)}
+              disabled={isSaving || isLoadingReviewData || !isWeekEnded}
+              title={!isWeekEnded
+                ? "Push Process is only available once the selected week has ended"
+                : `Process this week at ${formatMinutesAsMins(completionTotalMinutes)}, short of the 2,400-min target`}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-blue-600"
+            >
+              <LuListChecks size={15} strokeWidth={2} />
+              {isSaving ? "Processing…" : "Push Process"}
+            </button>
+          )}
           {!isIndia && (
             <button
               type="button"
