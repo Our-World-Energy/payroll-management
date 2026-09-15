@@ -581,7 +581,7 @@ export default function PayrollPage() {
     const headers = [
       "Pay Period", "Name", "Contractor ID", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-      "Completion Time", "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     // Plain 2dp, no currency prefix and no thousands separators: currency is
@@ -604,7 +604,6 @@ export default function PayrollPage() {
         r.totalRdOtMinutes ? hours(r.totalRdOtMinutes) : "",
         r.totalHoOtMinutes ? hours(r.totalHoOtMinutes) : "",
         r.totalTimeOffRequestMinutes > 0 ? hours(r.totalTimeOffRequestMinutes) : "",
-        r.completionMinutes != null ? hours(r.completionMinutes) : "",
         r.currency,
         `${r.currency} ${fmtRate(r.hourlyRate)}`, fmtRate(r.hourlyRate),
         r.earnings != null ? decimal(r.earnings) : "",
