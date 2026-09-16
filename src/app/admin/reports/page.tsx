@@ -2,6 +2,14 @@ import { LuChartColumn } from "react-icons/lu";
 import { fetchAllContractors } from "../contractors/actions";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 
+// This page reads live contractor data, so it must render per request rather
+// than be prerendered at build time. Without this, `next build` tries to fetch
+// from Supabase while compiling — which fails anywhere without database
+// credentials (CI), and would bake stale workforce numbers into the output
+// everywhere else. Matches the `force-dynamic` convention used by the API
+// routes that read the same data.
+export const dynamic = "force-dynamic";
+
 export default async function ReportsPage() {
   const contractors = await fetchAllContractors({ country: "All Countries", status: "Active", rules: [] });
   const countsByCountry = new Map<string, number>();
