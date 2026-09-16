@@ -62,13 +62,9 @@ type PayrollRow = {
   weeklyRate: number;
   actualMinutes: number;
   completionMinutes: number | null;
-  /** Minutes Reg Hours is paid on. Same as completionMinutes for every
-   *  category except Fixed-Ind, which pays on Ind Time — see `payableMinutes`
-   *  where this is built. */
-  payableMinutes: number | null;
   /** The "IND Time" column. Fixed-Ind only — every other category has no Ind
-   *  Time, and showing payableMinutes for them would just repeat Completion
-   *  Time in the next column over. */
+   *  Time. Shown for reference beside Completion Time; pay is calculated from
+   *  Completion Time (the Net Time), not from this. */
   indMinutes: number | null;
   hours: number | null;
   /** Pay derived from time alone — the pay components plus PTO pay, before any
@@ -411,25 +407,19 @@ export default function PayrollPage() {
               ? fixedMinutes
               : (isReviewed ? (saved!.completionMinutes as number) : null);
             const hours = completionMinutes != null ? completionMinutes / 60 : null;
-            // Fixed-Ind pays Reg Hours on Ind Time — the week's worked Worksnap
-            // time plus approved sick leave, as the Attendance Review "Ind
-            // Time" cell shows it. Completion Time is the Net Time derived from
-            // it (Offset Credit repaid, then capped at 2,400, plus any credit
-            // granted on the week), which is the right figure for the
-            // Completion Time column above but not for pay.
+            // Fixed-Ind Ind Time, for the IND Time column only — every pay
+            // category, this one included, is PAID on Completion Time, which
+            // for Fixed-Ind is the Net Time derived from Ind Time: any Offset
+            // Credit repaid, then capped at 2,400, plus any credit granted on
+            // the week. So the two figures sit side by side in the table, with
+            // Net Time the one Reg Hours is calculated from.
             //
             // Falls back to Completion Time when Ind Time was never stored:
-            // weeks saved before the column existed. Those two figures are
-            // equal for any week under the cap with no credit in play, which is
-            // the ordinary case.
-            const payableMinutes = payCategoryKey === "fixed-ind"
+            // weeks saved before the column existed. The two are equal for any
+            // week under the cap with no credit in play, the ordinary case.
+            const indMinutes = payCategoryKey === "fixed-ind"
               ? (isReviewed ? (saved!.totalIndMinutes ?? (saved!.completionMinutes as number)) : null)
-              : completionMinutes;
-            // Shown in its own column beside Completion Time, so the two
-            // figures a Fixed-Ind week is judged on are visible together: Ind
-            // Time is what Reg Hours is paid on, Completion Time is the Net
-            // Time after any repayment and the 2,400-min cap.
-            const indMinutes = payCategoryKey === "fixed-ind" ? payableMinutes : null;
+              : null;
             const country = countryFromLocation(c.location || "");
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
             const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
@@ -484,7 +474,7 @@ export default function PayrollPage() {
             // Earnings is the time-derived half, broken out so the table can show
             // it beside the manual adjustments that make up the rest of Gross.
             const earnings = hasGrossInputs
-              ? payComponentsFor(c.payCategory || "", hourlyRate, payableMinutes, {
+              ? payComponentsFor(c.payCategory || "", hourlyRate, completionMinutes, {
                   totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
                   totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
                   totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
@@ -575,7 +565,6 @@ export default function PayrollPage() {
               weeklyRate: monthlyRateNum > 0 ? weeklyRateFrom(monthlyRateNum) : (parseFloat(c.weeklyRate) || 0),
               actualMinutes,
               completionMinutes,
-              payableMinutes,
               indMinutes,
               hours,
               earnings,
@@ -1258,7 +1247,7 @@ function PayrollVoucherModal({
     setIsSaving(true);
     setSaveError("");
     try {
-      const live = payComponentsFor(row.payCategory, row.hourlyRate, row.payableMinutes, {
+      const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
         totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: row.totalRegularOtMinutes,
         totalRdOtMinutes: row.totalRdOtMinutes,
@@ -1396,7 +1385,7 @@ function PayrollVoucherModal({
         ptoDailyMinutes: row.ptoDailyMinutes,
       }
     : (() => {
-        const live = payComponentsFor(row.payCategory, row.hourlyRate, row.payableMinutes, {
+        const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
           totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
           totalRegularOtMinutes: row.totalRegularOtMinutes,
           totalRdOtMinutes: row.totalRdOtMinutes,
@@ -2214,7 +2203,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
 
   function buildItems(rowsToProcess: PayrollRow[]): ProcessedPayrollRow[] {
     return rowsToProcess.map((r) => {
-      const live = payComponentsFor(r.payCategory, r.hourlyRate, r.payableMinutes, {
+      const live = payComponentsFor(r.payCategory, r.hourlyRate, r.completionMinutes, {
         totalEvaluatedRegularMinutes: r.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: r.totalRegularOtMinutes,
         totalRdOtMinutes: r.totalRdOtMinutes,
