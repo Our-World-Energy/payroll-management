@@ -270,28 +270,55 @@ export async function setUserEnabled(id: string, enabled: boolean): Promise<void
  * one failure must not leave the caller unable to tell which of the others
  * went through.
  *
- * The caller's own account is never disabled. One row at a time that is a
- * deliberate act on a named person; "select all" then Disable would lock the
- * admin doing it out of the console — and every other admin with them — with
- * no way back in. Enforced here rather than by hiding a checkbox, since this
- * runs with the service-role key.
+ * Admin accounts are never touched in bulk, enabling or disabling. They are
+ * the accounts that can restore any of the others, so a sweep across a
+ * filtered list is the wrong instrument for them — one at a time through the
+ * account editor still works, where it is a deliberate act on a named person.
+ * A "select all" then Disable would otherwise lock every admin out of the
+ * console at once, with no way back in through the UI.
+ *
+ * The caller's own account is never disabled either. That is redundant while
+ * only admins reach this page, but it holds for any other role given access to
+ * it later.
+ *
+ * Both rules are enforced here rather than by hiding a checkbox: this runs with
+ * the service-role key, so the client's list of ids is a request, not a fact.
+ * Roles are read from GoTrue rather than taken from the caller for the same
+ * reason.
  */
 export async function setUsersEnabled(
   ids: string[],
   enabled: boolean
-): Promise<{ updated: number; failed: { id: string; message: string }[]; skippedSelf: boolean }> {
+): Promise<{
+  updated: number;
+  failed: { id: string; message: string }[];
+  skippedSelf: boolean;
+  skippedAdmins: number;
+}> {
   const sb = getSupabase();
   const failed: { id: string; message: string }[] = [];
   let updated = 0;
 
-  let selfId: string | null = null;
-  if (!enabled) {
-    const session = await createSessionClient();
-    const { data: { user } } = await session.auth.getUser();
-    selfId = user?.id ?? null;
-  }
-  const targets = ids.filter((id) => id !== selfId);
-  const skippedSelf = targets.length !== ids.length;
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  const selfId = user?.id ?? null;
+
+  // One paged listing (2 requests for ~360 accounts) rather than a
+  // getUserById per id, which would be one round trip per selected row.
+  const roleById = new Map(
+    (await listAllAuthUsers(sb)).map((u) => [
+      String(u.id ?? ""),
+      normalizeRole((u.user_metadata as Record<string, unknown> | undefined)?.role),
+    ])
+  );
+
+  const requested = new Set(ids);
+  const adminIds = [...requested].filter((id) => roleById.get(id) === "admin");
+  const targets = [...requested].filter(
+    (id) => roleById.get(id) !== "admin" && !(!enabled && id === selfId)
+  );
+  const skippedAdmins = adminIds.length;
+  const skippedSelf = !enabled && selfId != null && requested.has(selfId) && roleById.get(selfId) !== "admin";
 
   for (const id of targets) {
     const { error } = await sb.auth.admin.updateUserById(id, {
@@ -301,5 +328,5 @@ export async function setUsersEnabled(
     else updated++;
   }
 
-  return { updated, failed, skippedSelf };
+  return { updated, failed, skippedSelf, skippedAdmins };
 }
