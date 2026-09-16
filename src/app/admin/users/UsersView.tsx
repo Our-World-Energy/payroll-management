@@ -112,6 +112,37 @@ function StatCard({ label, value, Icon, tint }: { label: string; value: number; 
   );
 }
 
+/**
+ * Enabled and Disabled in one card rather than two: they are two halves of the
+ * same total, so reading them side by side is the point — and a lone "Disabled:
+ * 0" card would take a slot to say nothing.
+ *
+ * The disabled figure turns red only when there is something to see; zero stays
+ * grey, so an all-enabled workspace doesn't read as a problem.
+ */
+function AccountStatusCard({ enabled, disabled }: { enabled: number; disabled: number }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Account Status</p>
+        <div className="mt-1 flex items-baseline gap-4">
+          <span>
+            <span className="text-2xl font-black text-[#003527]">{enabled}</span>
+            <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600">Enabled</span>
+          </span>
+          <span>
+            <span className={`text-2xl font-black ${disabled > 0 ? "text-red-600" : "text-slate-300"}`}>{disabled}</span>
+            <span className={`ml-1.5 text-[10px] font-bold uppercase tracking-wide ${disabled > 0 ? "text-red-500" : "text-slate-400"}`}>Disabled</span>
+          </span>
+        </div>
+      </div>
+      <div className="size-10 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500">
+        <LuUserCheck size={20} />
+      </div>
+    </div>
+  );
+}
+
 type Modal =
   | { type: "create" }
   | { type: "delete"; user: AppUser }
@@ -143,6 +174,8 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   // "None" covers accounts with no contractor record — the dash in the column.
   const [contractorFilter, setContractorFilter] =
     useState<"All" | ContractorStatus | "None">("All");
+  const [departmentFilter, setDepartmentFilter] = useState("All");
+  const [countryFilter,    setCountryFilter]    = useState("All");
 
   // Create form
   const [newName,     setNewName]     = useState("");
@@ -334,6 +367,14 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   }
 
   const countByRole = (role: AppRole) => users.filter((u) => u.role === role).length;
+  const enabledCount  = users.filter((u) => u.enabled).length;
+  const disabledCount = users.length - enabledCount;
+
+  // Drawn from the accounts on file rather than a fixed list, so a new team or
+  // country appears here as soon as one contractor carries it. Blanks are
+  // dropped: an admin-only login has no team or country to offer.
+  const departmentOptions = Array.from(new Set(users.map((u) => u.department).filter(Boolean))).sort();
+  const countryOptions    = Array.from(new Set(users.map((u) => u.country).filter(Boolean))).sort();
 
   // Sorted alphabetically by the name actually shown in the row, falling back to
   // the email for accounts with no name — otherwise nameless rows would sort
@@ -347,6 +388,8 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
         || (contractorFilter === "None"
               ? u.contractorStatus === null
               : u.contractorStatus === contractorFilter)) &&
+      (departmentFilter === "All" || u.department === departmentFilter) &&
+      (countryFilter    === "All" || u.country    === countryFilter) &&
       (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
     )
     .sort((a, b) =>
@@ -412,7 +455,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <StatCard label="Total Users" value={users.length} Icon={LuUsers} tint="bg-teal-50 text-teal-600" />
         {APP_ROLES.map((role) => (
           <StatCard
@@ -423,6 +466,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
             tint={ROLE_BADGE[role].tint}
           />
         ))}
+        <AccountStatusCard enabled={enabledCount} disabled={disabledCount} />
       </div>
 
       {error && (
@@ -483,11 +527,29 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
           <option value="Dismissed">Dismissed</option>
           <option value="None">No contractor record</option>
         </select>
-        {(searchTerm !== "" || roleFilter !== "All" || statusFilter !== "All" || contractorFilter !== "All") && (
+        <select
+          value={departmentFilter}
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Assigned Teams</option>
+          {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select
+          value={countryFilter}
+          onChange={(e) => setCountryFilter(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Countries</option>
+          {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {(searchTerm !== "" || roleFilter !== "All" || statusFilter !== "All" || contractorFilter !== "All"
+          || departmentFilter !== "All" || countryFilter !== "All") && (
           <button
             onClick={() => {
               setSearchTerm(""); setRoleFilter("All");
               setStatusFilter("All"); setContractorFilter("All");
+              setDepartmentFilter("All"); setCountryFilter("All");
             }}
             className="text-sm font-semibold text-teal-600 hover:text-teal-700"
           >

@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { normalizeAccountPages, defaultAccountPages, accountPagesAreDefault } from "@/lib/accountPages";
 import { type AppRole, normalizeRole } from "@/lib/roles";
+import { countryFromLocation } from "@/lib/countryTimeZones";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -31,13 +32,24 @@ export type AppUser = {
    * a contractor who is on file and dismissed.
    */
   contractorStatus: ContractorStatus | null;
+  /**
+   * Assigned Team and country, from the contractor record. Both are "" for an
+   * account with none (admin-only logins) — they have no team or country to
+   * filter by, rather than an unknown one.
+   *
+   * Country is derived through countryFromLocation, the same mapping every
+   * other view uses, so "Philippines" means the same thing here as it does on
+   * Attendance and Payroll.
+   */
+  department: string;
+  country: string;
 };
 
 export type ContractorStatus = "Active" | "Dismissed";
 
 function toAppUser(
   u: Record<string, unknown>,
-  profile?: { fullName: string; status: string },
+  profile?: { fullName: string; status: string; department: string; location: string },
 ): AppUser {
   const metadata = u.user_metadata as Record<string, unknown> | undefined;
   const fullName = profile?.fullName ?? "";
@@ -61,6 +73,8 @@ function toAppUser(
     contractorStatus: profile == null
       ? null
       : profile.status === "Dismissed" ? "Dismissed" : "Active",
+    department: profile?.department ?? "",
+    country: profile?.location ? countryFromLocation(profile.location) : "",
   };
 }
 
@@ -89,7 +103,7 @@ export async function fetchUsers(): Promise<AppUser[]> {
   const sb = getSupabase();
   const [authUsers, contractorsRes] = await Promise.all([
     listAllAuthUsers(sb),
-    sb.from("contractor_profiles").select("email, status, fullName"),
+    sb.from("contractor_profiles").select("email, status, fullName, department, location"),
   ]);
 
   // Every account is listed, dismissed contractors included — the Contractor
@@ -100,7 +114,12 @@ export async function fetchUsers(): Promise<AppUser[]> {
   const profileByEmail = new Map(
     (contractorsRes.data ?? []).map((c) => [
       String(c.email ?? "").trim().toLowerCase(),
-      { status: String(c.status ?? ""), fullName: String(c.fullName ?? "") },
+      {
+        status: String(c.status ?? ""),
+        fullName: String(c.fullName ?? ""),
+        department: String(c.department ?? ""),
+        location: String(c.location ?? ""),
+      },
     ])
   );
 
