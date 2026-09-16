@@ -6,7 +6,7 @@ import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser, LuTriangleAlert } from
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
-import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
+import { fetchDashboardContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -172,13 +172,51 @@ function AdminDashboard() {
     return () => { isMounted = false; };
   }, []);
 
-  // Live per-country Active headcounts (independent of the absent/late gate
-  // below, which only runs after 7:30am) — these tiles should always be current.
   useEffect(() => {
     let isMounted = true;
-    fetchAllContractors({ country: "All Countries", status: "Active", rules: [] })
-      .then((contractors) => {
+
+    async function load() {
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setHours(7, 30, 0, 0);
+      // The country tiles are always current; Absent / Late / Time Away only
+      // mean anything once the day has started. Previously the whole effect
+      // returned early before 7:30 and a SECOND effect fetched every
+      // contractor again just to count them by country.
+      const afterCutoff = now >= cutoff;
+
+      const todayLocal = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      try {
+        // Trailing slashes throughout: next.config sets trailingSlash: true, so
+        // every one of these without it cost a 308 and a second round trip.
+        //
+        // The four day-specific requests are skipped entirely before the
+        // cutoff, when nothing reads them.
+        const [contractors, entriesRes, dailyLogRes, leaveRequests, shiftScheduleRes] = await Promise.all([
+          fetchDashboardContractors(),
+          afterCutoff
+            ? fetch(`/api/worksnap-entries/?from=${todayLocal}&to=${todayLocal}`).then((r) => (r.ok ? r.json() : { entries: [] })).catch(() => ({ entries: [] }))
+            : Promise.resolve({ entries: [] }),
+          afterCutoff
+            ? fetch(`/api/attendance/daily-log/?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })).catch(() => ({ logs: [] }))
+            : Promise.resolve({ logs: [] }),
+          afterCutoff ? fetchAllLeaveRequestsAdmin().catch(() => []) : Promise.resolve([]),
+          // Per-date windows for Shifting Schedule contractors — their start
+          // time changes day to day, so it can't come from shiftHours.
+          afterCutoff
+            ? fetch(`/api/attendance/shift-schedule/?date=${todayLocal}`)
+                .then((r) => (r.ok ? r.json() : { schedules: [] }))
+                .catch(() => ({ schedules: [] }))
+            : Promise.resolve({ schedules: [] }),
+        ]);
         if (!isMounted) return;
+
+        // Same one list the lists below use, counted by country.
         const counts = { ...EMPTY_COUNTRY_COUNTS };
         for (const c of contractors) {
           counts.totalActive++;
@@ -190,36 +228,8 @@ function AdminDashboard() {
           else if (country === "Colombia") counts.colombia++;
         }
         setCountryCounts(counts);
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
-  }, []);
 
-  useEffect(() => {
-    async function loadAbsent() {
-      const now = new Date();
-      const cutoff = new Date();
-      cutoff.setHours(7, 30, 0, 0);
-      if (now < cutoff) return;
-
-      const todayLocal = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-      ].join("-");
-
-      try {
-        const [entriesRes, contractors, dailyLogRes, leaveRequests, shiftScheduleRes] = await Promise.all([
-          fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
-          fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
-          fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
-          fetchAllLeaveRequestsAdmin().catch(() => []),
-          // Per-date windows for Shifting Schedule contractors — their start
-          // time changes day to day, so it can't come from shiftHours.
-          fetch(`/api/attendance/shift-schedule?date=${todayLocal}`)
-            .then((r) => (r.ok ? r.json() : { schedules: [] }))
-            .catch(() => ({ schedules: [] })),
-        ]);
+        if (!afterCutoff) return;
 
         const shiftStartByEmail = new Map<string, string>();
         for (const s of (shiftScheduleRes.schedules ?? []) as { email: string; shiftStart: string }[]) {
@@ -346,7 +356,8 @@ function AdminDashboard() {
       }
     }
 
-    loadAbsent();
+    load();
+    return () => { isMounted = false; };
   }, []);
 
   const METRICS = [
