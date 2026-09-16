@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { normalizeAccountPages, defaultAccountPages, accountPagesAreDefault } from "@/lib/accountPages";
 import { type AppRole, normalizeRole } from "@/lib/roles";
 
@@ -235,4 +236,51 @@ export async function setUserEnabled(id: string, enabled: boolean): Promise<void
     ban_duration: enabled ? "none" : "876000h", // ~100 years
   });
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Enable or disable several accounts in one call.
+ *
+ * One Server Action rather than the client calling setUserEnabled per row:
+ * Next serialises Server Action requests from a client, so N rows would mean N
+ * round trips each carrying the page payload. The loop here is sequential on
+ * purpose — these are GoTrue admin writes, and firing a few hundred at once
+ * invites rate limiting for no gain, since the round trip was the cost.
+ *
+ * Partial success is reported rather than thrown: with 300 accounts selected,
+ * one failure must not leave the caller unable to tell which of the others
+ * went through.
+ *
+ * The caller's own account is never disabled. One row at a time that is a
+ * deliberate act on a named person; "select all" then Disable would lock the
+ * admin doing it out of the console — and every other admin with them — with
+ * no way back in. Enforced here rather than by hiding a checkbox, since this
+ * runs with the service-role key.
+ */
+export async function setUsersEnabled(
+  ids: string[],
+  enabled: boolean
+): Promise<{ updated: number; failed: { id: string; message: string }[]; skippedSelf: boolean }> {
+  const sb = getSupabase();
+  const failed: { id: string; message: string }[] = [];
+  let updated = 0;
+
+  let selfId: string | null = null;
+  if (!enabled) {
+    const session = await createSessionClient();
+    const { data: { user } } = await session.auth.getUser();
+    selfId = user?.id ?? null;
+  }
+  const targets = ids.filter((id) => id !== selfId);
+  const skippedSelf = targets.length !== ids.length;
+
+  for (const id of targets) {
+    const { error } = await sb.auth.admin.updateUserById(id, {
+      ban_duration: enabled ? "none" : "876000h", // ~100 years, as setUserEnabled
+    });
+    if (error) failed.push({ id, message: error.message });
+    else updated++;
+  }
+
+  return { updated, failed, skippedSelf };
 }
