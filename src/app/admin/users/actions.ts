@@ -3,7 +3,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { normalizeAccountPages, defaultAccountPages, accountPagesAreDefault } from "@/lib/accountPages";
-import { type AppRole, normalizeRole } from "@/lib/roles";
+import { type AppRole, normalizeRole, canGrantAdminRole, ADMIN_ROLE_GRANTER_EMAIL } from "@/lib/roles";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 
 function getSupabase() {
@@ -128,12 +128,38 @@ export async function fetchUsers(): Promise<AppUser[]> {
   );
 }
 
+/**
+ * Refuses to hand out the admin role unless the caller is the one account
+ * allowed to (see ADMIN_ROLE_GRANTER_EMAIL). Enforced server-side because
+ * these actions run with the service-role key — the UI hiding the option is a
+ * convenience, not the rule.
+ *
+ * The caller comes from the session rather than an argument, so it cannot be
+ * claimed by whoever is calling.
+ */
+async function assertMayAssignRole(role: AppRole): Promise<void> {
+  if (role !== "admin") return;
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  if (!canGrantAdminRole(user?.email)) {
+    throw new Error(`Only ${ADMIN_ROLE_GRANTER_EMAIL} can assign the Admin role.`);
+  }
+}
+
+/** Whether the signed-in caller may assign the admin role — drives the UI. */
+export async function mayAssignAdminRole(): Promise<boolean> {
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  return canGrantAdminRole(user?.email);
+}
+
 export async function createUser(
   email: string,
   password: string,
   role: AppRole,
   fullName = "",
 ): Promise<AppUser> {
+  await assertMayAssignRole(role);
   const sb = getSupabase();
   const name = fullName.trim();
   const { data, error } = await sb.auth.admin.createUser({
@@ -156,6 +182,7 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 export async function updateUserRole(id: string, role: AppRole): Promise<void> {
+  await assertMayAssignRole(role);
   const sb = getSupabase();
   // Merge rather than replace: updateUserById overwrites user_metadata whole,
   // so writing { role } alone dropped fullName and (now) the granted pages.

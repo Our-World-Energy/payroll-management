@@ -6,8 +6,8 @@ import {
   LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
   LuHeartHandshake, LuBriefcaseBusiness, LuPencil, LuBan, LuUserX,
 } from "react-icons/lu";
-import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, type ContractorStatus, updateUserPages, setUserEnabled, setUsersEnabled } from "./actions";
-import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL } from "@/lib/roles";
+import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, type ContractorStatus, updateUserPages, setUserEnabled, setUsersEnabled, mayAssignAdminRole } from "./actions";
+import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL, ADMIN_ROLE_GRANTER_EMAIL } from "@/lib/roles";
 import { ACCOUNT_PAGES, ACCOUNT_PAGE_GROUPS } from "@/lib/accountPages";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
@@ -168,6 +168,11 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   const [bulkBusy, setBulkBusy] = useState<"enable" | "disable" | null>(null);
   const [bulkResult, setBulkResult] = useState("");
 
+  // Whether this admin may hand out the admin role — only one account can (see
+  // ADMIN_ROLE_GRANTER_EMAIL). Starts false so the option is never briefly
+  // offered to someone who cannot use it; the action refuses it regardless.
+  const [canGrantAdmin, setCanGrantAdmin] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<"All" | AppRole>("All");
   const [statusFilter, setStatusFilter] = useState<"All" | "Enabled" | "Disabled">("All");
@@ -200,6 +205,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   }
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { mayAssignAdminRole().then(setCanGrantAdmin).catch(() => setCanGrantAdmin(false)); }, []);
 
   async function handleSync() {
     setSyncing(true); setSyncResult(null); setError("");
@@ -792,9 +798,11 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</label>
                 <select className={INPUT + " cursor-pointer"} value={newRole} onChange={(e) => setNewRole(e.target.value as AppRole)}>
-                  {APP_ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
-                  ))}
+                  {APP_ROLES
+                    .filter((role) => role !== "admin" || canGrantAdmin)
+                    .map((role) => (
+                      <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                    ))}
                 </select>
               </div>
               {formError && <p className="text-xs text-red-500">{formError}</p>}
@@ -981,10 +989,17 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                   value={modal.newRole}
                   onChange={(e) => setModal({ ...modal, newRole: e.target.value as AppRole })}
                 >
-                  {APP_ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
-                  ))}
+                  {APP_ROLES
+                    .filter((role) => role !== "admin" || canGrantAdmin || modal.user.role === "admin")
+                    .map((role) => (
+                      <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                    ))}
                 </select>
+                {!canGrantAdmin && (
+                  <p className="text-[11px] text-slate-400">
+                    Only {ADMIN_ROLE_GRANTER_EMAIL} can assign the Admin role.
+                  </p>
+                )}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">

@@ -22,6 +22,22 @@ export function normalizeRole(raw: unknown): AppRole {
   return APP_ROLES.includes(raw as AppRole) ? (raw as AppRole) : "admin";
 }
 
+/**
+ * The one account that may grant the admin role. Every other admin can set any
+ * other role, but not create another admin — admin is the level that can undo
+ * anything, including revoking the others, so handing it out stays with a
+ * single named person.
+ *
+ * Named here rather than in the page so the server action enforcing it and the
+ * UI reflecting it read the same value, and so it is one edit to change.
+ */
+export const ADMIN_ROLE_GRANTER_EMAIL = "vdavid@ourworldenergy.com";
+
+/** Whether `email` is allowed to assign the admin role. Case-insensitive. */
+export function canGrantAdminRole(email: string | null | undefined): boolean {
+  return String(email ?? "").trim().toLowerCase() === ADMIN_ROLE_GRANTER_EMAIL;
+}
+
 /** Roles that live in the /admin console. Contractors get /contractor. */
 export function usesAdminConsole(role: AppRole): boolean {
   return role !== "user";
