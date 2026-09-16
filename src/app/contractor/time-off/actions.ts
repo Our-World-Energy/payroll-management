@@ -193,6 +193,12 @@ export async function submitLeaveRequest(params: {
     }
   }
 
+  // A reason is required. The portal blocks an empty one, but as with the
+  // checks above, a client-side rule is a hint rather than a guarantee.
+  if (!params.reason.trim()) {
+    return { ok: false, error: "Reason for request is required." };
+  }
+
   const now = new Date().toISOString();
   const hours = leaveTypeHours(params.type);
   const isPto = isPtoLeaveType(params.type);
@@ -218,7 +224,7 @@ export async function submitLeaveRequest(params: {
     // as 1 by existing convention — the "* Half Day" type is what encodes the
     // half, and leaveTypeHours already reads 4h from it.
     durationDays:       1,
-    reason:             params.reason,
+    reason:             params.reason.trim(),
     status:             "Pending",
     ptoUsedHours:       isPto ? hours : 0,
     sickLeaveUsedHours: isPto ? 0 : hours,

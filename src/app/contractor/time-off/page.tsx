@@ -366,6 +366,7 @@ export default function ContractorTimeOffPage() {
       );
       return;
     }
+    if (!reason.trim()) { setFormError("Reason for request is required."); return; }
     setFormError(""); setSuccess("");
     // Every check above still guards the form, so the review box only ever
     // opens on a request that would actually be accepted.
@@ -579,9 +580,8 @@ export default function ContractorTimeOffPage() {
 
           <div className="pt-1">
             <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Reason</p>
-            <p className={`text-sm mt-1 ${reason.trim() ? "text-slate-700" : "text-slate-400 italic"}`}>
-              {reason.trim() || "No reason given"}
-            </p>
+            {/* Always present: handleSubmit will not open this box without one. */}
+            <p className="text-sm mt-1 text-slate-700 whitespace-pre-wrap break-words">{reason.trim()}</p>
           </div>
 
           {/* Warnings, not blocks — each of these is a request the contractor
@@ -889,13 +889,15 @@ export default function ContractorTimeOffPage() {
             )}
 
             <div>
-              <label className="block text-sm font-bold text-slate-800 mb-2">4. Reason for Request</label>
+              <label className="block text-sm font-bold text-slate-800 mb-2">
+                4. Reason for Request <span className="text-red-500" title="Required">*</span>
+              </label>
               <textarea
                 rows={3}
                 maxLength={500}
                 value={reason}
                 onChange={e => setReason(e.target.value)}
-                placeholder="Briefly describe the reason for your time off..."
+                placeholder="Briefly describe the reason for your time off (required)..."
                 className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 resize-none"
               />
               <p className="text-right text-xs text-slate-400 mt-1">{reason.length} / 500</p>
