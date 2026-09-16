@@ -94,25 +94,60 @@ export function buildAttendanceStatusOps(
   const totalCompletionTimeMinutes = totalEvaluatedRegularMinutes + totalRegularOtMinutes + totalRdOtMinutes
     + totalUsHoMinutes + (totalLocalHolidayMinutes ?? 0) + totalTimeOffMinutes;
 
+  // Week-level request status + saved completion time.
+  //
+  // Raw rather than a Prisma upsert because two of these columns must be
+  // merged against what is already stored rather than overwritten — see the
+  // ON CONFLICT clause. Column names are quoted because the Prisma schema has
+  // no @map on these fields, so Postgres stores them exactly as the camelCase
+  // Prisma field names.
   const ops: Prisma.PrismaPromise<unknown>[] = [
-    // week-level request status + saved completion time
-    client.attendanceWeekStatus.upsert({
-      where: { attendance_week_key: { worksnapUserId, weekStart } },
-      create: {
-        worksnapUserId, email, weekStart, requestStatus, completionMinutes, totalIndMinutes, totalLocalHolidayMinutes,
-        totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
-        totalCompletionTimeMinutes,
-        offsetCreditMinutes,
-        processed,
-      },
-      update: {
-        email, requestStatus, completionMinutes, totalIndMinutes, totalLocalHolidayMinutes,
-        totalEvaluatedRegularMinutes, totalEvaluatedMinutes, totalUsHoMinutes, totalRegularOtMinutes, totalRdOtMinutes, totalHoOtMinutes,
-        totalCompletionTimeMinutes,
-        offsetCreditMinutes,
-        processed,
-      },
-    }),
+    client.$executeRaw`
+      INSERT INTO "attendance_week_status" (
+        "id", "worksnapUserId", "email", "weekStart", "requestStatus", "completionMinutes",
+        "totalIndMinutes", "totalLocalHolidayMinutes", "totalEvaluatedRegularMinutes", "totalEvaluatedMinutes",
+        "totalUsHoMinutes", "totalRegularOtMinutes", "totalRdOtMinutes", "totalHoOtMinutes",
+        "totalCompletionTimeMinutes", "offsetCreditMinutes", "processed", "updatedAt"
+      )
+      VALUES (
+        ${randomUUID()}::uuid, ${worksnapUserId}, ${email}, ${weekStart},
+        ${requestStatus}::"AttendanceRequestStatus", ${completionMinutes},
+        ${totalIndMinutes}, ${totalLocalHolidayMinutes}, ${totalEvaluatedRegularMinutes}, ${totalEvaluatedMinutes},
+        ${totalUsHoMinutes}, ${totalRegularOtMinutes}, ${totalRdOtMinutes}, ${totalHoOtMinutes},
+        ${totalCompletionTimeMinutes}, ${offsetCreditMinutes}, ${processed}, now()
+      )
+      ON CONFLICT ("worksnapUserId", "weekStart") DO UPDATE SET
+        "email" = EXCLUDED."email",
+        -- Processing is sticky: a later Save edits the week, it does not
+        -- un-process it. Pushing a short Fixed-Ind week to Processed and then
+        -- pressing Save used to drop the week straight back to For Review,
+        -- because a plain save sends processed = false.
+        --
+        -- Enforced here rather than only in the caller: the figures are
+        -- computed client-side, so a browser running an older bundle would
+        -- otherwise still be able to clear the flag.
+        "processed" = ("attendance_week_status"."processed" OR EXCLUDED."processed"),
+        -- And a processed week stays APPROVED. Processing IS the approval (see
+        -- the markProcessed branch in Attendance Review), so letting a later
+        -- Save downgrade it to OPEN would take the week back out of Payroll's
+        -- "reviewed" set and stop it being payable.
+        "requestStatus" = CASE
+          WHEN "attendance_week_status"."processed" OR EXCLUDED."processed"
+            THEN 'APPROVED'::"AttendanceRequestStatus"
+          ELSE EXCLUDED."requestStatus" END,
+        "completionMinutes" = EXCLUDED."completionMinutes",
+        "totalIndMinutes" = EXCLUDED."totalIndMinutes",
+        "totalLocalHolidayMinutes" = EXCLUDED."totalLocalHolidayMinutes",
+        "totalEvaluatedRegularMinutes" = EXCLUDED."totalEvaluatedRegularMinutes",
+        "totalEvaluatedMinutes" = EXCLUDED."totalEvaluatedMinutes",
+        "totalUsHoMinutes" = EXCLUDED."totalUsHoMinutes",
+        "totalRegularOtMinutes" = EXCLUDED."totalRegularOtMinutes",
+        "totalRdOtMinutes" = EXCLUDED."totalRdOtMinutes",
+        "totalHoOtMinutes" = EXCLUDED."totalHoOtMinutes",
+        "totalCompletionTimeMinutes" = EXCLUDED."totalCompletionTimeMinutes",
+        "offsetCreditMinutes" = EXCLUDED."offsetCreditMinutes",
+        "updatedAt" = now()
+    `,
   ];
 
   // Per-day attendance review snapshot — one multi-row raw INSERT instead of

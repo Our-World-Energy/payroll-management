@@ -3640,10 +3640,12 @@ export default function AttendancePage() {
           setWorksnapRows(rows.map((row) => {
             const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
             if (!saved) return row;
-            // "Processed" (via the Process Attendance action) takes priority
-            // over a plain "Reviewed" save — it's cleared back to false by any
-            // normal individual/Bulk Approve save, so it only ever reflects
-            // whether Process Attendance is the most recent thing to touch it.
+            // "Processed" (via Process Attendance, or Push Process / Push to
+            // Processed on an individual week) takes priority over a plain
+            // "Reviewed" save, and it sticks: a later Save edits the week
+            // without un-processing it. The flag is merged server-side, so a
+            // save can only ever set it, never clear it — see
+            // buildAttendanceStatusOps.
             const weeklyStatus: AttendanceRecord["weeklyStatus"] = saved.processed
               ? "Processed"
               : saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus;
