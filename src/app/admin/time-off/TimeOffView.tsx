@@ -17,7 +17,7 @@ import {
 import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange, requestStatusDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -853,7 +853,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         ) : (
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[reviewStatus]}`}>
                             {REVIEW_ICON[reviewStatus]}
-                            {reviewStatus}
+                            {requestStatusDisplayLabel(reviewStatus)}
                           </span>
                         )}
                       </div>
@@ -1861,7 +1861,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
           <option value="All Statuses">All Statuses</option>
           <option value="Pending">Pending</option>
           <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
+          <option value="Rejected">Declined</option>
         </select>
         {filtersActive && (
           <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); }}
@@ -2088,7 +2088,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
                           {reviewStatus === "Approved" ? <LuCircleCheck size={11} /> : reviewStatus === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                          {leaveTypeDisplayLabel(latest.type)} · {reviewStatus}
+                          {leaveTypeDisplayLabel(latest.type)} · {requestStatusDisplayLabel(reviewStatus)}
                         </span>
                       ) : (
                         <span className="text-slate-300 text-sm">—</span>
@@ -2218,7 +2218,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                               "bg-slate-50 text-slate-500 border-slate-200"
                             }`}>
                               {h.status === "Approved" ? <LuCircleCheck size={11} /> : h.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                              {h.status}
+                              {requestStatusDisplayLabel(h.status)}
                             </span>
                           </div>
                           {h.reason?.trim() && (
@@ -2264,7 +2264,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                               "bg-amber-50 text-amber-700 border-amber-200"
                             }`}>
                               {r.status === "Approved" ? <LuCircleCheck size={11} /> : r.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                              {r.status}
+                              {requestStatusDisplayLabel(r.status)}
                             </span>
                           } />
                           <Line label="Filed" value={fmtDate(String(r.createdAt).slice(0, 10))} />

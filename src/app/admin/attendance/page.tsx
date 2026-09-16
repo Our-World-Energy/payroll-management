@@ -14,6 +14,7 @@ import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
 import { fetchFixedTimeForWeek, saveFixedTime } from "./actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { requestStatusDisplayLabel } from "@/lib/timeOffBalances";
 import type { Contractor } from "../contractors/types";
 
 
@@ -1994,8 +1995,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                                   onClick={() => toggleDailyDecision(date, "Rejected")}
                                   disabled={!isWeekEnded}
                                   className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                  aria-label={`Reject attendance for ${formatDayLabel(date)}`}
-                                  title={isWeekEnded ? "Reject" : "Only available once the selected week has ended"}
+                                  aria-label={`Decline attendance for ${formatDayLabel(date)}`}
+                                  title={isWeekEnded ? "Decline" : "Only available once the selected week has ended"}
                                 >
                                   <LuX size={15} strokeWidth={2} />
                                 </button>
@@ -2107,7 +2108,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
                           hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
                         }`}>
-                          {dailyDecisionStatus}
+                          {requestStatusDisplayLabel(dailyDecisionStatus)}
                         </td>
                       </tr>
                     );

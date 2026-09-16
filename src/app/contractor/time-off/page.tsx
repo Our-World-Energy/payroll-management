@@ -11,7 +11,7 @@ import {
 import {
   HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType,
   bookedLeaveByDate, canAddLeaveOnDate, leaveRequestHoldsDates, MAX_LEAVE_HOURS_PER_DAY,
-  leaveHoursPerCoveredDate, leaveBucketFor,
+  leaveHoursPerCoveredDate, leaveBucketFor, requestStatusDisplayLabel,
 } from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
@@ -55,7 +55,7 @@ function BookedDateHint({ date, booked, heldHours, blocked }: {
   return (
     <p className={`mt-1.5 inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-semibold ${tone}`}>
       <LuCircleAlert size={12} strokeWidth={2.5} className="shrink-0" />
-      {fmtDayAndDate(date)} — {leaveTypeDisplayLabel(booked.type)} ({booked.status}), {heldHours}h used
+      {fmtDayAndDate(date)} — {leaveTypeDisplayLabel(booked.type)} ({requestStatusDisplayLabel(booked.status)}), {heldHours}h used
       {blocked ? " — day is full" : remaining > 0 ? ` — ${remaining}h still available` : ""}
     </p>
   );
@@ -433,7 +433,7 @@ export default function ContractorTimeOffPage() {
             <p className="text-xs text-slate-400 mt-0.5">Request details</p>
           </div>
           <span className={`shrink-0 px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(viewRequest.status)}`}>
-            {viewRequest.status}
+            {requestStatusDisplayLabel(viewRequest.status)}
           </span>
         </div>
         <div className="px-5 py-4 space-y-0.5">
@@ -992,7 +992,7 @@ export default function ContractorTimeOffPage() {
                         </td>
                         <td className="px-4 py-2.5">
                           <span className={`px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(row.status)}`}>
-                            {row.status}
+                            {requestStatusDisplayLabel(row.status)}
                           </span>
                         </td>
                         <td className="px-4 py-2.5">
@@ -1100,7 +1100,7 @@ export default function ContractorTimeOffPage() {
                           <td className="px-5 py-4 text-sm text-slate-500 whitespace-nowrap">{submittedOn}</td>
                           <td className="px-5 py-4">
                             <span className={`px-3 py-1 rounded-full text-xs font-bold border ${statusStyle(row.status)}`}>
-                              {row.status}
+                              {requestStatusDisplayLabel(row.status)}
                             </span>
                           </td>
                         </tr>

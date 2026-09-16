@@ -14,6 +14,23 @@ export function leaveTypeDisplayLabel(type: string): string {
   return type.replace(/Sick Leave/g, "Medical Unavailability");
 }
 
+/**
+ * Cosmetic-only relabeling, same principle as leaveTypeDisplayLabel above:
+ * "Declined" is what every portal reads, while "Rejected" stays the value
+ * written to contractor_leave_requests.status and the REJECTED member of the
+ * AttendanceRequestStatus enum.
+ *
+ * Renaming the stored value instead would mean migrating live rows and a
+ * Postgres enum, and every comparison against it, for a change that is purely
+ * about wording — so the raw status is simply never rendered directly.
+ *
+ * Takes any status and passes the rest through unchanged, so it can wrap a
+ * status badge without the caller having to know which values it affects.
+ */
+export function requestStatusDisplayLabel(status: string): string {
+  return status === "Rejected" ? "Declined" : status;
+}
+
 // The PTO/Sick Leave accrual "year" resets on a cut off date (month + day,
 // no year) configured under Settings → Time Away Settings → Cut Off Time,
 // rather than being hardcoded to March 1st.
