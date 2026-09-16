@@ -6,7 +6,7 @@ import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser, LuTriangleAlert } from
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
-import { fetchDashboardContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
+import type { DashboardContractor } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -192,29 +192,28 @@ function AdminDashboard() {
       ].join("-");
 
       try {
-        // Trailing slashes throughout: next.config sets trailingSlash: true, so
-        // every one of these without it cost a 308 and a second round trip.
+        // One request for the whole page. It replaces five — four API routes
+        // plus a server action — which is faster here only because that route
+        // reads over Supabase REST: concurrent REST reads don't contend
+        // (225ms for six, against 980ms sequentially), whereas the Prisma
+        // routes it replaces cost ~500ms each on a pooled connection that
+        // barely overlaps them. See the route for the measurements.
         //
-        // The four day-specific requests are skipped entirely before the
-        // cutoff, when nothing reads them.
-        const [contractors, entriesRes, dailyLogRes, leaveRequests, shiftScheduleRes] = await Promise.all([
-          fetchDashboardContractors(),
-          afterCutoff
-            ? fetch(`/api/worksnap-entries/?from=${todayLocal}&to=${todayLocal}`).then((r) => (r.ok ? r.json() : { entries: [] })).catch(() => ({ entries: [] }))
-            : Promise.resolve({ entries: [] }),
-          afterCutoff
-            ? fetch(`/api/attendance/daily-log/?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })).catch(() => ({ logs: [] }))
-            : Promise.resolve({ logs: [] }),
-          afterCutoff ? fetchAllLeaveRequestsAdmin().catch(() => []) : Promise.resolve([]),
-          // Per-date windows for Shifting Schedule contractors — their start
-          // time changes day to day, so it can't come from shiftHours.
-          afterCutoff
-            ? fetch(`/api/attendance/shift-schedule/?date=${todayLocal}`)
-                .then((r) => (r.ok ? r.json() : { schedules: [] }))
-                .catch(() => ({ schedules: [] }))
-            : Promise.resolve({ schedules: [] }),
-        ]);
+        // Trailing slash: next.config sets trailingSlash: true, so without it
+        // this takes a 308 and a second round trip.
+        const data: {
+          contractors: DashboardContractor[];
+          minutesByEmail: Record<string, number>;
+          firstInByEmail: Record<string, string>;
+          shiftStartByEmail: Record<string, string>;
+          leaveToday: { email: string; type: string }[];
+        } = await fetch(`/api/admin/dashboard-today/?date=${todayLocal}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+          ?? { contractors: [], minutesByEmail: {}, firstInByEmail: {}, shiftStartByEmail: {}, leaveToday: [] };
         if (!isMounted) return;
+
+        const contractors = data.contractors;
 
         // Same one list the lists below use, counted by country.
         const counts = { ...EMPTY_COUNTRY_COUNTS };
@@ -231,29 +230,14 @@ function AdminDashboard() {
 
         if (!afterCutoff) return;
 
-        const shiftStartByEmail = new Map<string, string>();
-        for (const s of (shiftScheduleRes.schedules ?? []) as { email: string; shiftStart: string }[]) {
-          const email = String(s.email ?? "").trim().toLowerCase();
-          if (email && s.shiftStart) shiftStartByEmail.set(email, s.shiftStart);
-        }
-
-        const minutesByEmail = new Map<string, number>();
-        for (const e of (entriesRes.entries ?? [])) {
-          const email = String(e.email ?? "").trim().toLowerCase();
-          if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
-        }
-
-        // Late Today keys off `firstInLogged` — the contractor's actual clock-in
-        // instant. `firstIn` is the rounded Worksnap time-entry bucket boundary
-        // (e.g. 6:30:01 for a 6:32:51 clock-in), which reads a few minutes early
-        // and can clear the grace period when the real login didn't. Fall back to
-        // `firstIn` only for the small tail of rows with no logged instant.
-        const firstInByEmail = new Map<string, Date>();
-        for (const log of (dailyLogRes.logs ?? [])) {
-          const email = String(log.email ?? "").trim().toLowerCase();
-          const logged = log.firstInLogged ?? log.firstIn;
-          if (email && logged) firstInByEmail.set(email, new Date(logged));
-        }
+        // Summed, resolved and narrowed server-side now — including the
+        // firstInLogged-over-firstIn clock-in rule and the effective-from
+        // resolution for Shifting Schedule windows.
+        const shiftStartByEmail = new Map(Object.entries(data.shiftStartByEmail));
+        const minutesByEmail = new Map(Object.entries(data.minutesByEmail));
+        const firstInByEmail = new Map(
+          Object.entries(data.firstInByEmail).map(([email, iso]) => [email, new Date(iso)] as const)
+        );
 
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
 
@@ -262,9 +246,7 @@ function AdminDashboard() {
         // or Medical Unavailability instead of a bare "Absent" (Half Day/Unpaid/Special
         // Leave requests are left as "Absent" since they weren't asked for).
         function absenceStatusFor(email: string): string {
-          const match = leaveRequests.find((r) =>
-            r.status === "Approved" && r.email.trim().toLowerCase() === email && todayLocal >= r.startDate && todayLocal <= r.endDate
-          );
+          const match = data.leaveToday.find((r) => r.email === email);
           if (match?.type === "PTO") return "Time Away";
           if (match?.type === "Sick Leave") return "Medical Unavailability";
           return "Absent";
@@ -340,10 +322,8 @@ function AdminDashboard() {
         const ptoRows: PtoRow[] = [];
         for (const c of activeContractors) {
           const email = c.email!.trim().toLowerCase();
-          const match = leaveRequests.find((r) =>
-            r.status === "Approved" &&
-            r.email.trim().toLowerCase() === email &&
-            todayLocal >= r.startDate && todayLocal <= r.endDate &&
+          const match = data.leaveToday.find((r) =>
+            r.email === email &&
             (r.type === "PTO" || r.type === "PTO Half Day" || r.type === "Sick Leave" || r.type === "Sick Leave Half Day")
           );
           if (match) {
