@@ -10,7 +10,7 @@ import {
 } from "./actions";
 import {
   HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType,
-  bookedLeaveByDate, canAddLeaveOnDate, MAX_LEAVE_HOURS_PER_DAY,
+  bookedLeaveByDate, canAddLeaveOnDate, leaveRequestHoldsDates, MAX_LEAVE_HOURS_PER_DAY,
 } from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
@@ -293,11 +293,14 @@ export default function ContractorTimeOffPage() {
   const effectiveEndDate = isHalfDay ? startDate : endDate;
 
   // Every date already spoken for by a live request, mapped to what booked it.
-  // Rejected and Archived requests free their dates back up.
+  // Which request is holding each date, for the hint beside the field. Goes
+  // through leaveRequestHoldsDates rather than listing statuses again here, so
+  // it can never disagree with the rule that decides whether the date is
+  // actually selectable.
   const bookedDates = (() => {
     const map = new Map<string, { kind: "pto" | "sick" | "other"; status: string; type: string }>();
     for (const r of allRequests.length > 0 ? allRequests : requests) {
-      if (r.status === "Rejected" || r.status === "Archived") continue;
+      if (!leaveRequestHoldsDates(r.status)) continue;
       const kind = isPtoLeaveType(r.type) ? "pto" : r.type.includes("Sick") ? "sick" : "other";
       for (const d of datesCoveredBy(r.startDate, r.endDate)) {
         // A Pending marker should not overwrite an Approved one for the day.

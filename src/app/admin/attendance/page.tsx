@@ -1649,9 +1649,19 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
     // Time Credit"-style fix for excess hours, so it stays "For Review" until
     // resolved some other way. Hourly contractors always save as "APPROVED"
     // (original behavior) regardless of per-day decisions.
-    const requestStatus = isIndia
-      ? (finalCompletionMinutes >= 2400 && finalCompletionMinutes <= 2700 ? "APPROVED" : "OPEN")
-      : "APPROVED";
+    //
+    // Pushing to Processed is itself the decision, so it approves the week
+    // regardless of the band. Without this, "Push Process" left the week OPEN
+    // and Payroll — which treats only an APPROVED week as reviewed — ignored
+    // the saved Completion Time and fell back to Evaluated Regular Time. For
+    // Fixed-Ind that silently dropped the week's OT minutes from Reg HRS (they
+    // belong in Completion Time, since the category pays no separate OT), so a
+    // 1,930-min week paid as 31.83 hrs instead of 32.17.
+    const requestStatus = markProcessed
+      ? "APPROVED"
+      : isIndia
+        ? (finalCompletionMinutes >= 2400 && finalCompletionMinutes <= 2700 ? "APPROVED" : "OPEN")
+        : "APPROVED";
 
     if (record.worksnapUserId != null) {
       setIsSaving(true);
@@ -1702,6 +1712,10 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
             week: weekDates[0],
             requestStatus,
             completionMinutes: finalCompletionMinutes,
+            // Ind Time as the cell above shows it — uncapped, before any
+            // repayment or granted credit. Payroll pays Fixed-Ind Reg Hours on
+            // this, so it is stored rather than re-derived there.
+            indMinutes: isIndia ? indiaPoolMinutes : null,
             // Persisted so reopening this week still shows the credit, and so
             // next week knows what it owes back without relying on React state.
             offsetCreditMinutes: finalOffsetCredit,
@@ -2603,6 +2617,9 @@ function BulkApproveModal({ worksnapRows, allLeaveRequests, onClose, onApprove, 
         completionMinutes: isFixedContractor(r.payCategory)
           ? fixedIndNetMinutes(rawCompletion, repaymentFor(r)) + grantedCredit
           : rawCompletion,
+        // The pre-cap pool the line above derives Net Time from — Payroll pays
+        // Fixed-Ind Reg Hours on it. Null for every other category.
+        indMinutes: isFixedContractor(r.payCategory) ? rawCompletion : null,
         offsetCreditMinutes: grantedCredit,
         days: buildBulkApproveDaySnapshots(r, modalWeekDates, usaHolidays, dailyLogs, allHolidays, adjustedByContractor.get(r.contractorId), leaveRequests.filter((req) => req.email === email), savedDecisionsByContractor.get(r.contractorId)),
       };
@@ -3146,12 +3163,16 @@ function ProcessAttendanceModal({ rows, allLeaveRequests, usaHolidays, allHolida
       const completionMinutes = isFixedContractor(r.payCategory)
         ? fixedIndNetMinutes(totals.totalCompletionMinutes, repaymentFor(r)) + grantedCredit
         : totals.totalCompletionMinutes;
+      // The pre-cap pool the line above derives Net Time from — Payroll pays
+      // Fixed-Ind Reg Hours on it. Null for every other category.
+      const indMinutes = isFixedContractor(r.payCategory) ? totals.totalCompletionMinutes : null;
       return {
         worksnapUserId: r.worksnapUserId,
         email,
         week: weekDates[0],
         requestStatus: "APPROVED",
         completionMinutes,
+        indMinutes,
         // Carried through explicitly: the ops builder writes whatever it is
         // given, so omitting it would zero a credit that had been applied.
         offsetCreditMinutes: grantedCredit,
@@ -3619,10 +3640,12 @@ export default function AttendancePage() {
           setWorksnapRows(rows.map((row) => {
             const saved = row.worksnapUserId != null ? savedByUserId.get(row.worksnapUserId) : undefined;
             if (!saved) return row;
-            // "Processed" (via the Process Attendance action) takes priority
-            // over a plain "Reviewed" save — it's cleared back to false by any
-            // normal individual/Bulk Approve save, so it only ever reflects
-            // whether Process Attendance is the most recent thing to touch it.
+            // "Processed" (via Process Attendance, or Push Process / Push to
+            // Processed on an individual week) takes priority over a plain
+            // "Reviewed" save, and it sticks: a later Save edits the week
+            // without un-processing it. The flag is merged server-side, so a
+            // save can only ever set it, never clear it — see
+            // buildAttendanceStatusOps.
             const weeklyStatus: AttendanceRecord["weeklyStatus"] = saved.processed
               ? "Processed"
               : saved.requestStatus === "APPROVED" ? "Reviewed" : row.weeklyStatus;

@@ -363,6 +363,14 @@ model AttendanceWeekStatus {
   requestStatus        AttendanceRequestStatus @default(NOT_SET)
   manualAdjustmentTime Int                     @default(0)
   completionMinutes    Int?
+  /// Fixed-Ind "Ind Time": worked Worksnap time plus approved sick leave,
+  /// uncapped and before any Offset Credit repayment — what the Attendance
+  /// Review "Ind Time" cell shows, and what Payroll pays Reg Hours on.
+  /// `completionMinutes` above is the Net Time derived from this (repayment
+  /// deducted, capped at 2,400, plus any credit granted), so the pre-cap figure
+  /// cannot be recovered from it. Null on weeks saved before this column
+  /// existed, and on non-Fixed categories, which have no Ind Time.
+  totalIndMinutes      Int?
   totalLocalHolidayMinutes Int?                                    // sum of the week's per-day "Local HO Time"
   totalEvaluatedRegularMinutes Int      @default(0)                // sum of the week's per-day "Evaluated Regular Time"
   totalEvaluatedMinutes Int             @default(0)                // sum of the week's per-day "Evaluated Time"

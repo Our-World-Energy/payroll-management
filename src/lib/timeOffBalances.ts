@@ -79,8 +79,20 @@ export function leaveHoursPerCoveredDate(type: string): number {
 }
 
 /** Whether a request is still holding its dates. */
+/**
+ * Statuses that release the dates a request covered, freeing them to be
+ * requested again.
+ *
+ * "Cancelled" belongs here: an admin cancel already reverses whatever the
+ * request had deducted (see cancelLeaveRequestAdmin) and keeps the row only as
+ * history, so the day was still being held by a request that no longer counts
+ * for anything. A contractor's own cancel deletes the row outright, so it never
+ * reached this test.
+ */
+const RELEASED_LEAVE_STATUSES = ["Rejected", "Archived", "Cancelled"];
+
 export function leaveRequestHoldsDates(status: string): boolean {
-  return status !== "Rejected" && status !== "Archived";
+  return !RELEASED_LEAVE_STATUSES.includes(status);
 }
 
 /** What a date is already holding. */

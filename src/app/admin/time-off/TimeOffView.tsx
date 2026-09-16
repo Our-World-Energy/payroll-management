@@ -579,7 +579,9 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   const [reviewRowId, setReviewRowId] = useState<string | null>(null);
   const reviewRow = scopedRows.find((r) => r.id === reviewRowId) ?? null;
   const [reviewTab, setReviewTab] = useState<"new" | "history">("new");
-  const [decisionBusy, setDecisionBusy] = useState<"Approved" | "Rejected" | null>(null);
+  // Which request is being decided, and to what. Per request rather than just
+  // a status, so one day's spinner does not appear on every other day's button.
+  const [decisionBusy, setDecisionBusy] = useState<{ id: string; status: "Approved" | "Rejected" } | null>(null);
   const [decisionError, setDecisionError] = useState("");
 
   // Approve / decline the request open in the Review popup.
@@ -587,34 +589,29 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   // right pool, and putting hours back when a prior decision is reversed), so
   // this only reloads afterwards rather than adjusting anything itself.
   /**
-   * Decide every request passed in. A date range is filed as one request per
-   * day, so a two-day request is two rows that were submitted together and
-   * have to be decided together — approving one and leaving the other pending
-   * is not a state anyone asked for.
+   * Decide one day. A date range is filed as one request per day, so each day
+   * is approved or declined on its own — a manager can accept part of a range
+   * and decline the rest.
    *
-   * Sequential, not Promise.all: each decision reads the contractor's balance
-   * and writes it back, so running them together would have both read the same
-   * starting figure and the second would overwrite the first's deduction.
+   * The dialog stays open afterwards: with several days pending, closing after
+   * the first decision would mean reopening the contractor for each remaining
+   * one. reloadData refreshes the list, so the day just decided moves from New
+   * to Historical in place.
+   *
+   * Every button is disabled while one decision is in flight. Each decision
+   * reads the contractor's balance and writes it back, so two overlapping
+   * calls would both read the same starting figure and the second would
+   * overwrite the first's deduction.
    */
-  async function handleReviewDecision(requestIds: string[], status: "Approved" | "Rejected") {
-    setDecisionBusy(status);
+  async function handleReviewDecision(requestId: string, status: "Approved" | "Rejected") {
+    setDecisionBusy({ id: requestId, status });
     setDecisionError("");
-    for (const [index, id] of requestIds.entries()) {
-      const res = await updateLeaveRequestStatus(id, status);
-      if (!res.ok) {
-        setDecisionBusy(null);
-        // Say how far it got: the earlier days are already decided, so the
-        // reader needs to know this was partial rather than a no-op.
-        setDecisionError(
-          (res.error ?? "Could not save the decision. Please try again.")
-          + (index > 0 ? ` (${index} of ${requestIds.length} already ${status.toLowerCase()})` : ""),
-        );
-        await reloadData();
-        return;
-      }
-    }
+    const res = await updateLeaveRequestStatus(requestId, status);
     setDecisionBusy(null);
-    setReviewRowId(null);
+    if (!res.ok) {
+      setDecisionError(res.error ?? "Could not save the decision. Please try again.");
+      return;
+    }
     await reloadData();
   }
 
@@ -2271,6 +2268,45 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                             </span>
                           } />
                           <Line label="Filed" value={fmtDate(String(r.createdAt).slice(0, 10))} />
+                          {/* The day's own reason, the way the Historical
+                              cards show theirs. A range carries the same text
+                              on each of its days, but separate single-day
+                              requests can differ — and the reason belongs with
+                              the day being decided, not in a panel below that
+                              could only ever show one of them. */}
+                          <div className="mt-2 pt-2 border-t border-dotted border-slate-200">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">Reason</p>
+                            <p className="mt-1 text-xs text-slate-600 whitespace-pre-wrap break-words">
+                              {r.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
+                            </p>
+                          </div>
+                          {/* Decided per day. Only a day still awaiting a
+                              decision gets buttons — an already-approved or
+                              declined one is read-only. */}
+                          {r.status === "Pending" && (
+                            <div className="mt-2.5 pt-2.5 border-t border-dotted border-slate-200 flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => handleReviewDecision(r.id, "Rejected")}
+                                disabled={decisionBusy !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {decisionBusy?.id === r.id && decisionBusy.status === "Rejected"
+                                  ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+                                  : <LuCircleX size={13} strokeWidth={2} />}
+                                {decisionBusy?.id === r.id && decisionBusy.status === "Rejected" ? "Declining…" : "Decline"}
+                              </button>
+                              <button
+                                onClick={() => handleReviewDecision(r.id, "Approved")}
+                                disabled={decisionBusy !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {decisionBusy?.id === r.id && decisionBusy.status === "Approved"
+                                  ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
+                                  : <LuCircleCheck size={13} strokeWidth={2} />}
+                                {decisionBusy?.id === r.id && decisionBusy.status === "Approved" ? "Approving…" : "Approve"}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2286,14 +2322,6 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   </>)}
                 </section>
 
-                <section>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 mb-2">Reason</p>
-                  <div className="rounded-xl border border-slate-200 px-4 py-3 min-h-[5.5rem]">
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">
-                      {req?.reason?.trim() || <span className="text-slate-300">No reason given.</span>}
-                    </p>
-                  </div>
-                </section>
               </div>
               )}
 
@@ -2309,38 +2337,14 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                   >
                     Close
                   </button>
-                  {/* Only a request still awaiting a decision can be decided
-                      here; an already-approved or declined one is read-only. */}
-                  {isPending && reviewTab === "new" ? (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleReviewDecision(shownReqs.map((r) => r.id), "Rejected")}
-                        disabled={decisionBusy !== null}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {decisionBusy === "Rejected"
-                          ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
-                          : <LuCircleX size={13} strokeWidth={2} />}
-                        {decisionBusy === "Rejected" ? "Declining…" : shownReqs.length > 1 ? `Decline all ${shownReqs.length}` : "Decline"}
-                      </button>
-                      <button
-                        onClick={() => handleReviewDecision(shownReqs.map((r) => r.id), "Approved")}
-                        disabled={decisionBusy !== null}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {decisionBusy === "Approved"
-                          ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
-                          : <LuCircleCheck size={13} strokeWidth={2} />}
-                        {decisionBusy === "Approved" ? "Approving…" : shownReqs.length > 1 ? `Approve all ${shownReqs.length}` : "Approve"}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-slate-400">
-                      {reviewTab === "history" ? "Past requests are read-only."
-                        : req ? `Already ${req.status.toLowerCase()} — nothing to decide.`
-                        : "No request to decide."}
-                    </p>
-                  )}
+                  {/* The decisions themselves live on each day's card above,
+                      so this only says why there is nothing to decide. */}
+                  <p className="text-[11px] text-slate-400">
+                    {reviewTab === "history" ? "Past requests are read-only."
+                      : isPending ? `Approve or decline each day above${shownReqs.length > 1 ? ` — ${shownReqs.length} pending` : ""}.`
+                      : req ? `Already ${req.status.toLowerCase()} — nothing to decide.`
+                      : "No request to decide."}
+                  </p>
                 </div>
               </div>
             </div>

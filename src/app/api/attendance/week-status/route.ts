@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     prisma.attendanceWeekStatus.findMany({
       where: { weekStart },
       select: {
-        worksnapUserId: true, email: true, requestStatus: true, completionMinutes: true, totalLocalHolidayMinutes: true,
+        worksnapUserId: true, email: true, requestStatus: true, completionMinutes: true, totalIndMinutes: true, totalLocalHolidayMinutes: true,
         totalEvaluatedRegularMinutes: true, totalEvaluatedMinutes: true, totalUsHoMinutes: true, totalRegularOtMinutes: true, totalRdOtMinutes: true, totalHoOtMinutes: true,
         totalCompletionTimeMinutes: true,
         offsetCreditMinutes: true,
