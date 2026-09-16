@@ -11,6 +11,7 @@ import {
 import {
   HOURS_PER_DAY, leaveTypeDisplayLabel, isPtoLeaveType,
   bookedLeaveByDate, canAddLeaveOnDate, leaveRequestHoldsDates, MAX_LEAVE_HOURS_PER_DAY,
+  leaveHoursPerCoveredDate, leaveBucketFor,
 } from "@/lib/timeOffBalances";
 import { fetchTimeAwayRequestsEnabled } from "@/app/admin/settings/actions";
 import {
@@ -232,6 +233,9 @@ export default function ContractorTimeOffPage() {
   const [endDate,   setEndDate]   = useState("");
   const [reason,    setReason]    = useState("");
   const [formError, setFormError] = useState("");
+  // Submit now opens a review step instead of filing straight away, so the
+  // dates and the hours being given up are read once before they are spent.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [success,   setSuccess]   = useState("");
   const [isPending, startTransition] = useTransition();
   // Settings → Time Away Settings → Enable Time Away Request. Defaults to
@@ -363,7 +367,13 @@ export default function ContractorTimeOffPage() {
       return;
     }
     setFormError(""); setSuccess("");
+    // Every check above still guards the form, so the review box only ever
+    // opens on a request that would actually be accepted.
+    setReviewOpen(true);
+  }
 
+  function confirmSubmit() {
+    setReviewOpen(false);
     startTransition(async () => {
       const result = await submitLeaveRequest({
         email,
@@ -500,6 +510,119 @@ export default function ContractorTimeOffPage() {
     </div>
   );
 
+  // What the request would actually cost, from the same helpers the server
+  // deducts with: a full-day request occupies 8 h on every date it spans, a
+  // half day 4 h on its single date, and Unpaid Leave 0.
+  const reviewDates = datesCoveredBy(startDate, effectiveEndDate);
+  const reviewHoursPerDay = leaveHoursPerCoveredDate(leaveType);
+  const reviewTotalHours = reviewHoursPerDay * reviewDates.length;
+  // Which pool it draws down, so the box can show what is left afterwards.
+  // Special Leave is a separately-granted balance that isn't carried here, so
+  // it gets no before/after line rather than a wrong one.
+  const reviewBucket = leaveBucketFor(leaveType);
+  const reviewPool = !data ? null
+    : reviewBucket === "pto" ? { label: "PTO", available: Math.max(data.ptoBalance - data.ptoUsed, 0) }
+    : reviewBucket === "sickLeave" ? { label: "Medical Unavailability", available: Math.max(data.sickLeaveBalance - data.sickLeaveUsed, 0) }
+    : null;
+  const reviewShort = reviewPool != null && reviewTotalHours > reviewPool.available;
+
+  const reviewDialog = reviewOpen && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setReviewOpen(false)} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <h3 className="text-base font-bold text-[#003527]">Review your request</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Check the details below before submitting.</p>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          {([
+            ["Leave Type", leaveTypeDisplayLabel(leaveType)],
+            [
+              reviewDates.length > 1 ? "Dates" : "Date",
+              reviewDates.length > 1
+                ? `${fmtDayAndDate(startDate)} – ${fmtDayAndDate(effectiveEndDate)}`
+                : fmtDayAndDate(startDate),
+            ],
+            [
+              "Duration",
+              isHalfDay
+                ? "Half day"
+                : `${reviewDates.length} ${reviewDates.length === 1 ? "day" : "days"}`,
+            ],
+            ["Hours Deducted", fmtHoursMinutes(reviewTotalHours)],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="flex items-start justify-between gap-4 pb-2.5 border-b border-dotted border-slate-100 last:border-0 last:pb-0">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide shrink-0">{label}</span>
+              <span className="text-sm font-bold text-slate-700 text-right">{value}</span>
+            </div>
+          ))}
+
+          {/* Balance after this request, so the cost is visible against what
+              is actually left rather than in isolation. */}
+          {reviewPool && (
+            <div className="flex items-start justify-between gap-4">
+              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide shrink-0">{reviewPool.label} Left</span>
+              <span className="text-sm font-bold text-right">
+                <span className="text-slate-400">{fmtHoursMinutes(reviewPool.available)}</span>
+                <span className="text-slate-300 mx-1.5">→</span>
+                <span className={reviewShort ? "text-red-600" : "text-emerald-700"}>
+                  {fmtHoursMinutes(Math.max(reviewPool.available - reviewTotalHours, 0))}
+                </span>
+              </span>
+            </div>
+          )}
+
+          <div className="pt-1">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Reason</p>
+            <p className={`text-sm mt-1 ${reason.trim() ? "text-slate-700" : "text-slate-400 italic"}`}>
+              {reason.trim() || "No reason given"}
+            </p>
+          </div>
+
+          {/* Warnings, not blocks — each of these is a request the contractor
+              is still allowed to file, but should not file unknowingly. */}
+          {reviewShort && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5">
+              <LuCircleAlert size={15} strokeWidth={2} className="text-red-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-red-700">
+                This is more than your remaining {reviewPool!.label} balance of{" "}
+                <span className="font-bold">{fmtHoursMinutes(reviewPool!.available)}</span>. Your
+                administrator may decline it or record it as an advance.
+              </p>
+            </div>
+          )}
+          {startTooSoon && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
+              <LuInfo size={15} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800">
+                PTO is meant to be filed 2 weeks ahead. This starts in{" "}
+                <span className="font-bold">{daysOfNotice(startDate)} {daysOfNotice(startDate) === 1 ? "day" : "days"}</span>,
+                so approval is at your administrator&apos;s discretion.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100 bg-slate-50">
+          <button
+            onClick={() => setReviewOpen(false)}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors"
+          >
+            Go back and edit
+          </button>
+          <button
+            onClick={confirmSubmit}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors"
+          >
+            <LuSend size={13} strokeWidth={2} />
+            Confirm &amp; Submit
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -528,6 +651,7 @@ export default function ContractorTimeOffPage() {
     <div className="space-y-5 max-w-[110rem] mx-auto">
       {cancelDialog}
       {viewDialog}
+      {reviewDialog}
       {/* Page title */}
       <PageHeader
         eyebrow=""
