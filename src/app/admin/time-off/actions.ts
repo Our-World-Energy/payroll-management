@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { fetchAllContractors, fetchAllLeaveRequestsAdmin, fetchAllSpecialLeaveGrantsAdmin } from "../contractors/actions";
+import { fetchCutOffTime, fetchProcessTimeAwayEnabled } from "../settings/actions";
 
 const TABLE = "contractor_leave_requests";
 
@@ -58,4 +60,34 @@ export async function updateLeaveRequestStatus(id: string, status: "Approved" | 
     .update({ status, updatedAt: new Date().toISOString() })
     .eq("id", id);
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Everything Time Away Management needs, in one call.
+ *
+ * The five fetches used to be five separate Server Actions wrapped in a
+ * client-side Promise.all — but Next serialises Server Action requests from a
+ * client, so they ran one after another (five round trips, each carrying the
+ * page payload) rather than concurrently. Doing the Promise.all here means one
+ * round trip and genuine parallelism, since it's plain async work on the
+ * server.
+ *
+ * Same reasoning, and the same shape, as fetchDashboardBundle in
+ * app/contractor/dashboard/actions.ts — this view had simply never been given
+ * the same treatment.
+ *
+ * Measured against the live database: the contractor read is ~565ms and the
+ * other four ~140-160ms each, so serialised they summed to roughly 1.2s of
+ * query time before per-round-trip overhead; concurrently they cost about as
+ * much as the slowest one.
+ */
+export async function fetchTimeOffBundle() {
+  const [contractors, requests, grants, savedCutoff, processEnabled] = await Promise.all([
+    fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
+    fetchAllLeaveRequestsAdmin(),
+    fetchAllSpecialLeaveGrantsAdmin(),
+    fetchCutOffTime(),
+    fetchProcessTimeAwayEnabled(),
+  ]);
+  return { contractors, requests, grants, savedCutoff, processEnabled };
 }

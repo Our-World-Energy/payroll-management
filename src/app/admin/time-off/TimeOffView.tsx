@@ -9,12 +9,13 @@ import {
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote, LuUsers,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
-  fetchAllLeaveRequestsAdmin, createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
+  updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
+  createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
   fetchAllSpecialLeaveGrantsAdmin, addSpecialLeaveGrant, type SpecialLeaveGrant,
   updateLeaveRequestStatus,
 } from "../contractors/actions";
-import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
+import { fetchTimeOffBundle } from "./actions";
+import { fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
 import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange, requestStatusDisplayLabel } from "@/lib/timeOffBalances";
@@ -456,13 +457,10 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
     try {
-      const [all, requests, grants, savedCutoff, canProcess] = await Promise.all([
-        fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
-        fetchAllLeaveRequestsAdmin(),
-        fetchAllSpecialLeaveGrantsAdmin(),
-        fetchCutOffTime(),
-        fetchProcessTimeAwayEnabled(),
-      ]);
+      // One Server Action, not five — see fetchTimeOffBundle. Next serialises
+      // Server Action requests from a client, so a Promise.all here ran them
+      // one after another instead of concurrently.
+      const { contractors: all, requests, grants, savedCutoff, processEnabled: canProcess } = await fetchTimeOffBundle();
       setContractors(all); setLeaveRequests(requests); setSpecialLeaveGrants(grants); setCutoff(cutoffFromSaved(savedCutoff));
       setProcessEnabled(canProcess);
     } catch (err) {
