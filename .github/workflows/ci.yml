@@ -24,6 +24,15 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       # Next.js telemetry adds noise and a network call to every CI build.
       NEXT_TELEMETRY_DISABLED: "1"
+      # `next build` prerenders pages that construct a Supabase client at build
+      # time (/admin/reports), and the client constructor throws on a missing or
+      # malformed URL. These placeholders only have to be well-formed — nothing
+      # here is connected to, and prerendering must not reach a live database.
+      # Real credentials would be the wrong call: CI should not hold production
+      # secrets just to compile.
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
 
     steps:
       - uses: actions/checkout@v4
