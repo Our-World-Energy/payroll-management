@@ -11,7 +11,7 @@ import {
   type AdminLeaveRequest,
 } from "../../contractors/actions";
 import type { Contractor } from "../../contractors/types";
-import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
+import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, leaveTypeDisplayLabel, requestStatusDisplayLabel } from "@/lib/timeOffBalances";
 import { fetchCutOffTime } from "../../settings/actions";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 
@@ -233,7 +233,7 @@ export default function ContractorTimeOffPage() {
         {!isIndia && (
           <TimeOffBalanceCard
             icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
-            title="PTO Balance"
+            title="Time Away Balance"
             tone={ptoAvailable < 0 ? "red" : "teal"}
             accrued={ptoBalance}
             used={ptoUsed}
@@ -298,7 +298,7 @@ export default function ContractorTimeOffPage() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {["Employee", "Dates", "Leave Type", "Hours", "Reason",
-                    ...(!isIndia ? ["PTO Available"] : []),
+                    ...(!isIndia ? ["Time Away Available"] : []),
                     "Medical Unavailability Available", "Actions",
                   ].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">
@@ -381,7 +381,7 @@ export default function ContractorTimeOffPage() {
                       : "text-slate-400 hover:text-slate-600"
                   }`}
                 >
-                  {f}
+                  {requestStatusDisplayLabel(f)}
                 </button>
               ))}
             </div>
@@ -457,7 +457,7 @@ export default function ContractorTimeOffPage() {
                               : "bg-red-50 text-red-600 border border-red-200"
                           }`}>
                             {isApproved ? <LuCircleCheck size={11} /> : isCancelled ? <LuBan size={11} /> : isArchived ? <LuArchive size={11} /> : <LuCircleX size={11} />}
-                            {req.status}
+                            {requestStatusDisplayLabel(req.status)}
                           </span>
                         </td>
                         <td className="px-5 py-4 whitespace-nowrap">

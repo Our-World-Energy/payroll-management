@@ -502,12 +502,14 @@ function AbsentFlag({ code, mins, ncns }: { code: AbsenceCode; mins: number; ncn
       : code === "HO"
         ? "A United States holiday falls on this date"
         : code === "PTO/SIL"
-          ? "An approved PTO or Sick Leave request covers this date"
+          ? "An approved Time Away or Medical Unavailability request covers this date"
           : "One of the contractor's Typical Non-Working Days";
 
   return (
     <span title={title} className={`text-xs whitespace-nowrap ${ABSENCE_CODE_STYLE[code]}`}>
-      {code === "Rest day" ? <span className="text-[10px] uppercase tracking-wide">Rest day</span> : code}
+      {code === "Rest day" ? <span className="text-[10px] uppercase tracking-wide">Rest day</span>
+        : code === "PTO/SIL" ? <span className="text-[10px] uppercase tracking-wide">Time Away/SIL</span>
+        : code}
     </span>
   );
 }
@@ -1281,7 +1283,7 @@ export default function AttendanceTrackerPage() {
                     <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Half Day</th>
                     <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Absent</th>
                     <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>NCNS</th>
-                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>PTO</th>
+                    <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Time Away</th>
                     <th className={`${headerCell} text-center`} style={{ background: "#003527" }}>Sick Leave</th>
                   </>
                 )}
@@ -1740,7 +1742,7 @@ export default function AttendanceTrackerPage() {
                               />
                             </td>
                             <td rowSpan={entry.dayRowSpan} className={`px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top ${dayRule}`}>
-                              <LeaveFlag type={entry.day.ptoType} label="PTO" className="text-blue-700" />
+                              <LeaveFlag type={entry.day.ptoType} label="Time Away" className="text-blue-700" />
                             </td>
                             <td rowSpan={entry.dayRowSpan} className={`px-3 md:px-4 py-2 text-center border-b border-slate-100 align-top ${dayRule}`}>
                               <LeaveFlag type={entry.day.silType} label="SIL" className="text-teal-700" />
@@ -1902,7 +1904,7 @@ export default function AttendanceTrackerPage() {
                             )}
                           </td>
                           <td rowSpan={span} className="px-3 md:px-4 py-2 text-center border-r border-b border-slate-100 align-top">
-                            <LeaveFlag type={row.perDay[0]?.ptoType ?? ""} label="PTO" className="text-blue-700" />
+                            <LeaveFlag type={row.perDay[0]?.ptoType ?? ""} label="Time Away" className="text-blue-700" />
                           </td>
                           <td rowSpan={span} className="px-3 md:px-4 py-2 text-center border-b border-slate-100 align-top">
                             <LeaveFlag type={row.perDay[0]?.silType ?? ""} label="SIL" className="text-teal-700" />

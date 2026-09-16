@@ -436,7 +436,7 @@ export default function ContractorAttendancePage() {
                     // as the Dashboard's birthday cake badge (see animate-bday-wiggle).
                     const dayBadgeEmoji = dayBadge === "PTO" ? "🏖️" : dayBadge === "ML" ? "🤒" : dayBadge ? "🎉" : null;
                     const dayBadgeAnim  = dayBadge === "PTO" ? "animate-vacation-float" : dayBadge === "ML" ? "animate-sick-wobble" : "animate-holiday-bounce";
-                    const dayBadgeTitle = dayBadge === "PTO" ? "PTO" : dayBadge === "ML" ? "Medical Leave" : dayBadge === "USO" ? "US Holiday" : "Local Holiday";
+                    const dayBadgeTitle = dayBadge === "PTO" ? "Time Away" : dayBadge === "ML" ? "Medical Leave" : dayBadge === "USO" ? "US Holiday" : "Local Holiday";
 
                     // Only when the day is genuinely empty and is a working
                     // day: a holiday on a rest day credits nothing, so
@@ -591,7 +591,7 @@ export default function ContractorAttendancePage() {
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-blue-50 border border-blue-200" /> HO — US Holiday</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-violet-50 border border-violet-200" /> HO — Local Holiday</span>
             <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-[#003527]" /> Today</span>
-            <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🏖️</span> PTO</span>
+            <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🏖️</span> Time Away</span>
             <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🤒</span> Medical Leave</span>
             <span className="flex items-center gap-1.5"><span className="text-xs" aria-hidden>🎉</span> Holiday (US or Local)</span>
             <span className="sm:ml-auto flex items-center gap-1.5"><LuCircleCheck size={13} className="text-emerald-600" /> Standard shift = {STANDARD_SHIFT_MINUTES / 60}h ({STANDARD_SHIFT_MINUTES} min)</span>

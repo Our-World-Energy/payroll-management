@@ -8,10 +8,32 @@ const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 export const HOURS_PER_DAY = 8;
 
 // Cosmetic-only relabeling: the stored/compared leave-request type stays
-// "Sick Leave" (so historical requests keep matching), this only changes
-// what's rendered wherever that raw type/label string is shown to a user.
+// "Sick Leave" / "PTO" (so historical requests keep matching), this only
+// changes what is rendered wherever that raw type/label string is shown to
+// a user. The PTO pattern is word-bounded so "Advance PTO/Birthday Leave"
+// relabels too - the slash is a word boundary - while a longer word that
+// merely starts with those letters would be left alone.
 export function leaveTypeDisplayLabel(type: string): string {
-  return type.replace(/Sick Leave/g, "Medical Unavailability");
+  return type
+    .replace(/Sick Leave/g, "Medical Unavailability")
+    .replace(/\bPTO\b/g, "Time Away");
+}
+
+/**
+ * Cosmetic-only relabeling, same principle as leaveTypeDisplayLabel above:
+ * "Declined" is what every portal reads, while "Rejected" stays the value
+ * written to contractor_leave_requests.status and the REJECTED member of the
+ * AttendanceRequestStatus enum.
+ *
+ * Renaming the stored value instead would mean migrating live rows and a
+ * Postgres enum, and every comparison against it, for a change that is purely
+ * about wording — so the raw status is simply never rendered directly.
+ *
+ * Takes any status and passes the rest through unchanged, so it can wrap a
+ * status badge without the caller having to know which values it affects.
+ */
+export function requestStatusDisplayLabel(status: string): string {
+  return status === "Rejected" ? "Declined" : status;
 }
 
 // The PTO/Sick Leave accrual "year" resets on a cut off date (month + day,

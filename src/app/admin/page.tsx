@@ -6,7 +6,7 @@ import { LuTrendingUp, LuX, LuClock, LuBriefcase, LuUser, LuTriangleAlert } from
 import { AnnouncementBoard } from "@/components/AnnouncementBoard";
 import { HolidayCalendar } from "@/components/HolidayCalendar";
 import { BirthdayCalendar } from "@/components/BirthdayCalendar";
-import { fetchAllContractors, fetchAllLeaveRequestsAdmin } from "./contractors/actions";
+import type { DashboardContractor } from "./contractors/actions";
 import { utcInstantForLocalTime, ARIZONA_TIME_ZONE } from "@/lib/countryTimeZones";
 import { LATE_GRACE_MINUTES, SHIFTING_SCHEDULE, parseShiftTime } from "./contractors/shiftScheduleShared";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
@@ -172,13 +172,50 @@ function AdminDashboard() {
     return () => { isMounted = false; };
   }, []);
 
-  // Live per-country Active headcounts (independent of the absent/late gate
-  // below, which only runs after 7:30am) — these tiles should always be current.
   useEffect(() => {
     let isMounted = true;
-    fetchAllContractors({ country: "All Countries", status: "Active", rules: [] })
-      .then((contractors) => {
+
+    async function load() {
+      const now = new Date();
+      const cutoff = new Date();
+      cutoff.setHours(7, 30, 0, 0);
+      // The country tiles are always current; Absent / Late / Time Away only
+      // mean anything once the day has started. Previously the whole effect
+      // returned early before 7:30 and a SECOND effect fetched every
+      // contractor again just to count them by country.
+      const afterCutoff = now >= cutoff;
+
+      const todayLocal = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      try {
+        // One request for the whole page. It replaces five — four API routes
+        // plus a server action — which is faster here only because that route
+        // reads over Supabase REST: concurrent REST reads don't contend
+        // (225ms for six, against 980ms sequentially), whereas the Prisma
+        // routes it replaces cost ~500ms each on a pooled connection that
+        // barely overlaps them. See the route for the measurements.
+        //
+        // Trailing slash: next.config sets trailingSlash: true, so without it
+        // this takes a 308 and a second round trip.
+        const data: {
+          contractors: DashboardContractor[];
+          minutesByEmail: Record<string, number>;
+          firstInByEmail: Record<string, string>;
+          shiftStartByEmail: Record<string, string>;
+          leaveToday: { email: string; type: string }[];
+        } = await fetch(`/api/admin/dashboard-today/?date=${todayLocal}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null)
+          ?? { contractors: [], minutesByEmail: {}, firstInByEmail: {}, shiftStartByEmail: {}, leaveToday: [] };
         if (!isMounted) return;
+
+        const contractors = data.contractors;
+
+        // Same one list the lists below use, counted by country.
         const counts = { ...EMPTY_COUNTRY_COUNTS };
         for (const c of contractors) {
           counts.totalActive++;
@@ -190,60 +227,17 @@ function AdminDashboard() {
           else if (country === "Colombia") counts.colombia++;
         }
         setCountryCounts(counts);
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
-  }, []);
 
-  useEffect(() => {
-    async function loadAbsent() {
-      const now = new Date();
-      const cutoff = new Date();
-      cutoff.setHours(7, 30, 0, 0);
-      if (now < cutoff) return;
+        if (!afterCutoff) return;
 
-      const todayLocal = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0"),
-      ].join("-");
-
-      try {
-        const [entriesRes, contractors, dailyLogRes, leaveRequests, shiftScheduleRes] = await Promise.all([
-          fetch(`/api/worksnap-entries?from=${todayLocal}&to=${todayLocal}`).then((r) => r.json()),
-          fetchAllContractors({ country: "All Countries", status: "Active", rules: [] }),
-          fetch(`/api/attendance/daily-log?date=${todayLocal}`).then((r) => (r.ok ? r.json() : { logs: [] })),
-          fetchAllLeaveRequestsAdmin().catch(() => []),
-          // Per-date windows for Shifting Schedule contractors — their start
-          // time changes day to day, so it can't come from shiftHours.
-          fetch(`/api/attendance/shift-schedule?date=${todayLocal}`)
-            .then((r) => (r.ok ? r.json() : { schedules: [] }))
-            .catch(() => ({ schedules: [] })),
-        ]);
-
-        const shiftStartByEmail = new Map<string, string>();
-        for (const s of (shiftScheduleRes.schedules ?? []) as { email: string; shiftStart: string }[]) {
-          const email = String(s.email ?? "").trim().toLowerCase();
-          if (email && s.shiftStart) shiftStartByEmail.set(email, s.shiftStart);
-        }
-
-        const minutesByEmail = new Map<string, number>();
-        for (const e of (entriesRes.entries ?? [])) {
-          const email = String(e.email ?? "").trim().toLowerCase();
-          if (email) minutesByEmail.set(email, (minutesByEmail.get(email) ?? 0) + ((e as { durationMins?: number }).durationMins ?? 0));
-        }
-
-        // Late Today keys off `firstInLogged` — the contractor's actual clock-in
-        // instant. `firstIn` is the rounded Worksnap time-entry bucket boundary
-        // (e.g. 6:30:01 for a 6:32:51 clock-in), which reads a few minutes early
-        // and can clear the grace period when the real login didn't. Fall back to
-        // `firstIn` only for the small tail of rows with no logged instant.
-        const firstInByEmail = new Map<string, Date>();
-        for (const log of (dailyLogRes.logs ?? [])) {
-          const email = String(log.email ?? "").trim().toLowerCase();
-          const logged = log.firstInLogged ?? log.firstIn;
-          if (email && logged) firstInByEmail.set(email, new Date(logged));
-        }
+        // Summed, resolved and narrowed server-side now — including the
+        // firstInLogged-over-firstIn clock-in rule and the effective-from
+        // resolution for Shifting Schedule windows.
+        const shiftStartByEmail = new Map(Object.entries(data.shiftStartByEmail));
+        const minutesByEmail = new Map(Object.entries(data.minutesByEmail));
+        const firstInByEmail = new Map(
+          Object.entries(data.firstInByEmail).map(([email, iso]) => [email, new Date(iso)] as const)
+        );
 
         const activeContractors = contractors.filter((c) => c.status === "Active" && c.email);
 
@@ -252,10 +246,8 @@ function AdminDashboard() {
         // or Medical Unavailability instead of a bare "Absent" (Half Day/Unpaid/Special
         // Leave requests are left as "Absent" since they weren't asked for).
         function absenceStatusFor(email: string): string {
-          const match = leaveRequests.find((r) =>
-            r.status === "Approved" && r.email.trim().toLowerCase() === email && todayLocal >= r.startDate && todayLocal <= r.endDate
-          );
-          if (match?.type === "PTO") return "PTO";
+          const match = data.leaveToday.find((r) => r.email === email);
+          if (match?.type === "PTO") return "Time Away";
           if (match?.type === "Sick Leave") return "Medical Unavailability";
           return "Absent";
         }
@@ -330,14 +322,12 @@ function AdminDashboard() {
         const ptoRows: PtoRow[] = [];
         for (const c of activeContractors) {
           const email = c.email!.trim().toLowerCase();
-          const match = leaveRequests.find((r) =>
-            r.status === "Approved" &&
-            r.email.trim().toLowerCase() === email &&
-            todayLocal >= r.startDate && todayLocal <= r.endDate &&
+          const match = data.leaveToday.find((r) =>
+            r.email === email &&
             (r.type === "PTO" || r.type === "PTO Half Day" || r.type === "Sick Leave" || r.type === "Sick Leave Half Day")
           );
           if (match) {
-            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "PTO" : "Medical Unavailability" });
+            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "Time Away" : "Medical Unavailability" });
           }
         }
         setPtoRows(ptoRows);
@@ -346,7 +336,8 @@ function AdminDashboard() {
       }
     }
 
-    loadAbsent();
+    load();
+    return () => { isMounted = false; };
   }, []);
 
   const METRICS = [
@@ -406,7 +397,7 @@ function AdminDashboard() {
               <LuBriefcase size={13} strokeWidth={2} />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">PTO/Medical Unavailability</p>
+              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">Time Away/Medical Unavailability</p>
               <p className="text-sm font-bold text-blue-700 leading-tight mt-0.5">{ptoRows.length}</p>
             </div>
           </button>
@@ -672,7 +663,7 @@ function AdminDashboard() {
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 bg-blue-600">
               <div>
-                <h3 className="text-lg font-bold text-white">PTO/Medical Unavailability Today</h3>
+                <h3 className="text-lg font-bold text-white">Time Away/Medical Unavailability Today</h3>
                 <p className="text-sm text-blue-100 mt-0.5">{ptoRows.length} contractor{ptoRows.length !== 1 ? "s" : ""} on approved leave today</p>
               </div>
               <button
@@ -694,7 +685,7 @@ function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {ptoRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved PTO or Medical Unavailability today.</td>
+                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved Time Away or Medical Unavailability today.</td>
                     </tr>
                   ) : ptoRows.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
@@ -703,7 +694,7 @@ function AdminDashboard() {
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${
-                          row.status === "PTO" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                          row.status === "Time Away" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
                         }`}>
                           {row.status}
                         </span>

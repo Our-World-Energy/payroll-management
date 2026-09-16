@@ -14,6 +14,7 @@ import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
 import { fetchFixedTimeForWeek, saveFixedTime } from "./actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
+import { requestStatusDisplayLabel, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import type { Contractor } from "../contractors/types";
 
 
@@ -940,6 +941,17 @@ function buildBulkApproveDaySnapshots(
   const restDaysStr = restDaysForAttendanceRow(row);
   const userLogs = dailyLogs.filter((l) => l.worksnapUserId === row.worksnapUserId);
 
+  const isFixedInd = isFixedContractor(row.payCategory);
+
+  // Fixed-Ind never gets a per-day decision, whatever the caller asked for.
+  // Attendance Review offers this category no per-day Decision control at all
+  // (the check/x column renders only for the others), and its pay is derived
+  // from Ind Time, which reads Worksnap directly and ignores the decisions —
+  // so a Bulk Approve run was stamping "Approved" on days nobody could set or
+  // clear, and leaving contractors it happened not to cover blank. Enforced
+  // here rather than at each call site so no future caller reintroduces it.
+  const mayApproveUnsetDays = approveUnsetDays && !isFixedInd;
+
   // Evaluated Regular Time draws on the WEEK's whole pool of Regular OT Time,
   // so it's built once across all weekDates together, same as the Review modal.
   const regularTimeByDate: Record<string, number> = {};
@@ -963,15 +975,15 @@ function buildBulkApproveDaySnapshots(
     // Review's own "Approve All" targets — every non-rest day, plus any rest
     // day with logged time.
     const dailyDecisionStatus = savedDecisions[date]
-      ?? (approveUnsetDays && (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
+      ?? (mayApproveUnsetDays && (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay, isFixedInd);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
-    const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedContractor(row.payCategory), restDaysStr, dailyDecisionStatus === "Approved");
+    const localHolMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedInd, restDaysStr, dailyDecisionStatus === "Approved");
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolMinutes);
     const isLocalOnlyHoliday = isLocalOnlyHolidayFor(holidayTime, localHolMinutes);
-    const { regularOtMinutes, rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay, false, isLocalOnlyHoliday);
+    const { regularOtMinutes, rdOtMinutes, hoOtMinutes } = otMinutesFor(timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay, dailyDecisionStatus === "Approved", isFullTimeOffDay, isFixedInd, isLocalOnlyHoliday);
 
-    regularTimeByDate[date] = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
+    regularTimeByDate[date] = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay, isFixedInd);
     regularOtByDate[date] = regularOtMinutes;
     rdOtByDate[date] = rdOtMinutes;
     hoOtByDate[date] = hoOtMinutes;
@@ -988,21 +1000,28 @@ function buildBulkApproveDaySnapshots(
   return weekDates.map((date) => {
     const worksnapTime = worksnapTimeForDate(dailyWorksnapMinutes, date);
     const isRestDay = isRestDayDate(date, restDaysStr);
-    // Same "Approve All"-equivalent rule as above.
-    const dailyDecisionStatus = (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status";
+    // Identical rule to the first loop. This loop used to hardcode "Approved",
+    // ignoring both savedDecisions and approveUnsetDays — and since this is the
+    // loop whose output is actually saved, it was the reason a Bulk Approve run
+    // re-approved a day an admin had set back to "No Status", and the reason
+    // Fixed-Ind ended up with per-day decisions it has no control over. Process
+    // Attendance only escaped it because the server refuses to overwrite a
+    // stored decision when processed = true.
+    const dailyDecisionStatus = savedDecisions[date]
+      ?? (mayApproveUnsetDays && (!isRestDay || worksnapTime !== "-") ? "Approved" : "No Status");
     const isFullTimeOffDay = isApprovedFullTimeOffRequestDay(date, leaveRequests);
-    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay);
+    const evaluatedTime = evaluatedTimeFor(worksnapTime, dailyDecisionStatus, isRestDay, isFullTimeOffDay, isFixedInd);
     const holidayTime = holidayTimeFor(date, usaHolidays, dailyWorksnapMinutes, restDaysStr, weekDates, row.hireDate, row.region, allHolidays);
     const localHoliday = localHolidayNameFor(date, row.region, allHolidays);
-    const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedContractor(row.payCategory), restDaysStr, dailyDecisionStatus === "Approved");
+    const localHolidayMinutes = localHolidayMinutesFor(date, userLogs, row.region, allHolidays, isFixedInd, restDaysStr, dailyDecisionStatus === "Approved");
     const isHolidayDay = isHolidayDayFor(holidayTime, localHolidayMinutes);
     const isLocalOnlyHoliday = isLocalOnlyHolidayFor(holidayTime, localHolidayMinutes);
     const { regularOtMinutes: rawRegularOtMinutes, rdOtMinutes: rawRdOtMinutes } = otMinutesFor(
       timeValueToMinutes(evaluatedTime), timeValueToMinutes(worksnapTime), isHolidayDay, isRestDay,
-      dailyDecisionStatus === "Approved", isFullTimeOffDay, false, isLocalOnlyHoliday
+      dailyDecisionStatus === "Approved", isFullTimeOffDay, isFixedInd, isLocalOnlyHoliday
     );
     const allocation = regularAllocationByDate[date] ?? { evaluatedRegularTime: 0, regularOtMinutes: 0, rdOtMinutes: 0, hoOtMinutes: 0 };
-    const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay);
+    const regularTimeMinutes = regularTimeMinutesFor(timeValueToMinutes(worksnapTime), isRestDay, isFullTimeOffDay, isHolidayDay, isFixedInd);
     // Same week-total formula Attendance Review actually saves as
     // completionMinutes (see completionTotalMinutes in ReviewModal) — not the
     // weekly-reallocated allocation above, which only feeds the day snapshot's
@@ -1013,7 +1032,7 @@ function buildBulkApproveDaySnapshots(
       evaluatedTime, timeOffTime, holidayTime, formatMinutesAsMins(otMinutesToFold),
       // Matches the Review modal: Fixed-Ind's Ind Time carries the local holiday
       // credit, so a Bulk Approve save records the same figure a manual one would.
-      isFixedContractor(row.payCategory) ? formatMinutesAsMins(localHolidayMinutes ?? 0) : "-",
+      isFixedInd ? formatMinutesAsMins(localHolidayMinutes ?? 0) : "-",
     ));
 
     return {
@@ -1969,7 +1988,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           className={`sticky left-0 z-10 w-[156px] min-w-[156px] px-4 py-2 font-medium border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                             hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-800"
                           }`}
-                          title={hasLeaveWorkConflict ? "Approved PTO/Medical Unavailability on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved PTO/Medical Unavailability on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
+                          title={hasLeaveWorkConflict ? "Approved Time Away/Medical Unavailability on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved Time Away/Medical Unavailability on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
                         >
                           {formatDayLabel(date)}
                         </td>
@@ -1994,8 +2013,8 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                                   onClick={() => toggleDailyDecision(date, "Rejected")}
                                   disabled={!isWeekEnded}
                                   className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                                  aria-label={`Reject attendance for ${formatDayLabel(date)}`}
-                                  title={isWeekEnded ? "Reject" : "Only available once the selected week has ended"}
+                                  aria-label={`Decline attendance for ${formatDayLabel(date)}`}
+                                  title={isWeekEnded ? "Decline" : "Only available once the selected week has ended"}
                                 >
                                   <LuX size={15} strokeWidth={2} />
                                 </button>
@@ -2089,7 +2108,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
-                          {timeOffRequestTypeFor(date, leaveRequests)}
+                          {leaveTypeDisplayLabel(timeOffRequestTypeFor(date, leaveRequests))}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                           {timeOffRequestMinutesFor(date, leaveRequests)}
@@ -2107,7 +2126,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                         <td className={`sticky right-0 z-10 w-[140px] min-w-[140px] px-4 py-2 shadow-[-1px_0_0_0_#e2e8f0] ${
                           hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : `bg-white ${approvalStatusClassName(dailyDecisionStatus)}`
                         }`}>
-                          {dailyDecisionStatus}
+                          {requestStatusDisplayLabel(dailyDecisionStatus)}
                         </td>
                       </tr>
                     );

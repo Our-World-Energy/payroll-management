@@ -121,7 +121,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
     }
   }
 
-  const columnLabel = leaveType === "pto" ? "PTO Used Import" : "Medical Unavailability Used Import";
+  const columnLabel = leaveType === "pto" ? "Time Away Used Import" : "Medical Unavailability Used Import";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -135,7 +135,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
               <LuUpload size={17} strokeWidth={2} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-[#003527]">PTO / Medical Unavailability Used Import</h3>
+              <h3 className="text-lg font-bold text-[#003527]">Time Away / Medical Unavailability Used Import</h3>
               <p className="text-xs text-slate-400">Bulk-set the imported {columnLabel} baseline from a CSV</p>
             </div>
           </div>
@@ -181,7 +181,7 @@ export function PtoSickUsedImportModal({ onClose, onImported }: Props) {
                         : "border-slate-200 text-slate-500 hover:bg-slate-50"
                     }`}
                   >
-                    <LuUmbrella size={15} strokeWidth={2} /> PTO
+                    <LuUmbrella size={15} strokeWidth={2} /> Time Away
                   </button>
                   <button
                     type="button"

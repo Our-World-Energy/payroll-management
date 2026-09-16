@@ -9,15 +9,16 @@ import {
   LuSlidersHorizontal, LuCircleAlert, LuSearch, LuGift, LuPencil, LuTrash2, LuLoader, LuListChecks, LuFingerprint, LuBanknote, LuUsers,
 } from "react-icons/lu";
 import {
-  fetchAllContractors, updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
-  fetchAllLeaveRequestsAdmin, createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
+  updateTimeOffUsage, bulkImportUsedImport, resetUsedHours,
+  createLeaveOverride, createAdvanceLeaveOverride, type AdminLeaveRequest,
   fetchAllSpecialLeaveGrantsAdmin, addSpecialLeaveGrant, type SpecialLeaveGrant,
   updateLeaveRequestStatus,
 } from "../contractors/actions";
-import { fetchCutOffTime, fetchAlerts, removeAlert, fetchProcessTimeAwayEnabled, type AdminAlert } from "../settings/actions";
+import { fetchTimeOffBundle } from "./actions";
+import { fetchAlerts, removeAlert, type AdminAlert } from "../settings/actions";
 import { CalendarDateInput, parseDate } from "@/components/CalendarDateInput";
 import type { Contractor } from "../contractors/types";
-import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange } from "@/lib/timeOffBalances";
+import { leaveTypeHours, isPtoLeaveType, leaveBucketFor, cutoffFromSaved, DEFAULT_CUTOFF, type CutoffDate, type RequestDecision, calculatePtoBalance, calculateSickLeaveBalance, resetSpecialLeaveIfExpired, leaveTypeDisplayLabel, specialLeaveAvailableForGrants, isSpecialLeaveGrantExpired, bookedLeaveByDate, canAddLeaveOnDate, datesCoveredByRange, requestStatusDisplayLabel } from "@/lib/timeOffBalances";
 import { PtoSickUsedImportModal } from "@/components/PtoSickUsedImportModal";
 import { TimeOffBalanceCard } from "@/components/TimeOffBalanceCard";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
@@ -117,6 +118,36 @@ function BalanceBar({ used, total, color }: { used: number; total: number; color
     </div>
   );
 }
+
+/**
+ * Table sort orders, also used for the CSV so an export matches what is on
+ * screen.
+ *
+ * Both balance sorts run lowest-first: the point of ordering by a balance is
+ * to surface whoever is running low — under 8 hours available is what makes
+ * advance leave available — not whoever has the most left. A negative
+ * Available therefore sorts to the very top, which is where it wants to be.
+ *
+ * Every comparator falls back to the name, so rows holding the same balance
+ * keep a stable order instead of shuffling between renders.
+ */
+const SORT_OPTIONS = [
+  { value: "name",     label: "Sort: A \u2013 Z" },
+  { value: "timeAway", label: "Sort: Time Away Available" },
+  { value: "medical",  label: "Sort: Medical Unavailability" },
+] as const;
+
+type SortKey = (typeof SORT_OPTIONS)[number]["value"];
+
+function byFullName(a: TimeOffRow, b: TimeOffRow) {
+  return a.fullName.localeCompare(b.fullName);
+}
+
+const SORT_COMPARATORS: Record<SortKey, (a: TimeOffRow, b: TimeOffRow) => number> = {
+  name:     byFullName,
+  timeAway: (a, b) => a.ptoAvailable - b.ptoAvailable || byFullName(a, b),
+  medical:  (a, b) => a.sickLeaveAvailable - b.sickLeaveAvailable || byFullName(a, b),
+};
 
 const REVIEW_BADGE: Record<RequestDecision, string> = {
   Approved: "bg-emerald-50 text-emerald-700 border border-emerald-200",
@@ -231,11 +262,11 @@ function ProcessTimeOffModal({
             <LuX size={18} strokeWidth={2} />
           </button>
         </div>
-        <p className="text-sm text-slate-500 mb-4">Current PTO / Medical Unavailability usage across your contractor workforce.</p>
+        <p className="text-sm text-slate-500 mb-4">Current Time Away / Medical Unavailability usage across your contractor workforce.</p>
 
         <div className="space-y-2 mb-5">
           <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-teal-50 border border-teal-100">
-            <span className="text-sm font-medium text-teal-700">Contractors with PTO</span>
+            <span className="text-sm font-medium text-teal-700">Contractors with Time Away</span>
             <span className="text-sm font-bold text-teal-700">{ptoCount}</span>
           </div>
           <div className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-orange-50 border border-orange-100">
@@ -251,7 +282,7 @@ function ProcessTimeOffModal({
         {resetUsedError && <p className="text-xs text-red-600 mb-3">{resetUsedError}</p>}
         {resetUsedCount != null && !resetUsedError && (
           <p className="text-xs text-emerald-600 mb-3">
-            Reset PTO Used / Sick Leave Used for {resetUsedCount} contractor{resetUsedCount !== 1 ? "s" : ""}.
+            Reset Time Away Used / Medical Unavailability Used for {resetUsedCount} contractor{resetUsedCount !== 1 ? "s" : ""}.
           </p>
         )}
 
@@ -266,7 +297,7 @@ function ProcessTimeOffModal({
             onClick={() => setShowResetUsedConfirm(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-red-700 border border-red-200 bg-white hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors"
           >
-            Reset PTO Used / Sick Leave Used
+            Reset Time Away Used / Medical Unavailability Used
           </button>
         </div>
       </div>
@@ -290,14 +321,14 @@ function ProcessTimeOffModal({
                 <LuTrash2 size={18} strokeWidth={2} />
               </div>
               <div>
-                <h3 className="text-base font-bold text-[#003527]">Reset PTO Used / Sick Leave Used</h3>
+                <h3 className="text-base font-bold text-[#003527]">Reset Time Away Used / Medical Unavailability Used</h3>
                 {dueAlert && (
                   <p className="text-xs font-semibold text-amber-600 mt-1">
                     Scheduled to run {fmtDate(dueAlert.alertDate)}{dueAlert.alertTime ? ` ${dueAlert.alertTime}` : ""} — proceed or cancel this scheduled run.
                   </p>
                 )}
                 <p className="text-sm text-slate-500 mt-1.5 leading-relaxed">
-                  This will set PTO Used, Sick Leave Used, Advance PTO/Birthday Leave (Time and Used), and Advance Sick Leave (Time and Used) back to 0, and mark the matching Approved leave requests as Archived. Before resetting, any currently-negative Available is captured into Outstanding Balance first (same as Process) — otherwise Outstanding Balance is cleared to 0. It does not touch imported baselines, Pending requests, or Special Leave. This cannot be undone.
+                  This will set Time Away Used, Medical Unavailability Used, Advance Time Away/Birthday Leave (Time and Used), and Advance Medical Unavailability (Time and Used) back to 0, and mark the matching Approved leave requests as Archived. Before resetting, any currently-negative Available is captured into Outstanding Balance first (same as Process) — otherwise Outstanding Balance is cleared to 0. It does not touch imported baselines, Pending requests, or Special Leave. This cannot be undone.
                 </p>
               </div>
             </div>
@@ -426,13 +457,10 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   const reloadData = useCallback(async () => {
     setLoading(true); setLoadError("");
     try {
-      const [all, requests, grants, savedCutoff, canProcess] = await Promise.all([
-        fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
-        fetchAllLeaveRequestsAdmin(),
-        fetchAllSpecialLeaveGrantsAdmin(),
-        fetchCutOffTime(),
-        fetchProcessTimeAwayEnabled(),
-      ]);
+      // One Server Action, not five — see fetchTimeOffBundle. Next serialises
+      // Server Action requests from a client, so a Promise.all here ran them
+      // one after another instead of concurrently.
+      const { contractors: all, requests, grants, savedCutoff, processEnabled: canProcess } = await fetchTimeOffBundle();
       setContractors(all); setLeaveRequests(requests); setSpecialLeaveGrants(grants); setCutoff(cutoffFromSaved(savedCutoff));
       setProcessEnabled(canProcess);
     } catch (err) {
@@ -615,9 +643,11 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     await reloadData();
   }
 
+  const [sortBy, setSortBy] = useState<SortKey>("name");
+
   const countryOptions    = Array.from(new Set(scopedRows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(scopedRows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses";
+  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses" || sortBy !== "name";
 
   const filteredRows = scopedRows.filter((r) => {
     const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
@@ -626,7 +656,8 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     const pm = payCategoryFilter === "All Categories" || r.payCategory === payCategoryFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
     return nm && cm && dm && pm && sm;
-  });
+  // filter() already returned a fresh array, so sorting it in place is safe.
+  }).sort(SORT_COMPARATORS[sortBy]);
 
   const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
   const approvedCount = leaveRequests.filter((r) => r.status === "Approved").length;
@@ -683,11 +714,11 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     // baseline still drives the Used figures (see the row build above) and is
     // surfaced/clearable from the Used cells themselves. Both values remain in
     // the CSV export.
-    ...(!isIndia && !readOnly ? ["PTO Accrual", "PTO Used", "PTO Accrual Available"] : []),
+    ...(!isIndia && !readOnly ? ["Time Away Accrual", "Time Away Used", "Time Away Accrual Available"] : []),
     ...(readOnly ? [] : [
       "Medical Unavailability Accrual", "Medical Unavailability Used", "Medical Unavailability Accrual Available",
     ]),
-    ...(!isIndia && !readOnly ? ["Advance PTO/Birthday Leave"] : []),
+    ...(!isIndia && !readOnly ? ["Advance Time Away/Birthday Leave"] : []),
     ...(readOnly ? [] : ["Advance Medical Unavailability"]),
     ...(readOnly ? ["Pending Request", "Request Dates"] : []),
     "Status", "Action",
@@ -696,9 +727,9 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   function exportCSV() {
     const headers = [
       "Name", "Country", "Assigned Team", "Engagement Start Date",
-      "PTO Accrual (h)", "PTO Used (h)", "PTO Used Import (h)", "PTO Available (h)",
+      "Time Away Accrual (h)", "Time Away Used (h)", "Time Away Used Import (h)", "Time Away Available (h)",
       "Medical Unavailability Accrual (h)", "Medical Unavailability Used (h)", "Medical Unavailability Used Import (h)", "Medical Unavailability Available (h)",
-      "Advance PTO/Birthday Leave (h)", "Advance Medical Unavailability (h)",
+      "Advance Time Away/Birthday Leave (h)", "Advance Medical Unavailability (h)",
       "Special Leave Credits (h)", "Special Leave Used (h)", "Special Leave Available (h)", "Status",
     ];
     const csvRows = [
@@ -825,7 +856,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       {!isRowIndia && (
                         <TimeOffBalanceCard
                           icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
-                          title="PTO Balance"
+                          title="Time Away Balance"
                           tone={selectedRow.ptoAvailable < 0 ? "red" : "teal"}
                           accrued={selectedRow.ptoBalance}
                           used={selectedRow.ptoUsed}
@@ -853,7 +884,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         ) : (
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${REVIEW_BADGE[reviewStatus]}`}>
                             {REVIEW_ICON[reviewStatus]}
-                            {reviewStatus}
+                            {requestStatusDisplayLabel(reviewStatus)}
                           </span>
                         )}
                       </div>
@@ -955,7 +986,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         <div className="space-y-3">
                           {!isRowIndia && (
                             <div>
-                              <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1.5">Advance PTO/Birthday Leave</p>
+                              <p className="text-[10px] font-semibold text-pink-600 uppercase tracking-wider mb-1.5">Advance Time Away/Birthday Leave</p>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                                 <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                                   <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Time</p>
@@ -1017,7 +1048,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           {!isRowIndia && (
                             <TimeOffBalanceCard
                               icon={<LuCalendarPlus size={18} strokeWidth={1.75} />}
-                              title="Advance PTO/Birthday Leave"
+                              title="Advance Time Away/Birthday Leave"
                               tone="pink"
                               accruedLabel="Time"
                               accrued={selectedRow.birthdayLeave}
@@ -1045,13 +1076,13 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 flex items-start gap-3">
                             <LuCalendarDays size={16} className="text-slate-400 shrink-0 mt-0.5" />
                             <p className="text-xs text-slate-500 leading-relaxed">
-                              Advance leave becomes available once a contractor&apos;s available PTO or Medical Unavailability balance drops <strong>below 8 hours</strong>. This contractor currently has 8+ hours available in {isRowIndia ? "Medical Unavailability" : "both PTO and Medical Unavailability"}, so advance leave isn&apos;t needed.
+                              Advance leave becomes available once a contractor&apos;s available PTO or Medical Unavailability balance drops <strong>below 8 hours</strong>. This contractor currently has 8+ hours available in {isRowIndia ? "Medical Unavailability" : "both Time Away and Medical Unavailability"}, so advance leave isn&apos;t needed.
                             </p>
                           </div>
                         ) : (
                           <div className="space-y-2">
                             <p className="text-xs text-slate-500 leading-relaxed mb-1">
-                              Grants extra advance leave hours ahead of accrual for a contractor running low on PTO or Medical Unavailability — repaid automatically from future accrual.
+                              Grants extra advance leave hours ahead of accrual for a contractor running low on Time Away or Medical Unavailability — repaid automatically from future accrual.
                             </p>
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
                               <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Advance Leave Type</p>
@@ -1061,7 +1092,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                                 className="w-full text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-teal-500"
                               >
                                 {sickAdvanceEligible && <option value="Advance Sick Leave">Advance Medical Unavailability</option>}
-                                {ptoAdvanceEligible && <option value="Advance PTO/Birthday Leave">Advance PTO/Birthday Leave</option>}
+                                {ptoAdvanceEligible && <option value="Advance PTO/Birthday Leave">Advance Time Away/Birthday Leave</option>}
                               </select>
                             </div>
                             <div className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100">
@@ -1218,7 +1249,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                       selectedRow.sickLeaveAvailable;
                     if (requiredHours > 0 && availableHours < requiredHours) {
                       const leaveLabel =
-                        overrideBucket === "pto" ? "PTO" :
+                        overrideBucket === "pto" ? "Time Away" :
                         overrideBucket === "specialLeave" ? "Special Leave Credits" :
                         "Medical Unavailability";
                       setOverrideBlocked(
@@ -1280,7 +1311,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                         {!isRowIndia && (
                           <TimeOffBalanceCard
                             icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
-                            title="PTO Balance"
+                            title="Time Away Balance"
                             tone={selectedRow.ptoAvailable < 0 ? "red" : "teal"}
                             accrued={selectedRow.ptoBalance}
                             used={selectedRow.ptoUsed}
@@ -1593,7 +1624,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           <LuGift size={13} /> Grant Special Leave Credits
                         </p>
                         <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                          Grants an extra bonus leave balance for this contractor, on top of their regular PTO/Medical Unavailability — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
+                          Grants an extra bonus leave balance for this contractor, on top of their regular Time Away/Medical Unavailability — grantable at any time. Once granted, it can be drawn against via a Leave Override with type &ldquo;Special Leave&rdquo;.
                         </p>
                         <div className="space-y-2">
                           {selectedRow.payCategory.trim().toLowerCase() === "fixed-ind" && (
@@ -1730,7 +1761,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
             </div>
             <div>
               <h2 className="text-[clamp(1rem,1.45vw,1.25rem)] font-bold text-[#003527] tracking-tight">{pageTitle}</h2>
-              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track PTO and Medical Unavailability balances across your contractor workforce.</p>
+              <p className="text-[clamp(0.625rem,0.85vw,0.75rem)] text-slate-500 mt-0.5">Track Time Away and Medical Unavailability balances across your contractor workforce.</p>
             </div>
           </div>
         </div>
@@ -1749,7 +1780,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
             onClick={() => setShowUsedImportModal(true)}
             className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors"
           >
-            <LuUpload size={13} strokeWidth={2} /> PTO / SICK Used Import
+            <LuUpload size={13} strokeWidth={2} /> Time Away / SICK Used Import
           </button>
           </>)}
         </div>
@@ -1861,10 +1892,17 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
           <option value="All Statuses">All Statuses</option>
           <option value="Pending">Pending</option>
           <option value="Approved">Approved</option>
-          <option value="Rejected">Rejected</option>
+          <option value="Rejected">Declined</option>
+        </select>
+        {/* Wider than the filters beside it: "Sort: Medical Unavailability"
+            is unreadable truncated to their width. */}
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} disabled={loading}
+          title="Order the table. Both balance sorts list the lowest available first."
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(8rem,15vw,14rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         {filtersActive && (
-          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); }}
+          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); setSortBy("name"); }}
             className="grid size-[clamp(1.75rem,2.13vw,2rem)] shrink-0 place-items-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={14} strokeWidth={2} />
           </button>
@@ -2088,7 +2126,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                           "bg-amber-50 text-amber-700 border-amber-200"
                         }`}>
                           {reviewStatus === "Approved" ? <LuCircleCheck size={11} /> : reviewStatus === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                          {leaveTypeDisplayLabel(latest.type)} · {reviewStatus}
+                          {leaveTypeDisplayLabel(latest.type)} · {requestStatusDisplayLabel(reviewStatus)}
                         </span>
                       ) : (
                         <span className="text-slate-300 text-sm">—</span>
@@ -2218,7 +2256,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                               "bg-slate-50 text-slate-500 border-slate-200"
                             }`}>
                               {h.status === "Approved" ? <LuCircleCheck size={11} /> : h.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                              {h.status}
+                              {requestStatusDisplayLabel(h.status)}
                             </span>
                           </div>
                           {h.reason?.trim() && (
@@ -2264,7 +2302,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                               "bg-amber-50 text-amber-700 border-amber-200"
                             }`}>
                               {r.status === "Approved" ? <LuCircleCheck size={11} /> : r.status === "Pending" ? <LuClock size={11} /> : <LuCircleX size={11} />}
-                              {r.status}
+                              {requestStatusDisplayLabel(r.status)}
                             </span>
                           } />
                           <Line label="Filed" value={fmtDate(String(r.createdAt).slice(0, 10))} />

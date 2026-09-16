@@ -62,13 +62,9 @@ type PayrollRow = {
   weeklyRate: number;
   actualMinutes: number;
   completionMinutes: number | null;
-  /** Minutes Reg Hours is paid on. Same as completionMinutes for every
-   *  category except Fixed-Ind, which pays on Ind Time — see `payableMinutes`
-   *  where this is built. */
-  payableMinutes: number | null;
   /** The "IND Time" column. Fixed-Ind only — every other category has no Ind
-   *  Time, and showing payableMinutes for them would just repeat Completion
-   *  Time in the next column over. */
+   *  Time. Shown for reference beside Completion Time; pay is calculated from
+   *  Completion Time (the Net Time), not from this. */
   indMinutes: number | null;
   hours: number | null;
   /** Pay derived from time alone — the pay components plus PTO pay, before any
@@ -411,25 +407,19 @@ export default function PayrollPage() {
               ? fixedMinutes
               : (isReviewed ? (saved!.completionMinutes as number) : null);
             const hours = completionMinutes != null ? completionMinutes / 60 : null;
-            // Fixed-Ind pays Reg Hours on Ind Time — the week's worked Worksnap
-            // time plus approved sick leave, as the Attendance Review "Ind
-            // Time" cell shows it. Completion Time is the Net Time derived from
-            // it (Offset Credit repaid, then capped at 2,400, plus any credit
-            // granted on the week), which is the right figure for the
-            // Completion Time column above but not for pay.
+            // Fixed-Ind Ind Time, for the IND Time column only — every pay
+            // category, this one included, is PAID on Completion Time, which
+            // for Fixed-Ind is the Net Time derived from Ind Time: any Offset
+            // Credit repaid, then capped at 2,400, plus any credit granted on
+            // the week. So the two figures sit side by side in the table, with
+            // Net Time the one Reg Hours is calculated from.
             //
             // Falls back to Completion Time when Ind Time was never stored:
-            // weeks saved before the column existed. Those two figures are
-            // equal for any week under the cap with no credit in play, which is
-            // the ordinary case.
-            const payableMinutes = payCategoryKey === "fixed-ind"
+            // weeks saved before the column existed. The two are equal for any
+            // week under the cap with no credit in play, the ordinary case.
+            const indMinutes = payCategoryKey === "fixed-ind"
               ? (isReviewed ? (saved!.totalIndMinutes ?? (saved!.completionMinutes as number)) : null)
-              : completionMinutes;
-            // Shown in its own column beside Completion Time, so the two
-            // figures a Fixed-Ind week is judged on are visible together: Ind
-            // Time is what Reg Hours is paid on, Completion Time is the Net
-            // Time after any repayment and the 2,400-min cap.
-            const indMinutes = payCategoryKey === "fixed-ind" ? payableMinutes : null;
+              : null;
             const country = countryFromLocation(c.location || "");
             const localHoliday = formatLocalHolidays(holidaysInWeek.filter((h) => h.country === country));
             const contractorRequests = leaveRequestsByEmail.get(email) ?? [];
@@ -484,7 +474,7 @@ export default function PayrollPage() {
             // Earnings is the time-derived half, broken out so the table can show
             // it beside the manual adjustments that make up the rest of Gross.
             const earnings = hasGrossInputs
-              ? payComponentsFor(c.payCategory || "", hourlyRate, payableMinutes, {
+              ? payComponentsFor(c.payCategory || "", hourlyRate, completionMinutes, {
                   totalEvaluatedRegularMinutes: saved?.totalEvaluatedRegularMinutes ?? null,
                   totalRegularOtMinutes: saved?.totalRegularOtMinutes ?? null,
                   totalRdOtMinutes: saved?.totalRdOtMinutes ?? null,
@@ -575,7 +565,6 @@ export default function PayrollPage() {
               weeklyRate: monthlyRateNum > 0 ? weeklyRateFrom(monthlyRateNum) : (parseFloat(c.weeklyRate) || 0),
               actualMinutes,
               completionMinutes,
-              payableMinutes,
               indMinutes,
               hours,
               earnings,
@@ -650,7 +639,7 @@ export default function PayrollPage() {
     const headers = [
       "Pay Period", "Name", "Contractor ID", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time", "IND Time",
-      "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Currency", "Rate/hr", "Rate", "Earnings", "Time Away", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     // Plain 2dp, no currency prefix and no thousands separators: currency is
@@ -986,7 +975,7 @@ export default function PayrollPage() {
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-                  "Completion Time", "IND Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
+                  "Completion Time", "IND Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "Time Away", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
@@ -1061,7 +1050,7 @@ export default function PayrollPage() {
                       behind it are in the tooltip, since four extra hour columns
                       would double the width for a figure that's rarely read. */}
                   {([
-                    ["ptoPay", r.ptoPay, r.ptoHours, "PTO"],
+                    ["ptoPay", r.ptoPay, r.ptoHours, "Time Away"],
                     ["sickPay", r.sickPay, r.sickHours, "Medical Unavailability"],
                     ["specialPay", r.specialPay, r.specialHours, "Special Leave"],
                     ["advancePay", r.advancePay, r.advanceHours, "Advance Leave"],
@@ -1258,7 +1247,7 @@ function PayrollVoucherModal({
     setIsSaving(true);
     setSaveError("");
     try {
-      const live = payComponentsFor(row.payCategory, row.hourlyRate, row.payableMinutes, {
+      const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
         totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: row.totalRegularOtMinutes,
         totalRdOtMinutes: row.totalRdOtMinutes,
@@ -1396,7 +1385,7 @@ function PayrollVoucherModal({
         ptoDailyMinutes: row.ptoDailyMinutes,
       }
     : (() => {
-        const live = payComponentsFor(row.payCategory, row.hourlyRate, row.payableMinutes, {
+        const live = payComponentsFor(row.payCategory, row.hourlyRate, row.completionMinutes, {
           totalEvaluatedRegularMinutes: row.totalEvaluatedRegularMinutes,
           totalRegularOtMinutes: row.totalRegularOtMinutes,
           totalRdOtMinutes: row.totalRdOtMinutes,
@@ -1614,7 +1603,7 @@ function PayrollVoucherModal({
                             title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours`
                               : hoInPlaceOfZero ? `US Holiday — ${usHoHours.toFixed(2)} h credited, counted in HO HRS, not REG Hours`
                               : ptoInPlaceOfZero ? ptoTitle : undefined}>
-                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : ptoInPlaceOfZero ? "PTO" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : ptoInPlaceOfZero ? "Time Away" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
                           </div>
                           {!otInPlaceOfZero && otHours > 0 && (
                             <div className="text-[9px] font-semibold leading-tight text-amber-600"
@@ -1624,7 +1613,7 @@ function PayrollVoucherModal({
                           )}
                           {ptoNote && (
                             <div className="text-[9px] font-semibold leading-tight text-emerald-600" title={ptoTitle}>
-                              PTO
+                              Time Away
                             </div>
                           )}
                         </td>
@@ -1644,7 +1633,7 @@ function PayrollVoucherModal({
                   // This is what the Time Off Pay line below is paid on — it
                   // sums the same four — so showing PTO alone left hours ×
                   // rate unable to reconcile with the pay beside it.
-                  ["PTO HRS", ptoHours + sickHours + specialHours + advanceHours],
+                  ["Time Away HRS", ptoHours + sickHours + specialHours + advanceHours],
                   // Combined to match the single Holiday Pay line below. Kept
                   // distinct from "HO OT HRS" in the next group — that's
                   // overtime worked on a holiday, not holiday hours.
@@ -2214,7 +2203,7 @@ function ProcessPayrollModal({ rows, rangeFrom, rangeTo, onClose, onProcessed }:
 
   function buildItems(rowsToProcess: PayrollRow[]): ProcessedPayrollRow[] {
     return rowsToProcess.map((r) => {
-      const live = payComponentsFor(r.payCategory, r.hourlyRate, r.payableMinutes, {
+      const live = payComponentsFor(r.payCategory, r.hourlyRate, r.completionMinutes, {
         totalEvaluatedRegularMinutes: r.totalEvaluatedRegularMinutes,
         totalRegularOtMinutes: r.totalRegularOtMinutes,
         totalRdOtMinutes: r.totalRdOtMinutes,

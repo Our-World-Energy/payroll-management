@@ -15,32 +15,59 @@ import { prisma } from "@/lib/prisma";
  * The daily log is the authority rather than worksnap_entries: a contractor can
  * carry task entries yet still have no clock-in/out record, and it's the daily
  * log that every attendance check (late, first in / last out) reads.
+ *
+ * One raw query rather than two Prisma reads intersected in JS. The previous
+ * shape fetched `distinct: ["email"]` from worksnap_daily_log, which Prisma
+ * resolves by reading every row and deduplicating client-side — 22,758 rows
+ * transferred to derive 420 addresses — and then read all Active profiles in a
+ * second query. Against the live database that measured ~791ms and ~508ms;
+ * NOT EXISTS does the same work inside Postgres in a single round trip, which
+ * matters on a Dashboard where the per-query latency is the whole cost.
+ *
+ * json_agg with a COALESCE so the row always comes back, `untracked` included
+ * as an empty array when nobody is untracked — a FILTER-less aggregate over no
+ * rows returns NULL, which would otherwise read as a failure.
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+type CoverageResult = {
+  untracked: { email: string; name: string; department: string }[] | null;
+  activeCount: number;
+};
+
 export async function GET() {
-  const [trackedEmails, profiles] = await Promise.all([
-    prisma.worksnapDailyLog.findMany({ select: { email: true }, distinct: ["email"] }),
-    prisma.contractorProfile.findMany({
-      where: { status: "Active" },
-      select: { email: true, fullName: true, firstName: true, surname: true, department: true },
-    }),
-  ]);
+  const [result] = await prisma.$queryRaw<CoverageResult[]>`
+    SELECT
+      (SELECT COUNT(*)::int FROM "contractor_profiles" WHERE "status" = 'Active') AS "activeCount",
+      COALESCE(
+        (
+          SELECT json_agg(u ORDER BY u.name)
+          FROM (
+            SELECT
+              btrim(p."email") AS email,
+              COALESCE(
+                NULLIF(btrim(p."fullName"), ''),
+                NULLIF(btrim(CONCAT_WS(' ', p."firstName", p."surname")), ''),
+                btrim(p."email")
+              ) AS name,
+              COALESCE(btrim(p."department"), '') AS department
+            FROM "contractor_profiles" p
+            WHERE p."status" = 'Active'
+              AND btrim(COALESCE(p."email", '')) <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM "worksnap_daily_log" l
+                WHERE lower(btrim(l."email")) = lower(btrim(p."email"))
+              )
+          ) u
+        ),
+        '[]'::json
+      ) AS "untracked"
+  `;
 
-  const tracked = new Set(
-    trackedEmails.map((e) => (e.email ?? "").trim().toLowerCase()).filter(Boolean)
-  );
-
-  const untracked = profiles
-    .filter((p) => p.email && !tracked.has(p.email.trim().toLowerCase()))
-    .map((p) => ({
-      email: p.email.trim(),
-      name: p.fullName?.trim() || [p.firstName, p.surname].filter(Boolean).join(" ").trim() || p.email.trim(),
-      department: p.department?.trim() ?? "",
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  return Response.json({ untracked, activeCount: profiles.length });
+  return Response.json({
+    untracked: result?.untracked ?? [],
+    activeCount: result?.activeCount ?? 0,
+  });
 }

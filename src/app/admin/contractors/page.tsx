@@ -79,7 +79,7 @@ function exportCSV(rows: Contractor[], cutoff: CutoffDate) {
   const headers = [
     "Unique ID","First Name","Middle Name","Surname","Full Name","DOB","Gender",
     "Contractor ID","Assigned Team","Functional Team","Role","Location","Status",
-    "Engagement Start Date","PTO Balance","PTO Used","Medical Unavailability Balance","Medical Unavailability Used",
+    "Engagement Start Date","Time Away Balance","Time Away Used","Medical Unavailability Balance","Medical Unavailability Used",
     "Work Location","Currency","Monthly Contract Rate","Weekly Contract Rate","Hourly Rate",
     "Email","Pay Category","Agreed Schedule","Typical Non-Working Days","OWE Contact","Pay Cycle","Shift Type",
     "Equipment Provided","Created On","Dismissal Date","Dismissal Reason",

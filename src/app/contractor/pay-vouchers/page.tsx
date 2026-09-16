@@ -322,7 +322,7 @@ function Voucher({ profile, v, vouchers, onSelect, onDownload }: {
             <div>
               {([
                 ["REG Hours", t.regHours, true],
-                ["PTO HRS", v.ptoHours, false],
+                ["Time Away HRS", v.ptoHours, false],
                 ["HO HRS", t.usHolidayHours + t.localHolidayHours, false],
                 ["OT HRS (REG/RD/HO)", otHours, false],
               ] as const).map(([label, value, strong]) => (
@@ -537,7 +537,7 @@ function PrintableVoucher({ profile, v }: { profile: ContractorVoucherProfile; v
           <div className="space-y-2 text-xs">
             {[
               ["REG Hours", regHours],
-              ["PTO HRS", ptoHours],
+              ["Time Away HRS", ptoHours],
               // Same combined line as the admin voucher.
               ["HO HRS", usHolidayHours + localHolidayHours],
             ].map(([label, value]) => (
