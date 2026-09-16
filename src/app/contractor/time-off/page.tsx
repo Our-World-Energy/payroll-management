@@ -99,8 +99,8 @@ function ShortNoticeHint({ days }: { days: number }) {
       {days < 0
         ? "This date is in the past."
         : days === 0
-          ? "That's today — PTO needs 2 weeks' notice."
-          : `Only ${days} day${days === 1 ? "" : "s"}' notice — PTO needs 14.`}
+          ? "That's today — Time Away needs 2 weeks' notice."
+          : `Only ${days} day${days === 1 ? "" : "s"}' notice — Time Away needs 14.`}
     </p>
   );
 }
@@ -600,7 +600,7 @@ export default function ContractorTimeOffPage() {
             <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5">
               <LuInfo size={15} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-800">
-                PTO is meant to be filed 2 weeks ahead. This starts in{" "}
+                Time Away is meant to be filed 2 weeks ahead. This starts in{" "}
                 <span className="font-bold">{daysOfNotice(startDate)} {daysOfNotice(startDate) === 1 ? "day" : "days"}</span>,
                 so approval is at your administrator&apos;s discretion.
               </p>
@@ -674,7 +674,7 @@ export default function ContractorTimeOffPage() {
           <BalanceCard
             icon={<LuUmbrella size={20} strokeWidth={1.75} />}
             iconBg="bg-emerald-100 text-emerald-900"
-            title="Paid Time Off (PTO)"
+            title="Time Away"
             badge="Active Cycle"
             badgeBg="bg-emerald-50"
             badgeText="text-emerald-700"
@@ -805,7 +805,7 @@ export default function ContractorTimeOffPage() {
                 <div className="mt-2 flex items-start gap-2.5 bg-amber-50 border border-amber-200 rounded-lg px-3.5 py-2.5">
                   <LuInfo size={15} strokeWidth={2} className="text-amber-600 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-800">
-                    <span className="font-bold">PTO must be filed at least 2 weeks in advance.</span>{" "}
+                    <span className="font-bold">Time Away must be filed at least 2 weeks in advance.</span>{" "}
                     The earliest date that meets this is{" "}
                     <span className="font-bold tabular-nums">{fmtNoticeDate(earliestPtoDate)}</span>.
                   </p>

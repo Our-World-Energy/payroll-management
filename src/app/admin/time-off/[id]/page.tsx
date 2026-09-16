@@ -233,7 +233,7 @@ export default function ContractorTimeOffPage() {
         {!isIndia && (
           <TimeOffBalanceCard
             icon={<LuCalendarDays size={18} strokeWidth={1.75} />}
-            title="PTO Balance"
+            title="Time Away Balance"
             tone={ptoAvailable < 0 ? "red" : "teal"}
             accrued={ptoBalance}
             used={ptoUsed}
@@ -298,7 +298,7 @@ export default function ContractorTimeOffPage() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   {["Employee", "Dates", "Leave Type", "Hours", "Reason",
-                    ...(!isIndia ? ["PTO Available"] : []),
+                    ...(!isIndia ? ["Time Away Available"] : []),
                     "Medical Unavailability Available", "Actions",
                   ].map((h) => (
                     <th key={h} className="px-5 py-3.5 text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">

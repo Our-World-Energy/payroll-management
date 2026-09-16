@@ -639,7 +639,7 @@ export default function PayrollPage() {
     const headers = [
       "Pay Period", "Name", "Contractor ID", "Email", "Assigned Team", "Functional Team", "Role", "Country", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
       "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time", "IND Time",
-      "Currency", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
+      "Currency", "Rate/hr", "Rate", "Earnings", "Time Away", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status",
     ];
     const escape = (v: string) => `"${String(v).replace(/"/g, '""')}"`;
     // Plain 2dp, no currency prefix and no thousands separators: currency is
@@ -975,7 +975,7 @@ export default function PayrollPage() {
               <tr className="bg-[#003527]">
                 {["Name", "Country", "Assigned Team", "Pay Category", "Shift Type", "Local Holiday", "Local HO Time",
                   "Total Evaluated Regular Time", "Total US HO Time", "Total Regular OT Time", "Total RD OT Time", "Total HO OT Time", "Total Time Away Request Time",
-                  "Completion Time", "IND Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "PTO", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
+                  "Completion Time", "IND Time", "Monthly Rate", "Weekly Rate", "Rate/hr", "Rate", "Earnings", "Time Away", "Medical Unavailability", "Special Leave", "Advance Leave", "Bonus", "MISC", "Retro Pay", "REIM", "Gross", "Cash Advance", "HMO", "Deductions", "Net Pay", "Status", "Action"].map((h, i) => (
                   <th
                     key={h}
                     className={`text-left px-4 md:px-6 py-3 md:py-4 text-[10px] font-bold text-white uppercase tracking-widest whitespace-nowrap border-r border-white/20 last:border-r-0 overflow-hidden ${
@@ -1050,7 +1050,7 @@ export default function PayrollPage() {
                       behind it are in the tooltip, since four extra hour columns
                       would double the width for a figure that's rarely read. */}
                   {([
-                    ["ptoPay", r.ptoPay, r.ptoHours, "PTO"],
+                    ["ptoPay", r.ptoPay, r.ptoHours, "Time Away"],
                     ["sickPay", r.sickPay, r.sickHours, "Medical Unavailability"],
                     ["specialPay", r.specialPay, r.specialHours, "Special Leave"],
                     ["advancePay", r.advancePay, r.advanceHours, "Advance Leave"],
@@ -1603,7 +1603,7 @@ function PayrollVoucherModal({
                             title={otInPlaceOfZero ? `Regular OT earned this day — counted in REG OT HRS, not REG Hours`
                               : hoInPlaceOfZero ? `US Holiday — ${usHoHours.toFixed(2)} h credited, counted in HO HRS, not REG Hours`
                               : ptoInPlaceOfZero ? ptoTitle : undefined}>
-                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : ptoInPlaceOfZero ? "PTO" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
+                            {isOff ? "OFF" : hoInPlaceOfZero ? "HO" : ptoInPlaceOfZero ? "Time Away" : (otInPlaceOfZero ? otHours : hours).toFixed(2)}
                           </div>
                           {!otInPlaceOfZero && otHours > 0 && (
                             <div className="text-[9px] font-semibold leading-tight text-amber-600"
@@ -1613,7 +1613,7 @@ function PayrollVoucherModal({
                           )}
                           {ptoNote && (
                             <div className="text-[9px] font-semibold leading-tight text-emerald-600" title={ptoTitle}>
-                              PTO
+                              Time Away
                             </div>
                           )}
                         </td>
@@ -1633,7 +1633,7 @@ function PayrollVoucherModal({
                   // This is what the Time Off Pay line below is paid on — it
                   // sums the same four — so showing PTO alone left hours ×
                   // rate unable to reconcile with the pay beside it.
-                  ["PTO HRS", ptoHours + sickHours + specialHours + advanceHours],
+                  ["Time Away HRS", ptoHours + sickHours + specialHours + advanceHours],
                   // Combined to match the single Holiday Pay line below. Kept
                   // distinct from "HO OT HRS" in the next group — that's
                   // overtime worked on a holiday, not holiday hours.

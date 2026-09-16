@@ -8,10 +8,15 @@ const SICK_LEAVE_HALF_MONTH_ACCRUAL = 1.6675;
 export const HOURS_PER_DAY = 8;
 
 // Cosmetic-only relabeling: the stored/compared leave-request type stays
-// "Sick Leave" (so historical requests keep matching), this only changes
-// what's rendered wherever that raw type/label string is shown to a user.
+// "Sick Leave" / "PTO" (so historical requests keep matching), this only
+// changes what is rendered wherever that raw type/label string is shown to
+// a user. The PTO pattern is word-bounded so "Advance PTO/Birthday Leave"
+// relabels too - the slash is a word boundary - while a longer word that
+// merely starts with those letters would be left alone.
 export function leaveTypeDisplayLabel(type: string): string {
-  return type.replace(/Sick Leave/g, "Medical Unavailability");
+  return type
+    .replace(/Sick Leave/g, "Medical Unavailability")
+    .replace(/\bPTO\b/g, "Time Away");
 }
 
 /**

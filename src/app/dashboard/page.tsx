@@ -50,7 +50,7 @@ const STATS: Stat[] = [
     spark: [3, 5, 4, 7, 6, 8, 7],
   },
   {
-    label: "Pending PTO",
+    label: "Pending Time Away",
     value: "18",
     delta: "−4",
     trend: "down",

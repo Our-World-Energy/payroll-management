@@ -255,7 +255,7 @@ function AdminDashboard() {
           const match = leaveRequests.find((r) =>
             r.status === "Approved" && r.email.trim().toLowerCase() === email && todayLocal >= r.startDate && todayLocal <= r.endDate
           );
-          if (match?.type === "PTO") return "PTO";
+          if (match?.type === "PTO") return "Time Away";
           if (match?.type === "Sick Leave") return "Medical Unavailability";
           return "Absent";
         }
@@ -337,7 +337,7 @@ function AdminDashboard() {
             (r.type === "PTO" || r.type === "PTO Half Day" || r.type === "Sick Leave" || r.type === "Sick Leave Half Day")
           );
           if (match) {
-            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "PTO" : "Medical Unavailability" });
+            ptoRows.push({ name: c.fullName, department: c.department, date: todayLocal, status: match.type.startsWith("PTO") ? "Time Away" : "Medical Unavailability" });
           }
         }
         setPtoRows(ptoRows);
@@ -406,7 +406,7 @@ function AdminDashboard() {
               <LuBriefcase size={13} strokeWidth={2} />
             </div>
             <div className="min-w-0">
-              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">PTO/Medical Unavailability</p>
+              <p className="text-[9px] font-semibold text-blue-600 uppercase tracking-wider leading-none truncate">Time Away/Medical Unavailability</p>
               <p className="text-sm font-bold text-blue-700 leading-tight mt-0.5">{ptoRows.length}</p>
             </div>
           </button>
@@ -672,7 +672,7 @@ function AdminDashboard() {
           <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="flex items-start justify-between px-6 py-5 bg-blue-600">
               <div>
-                <h3 className="text-lg font-bold text-white">PTO/Medical Unavailability Today</h3>
+                <h3 className="text-lg font-bold text-white">Time Away/Medical Unavailability Today</h3>
                 <p className="text-sm text-blue-100 mt-0.5">{ptoRows.length} contractor{ptoRows.length !== 1 ? "s" : ""} on approved leave today</p>
               </div>
               <button
@@ -694,7 +694,7 @@ function AdminDashboard() {
                 <tbody className="divide-y divide-slate-100">
                   {ptoRows.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved PTO or Medical Unavailability today.</td>
+                      <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-400">No approved Time Away or Medical Unavailability today.</td>
                     </tr>
                   ) : ptoRows.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
@@ -703,7 +703,7 @@ function AdminDashboard() {
                       <td className="px-5 py-3 text-slate-600 whitespace-nowrap">{row.date}</td>
                       <td className="px-5 py-3">
                         <span className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase ${
-                          row.status === "PTO" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
+                          row.status === "Time Away" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"
                         }`}>
                           {row.status}
                         </span>

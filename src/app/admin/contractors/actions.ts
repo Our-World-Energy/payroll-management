@@ -1042,7 +1042,7 @@ export async function createAdvanceLeaveOverride(params: {
   const alreadyUsed = isPto ? Number(profile.birthdayLeaveUsed ?? 0) : Number(profile.advanceSickLeaveUsed ?? 0);
   const available = Math.max(balance - alreadyUsed, 0);
   if (available <= 0) {
-    const label = isPto ? "Advance PTO/Birthday Leave" : "Advance Medical Unavailability";
+    const label = isPto ? "Advance Time Away/Birthday Leave" : "Advance Medical Unavailability";
     return { ok: false, error: `${label} has no balance remaining for this override.` };
   }
   // Deduction is capped to whatever's actually available — e.g. 12h available

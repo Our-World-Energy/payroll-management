@@ -14,7 +14,7 @@ import { FilterSelect } from "@/components/FilterSelect";
 import { fetchAllLeaveRequestsAdmin, fetchAllContractors, type AdminLeaveRequest } from "../contractors/actions";
 import { fetchFixedTimeForWeek, saveFixedTime } from "./actions";
 import { fetchWithRetry } from "@/lib/fetchWithRetry";
-import { requestStatusDisplayLabel } from "@/lib/timeOffBalances";
+import { requestStatusDisplayLabel, leaveTypeDisplayLabel } from "@/lib/timeOffBalances";
 import type { Contractor } from "../contractors/types";
 
 
@@ -1970,7 +1970,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           className={`sticky left-0 z-10 w-[156px] min-w-[156px] px-4 py-2 font-medium border-r border-slate-100 shadow-[1px_0_0_0_#e2e8f0] ${
                             hasLeaveWorkConflict ? "bg-red-100 text-red-700" : isShortDay ? "bg-yellow-100 text-yellow-800" : "bg-white text-slate-800"
                           }`}
-                          title={hasLeaveWorkConflict ? "Approved PTO/Medical Unavailability on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved PTO/Medical Unavailability on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
+                          title={hasLeaveWorkConflict ? "Approved Time Away/Medical Unavailability on file for this date, and more than 240 min (4h) was also logged." : isShortDay ? "Approved Time Away/Medical Unavailability on file for this date — 240 min (4h) or less was also logged, the expected half-day pattern." : undefined}
                         >
                           {formatDayLabel(date)}
                         </td>
@@ -2090,7 +2090,7 @@ const completionTotalMinutes = isFixedContractor((record as AttendanceRow).payCa
                           {localHolidayMinutes != null ? formatMinutesAsMins(localHolidayMinutes) : ""}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
-                          {timeOffRequestTypeFor(date, leaveRequests)}
+                          {leaveTypeDisplayLabel(timeOffRequestTypeFor(date, leaveRequests))}
                         </td>
                         <td className={`px-4 py-2 border-r border-slate-100 whitespace-nowrap ${conflictCellClass}`}>
                           {timeOffRequestMinutesFor(date, leaveRequests)}
