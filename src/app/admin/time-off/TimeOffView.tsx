@@ -118,6 +118,36 @@ function BalanceBar({ used, total, color }: { used: number; total: number; color
   );
 }
 
+/**
+ * Table sort orders, also used for the CSV so an export matches what is on
+ * screen.
+ *
+ * Both balance sorts run lowest-first: the point of ordering by a balance is
+ * to surface whoever is running low — under 8 hours available is what makes
+ * advance leave available — not whoever has the most left. A negative
+ * Available therefore sorts to the very top, which is where it wants to be.
+ *
+ * Every comparator falls back to the name, so rows holding the same balance
+ * keep a stable order instead of shuffling between renders.
+ */
+const SORT_OPTIONS = [
+  { value: "name",     label: "Sort: A \u2013 Z" },
+  { value: "timeAway", label: "Sort: Time Away Available" },
+  { value: "medical",  label: "Sort: Medical Unavailability" },
+] as const;
+
+type SortKey = (typeof SORT_OPTIONS)[number]["value"];
+
+function byFullName(a: TimeOffRow, b: TimeOffRow) {
+  return a.fullName.localeCompare(b.fullName);
+}
+
+const SORT_COMPARATORS: Record<SortKey, (a: TimeOffRow, b: TimeOffRow) => number> = {
+  name:     byFullName,
+  timeAway: (a, b) => a.ptoAvailable - b.ptoAvailable || byFullName(a, b),
+  medical:  (a, b) => a.sickLeaveAvailable - b.sickLeaveAvailable || byFullName(a, b),
+};
+
 const REVIEW_BADGE: Record<RequestDecision, string> = {
   Approved: "bg-emerald-50 text-emerald-700 border border-emerald-200",
   Pending:  "bg-amber-50 text-amber-700 border border-amber-200",
@@ -615,9 +645,11 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     await reloadData();
   }
 
+  const [sortBy, setSortBy] = useState<SortKey>("name");
+
   const countryOptions    = Array.from(new Set(scopedRows.map((r) => r.country))).sort();
   const departmentOptions = Array.from(new Set(scopedRows.map((r) => r.department || "Unassigned"))).sort();
-  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses";
+  const filtersActive = nameSearch.trim() !== "" || countryFilter !== "All Countries" || departmentFilter !== "All Assigned Teams" || payCategoryFilter !== "All Categories" || reviewStatusFilter !== "All Statuses" || sortBy !== "name";
 
   const filteredRows = scopedRows.filter((r) => {
     const nm = !nameSearch.trim() || r.fullName.toLowerCase().includes(nameSearch.trim().toLowerCase());
@@ -626,7 +658,8 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
     const pm = payCategoryFilter === "All Categories" || r.payCategory === payCategoryFilter;
     const sm = reviewStatusFilter === "All Statuses"  || r.latestRequest?.status === reviewStatusFilter;
     return nm && cm && dm && pm && sm;
-  });
+  // filter() already returned a fresh array, so sorting it in place is safe.
+  }).sort(SORT_COMPARATORS[sortBy]);
 
   const pendingCount  = leaveRequests.filter((r) => r.status === "Pending").length;
   const approvedCount = leaveRequests.filter((r) => r.status === "Approved").length;
@@ -1863,8 +1896,15 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
           <option value="Approved">Approved</option>
           <option value="Rejected">Declined</option>
         </select>
+        {/* Wider than the filters beside it: "Sort: Medical Unavailability"
+            is unreadable truncated to their width. */}
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} disabled={loading}
+          title="Order the table. Both balance sorts list the lowest available first."
+          className="h-[clamp(1.75rem,2.13vw,2rem)] max-w-[clamp(8rem,15vw,14rem)] text-[clamp(0.6875rem,0.87vw,0.8125rem)] border border-slate-200 rounded-lg px-[clamp(0.4375rem,0.7vw,0.5625rem)] bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500">
+          {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
         {filtersActive && (
-          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); }}
+          <button onClick={() => { setNameSearch(""); setCountryFilter("All Countries"); setDepartmentFilter("All Assigned Teams"); setPayCategoryFilter("All Categories"); setReviewStatusFilter("All Statuses"); setSortBy("name"); }}
             className="grid size-[clamp(1.75rem,2.13vw,2rem)] shrink-0 place-items-center text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Clear filters">
             <LuX size={14} strokeWidth={2} />
           </button>
