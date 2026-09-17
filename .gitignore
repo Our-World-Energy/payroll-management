@@ -30,6 +30,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# cloudflare (opennext build output + wrangler local state)
+/.open-next/
+/.wrangler/
+.dev.vars
+cloudflare-env.d.ts
+
 # vercel
 .vercel
 
@@ -44,3 +50,6 @@ next-env.d.ts
 worksnap_*.log
 worksnap_week_*.csv
 dev_server.log
+
+# prisma client generated for workerd (see prisma/schema.prisma)
+/src/generated/

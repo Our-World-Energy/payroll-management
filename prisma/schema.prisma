@@ -1,9 +1,20 @@
 // Prisma schema — Our World Energy Contractor Suite
 
 generator client {
-  provider      = "prisma-client-js"
-  // "native" for local; rhel-openssl-3.0.x for Netlify/AWS Lambda functions
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  // Workers cannot load a native Rust query engine. Two settings are needed:
+  //   engineType = "client"  -> Rust-free query COMPILER (pairs with the pg
+  //                             driver adapter in src/lib/prisma.ts)
+  //   runtime    = "workerd" -> emits the compiler wasm as a module import
+  //                             instead of a filesystem read, which is what
+  //                             a Worker can actually resolve.
+  // The default prisma-client-js generator resolves @prisma/client's `node`
+  // export condition under serverExternalPackages, lands on the binary runtime
+  // and fails with: readAll '/bundle/.../query_compiler_bg.wasm'.
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "workerd"
+  moduleFormat = "esm"
+  engineType   = "client"
 }
 
 datasource db {

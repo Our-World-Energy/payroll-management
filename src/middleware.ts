@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { updateSession } from "@/lib/supabase/proxy-session";
+import { updateSession } from "@/lib/supabase/middleware-session";
 import { accountCanAccessAdminPath } from "@/lib/accountPages";
 import { homeForRole, normalizeRole } from "@/lib/roles";
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { response, user } = await updateSession(request);
 
   const path = request.nextUrl.pathname;
