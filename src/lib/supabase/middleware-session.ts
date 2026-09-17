@@ -3,9 +3,9 @@ import { createServerClient } from "@supabase/ssr";
 
 /**
  * Refreshes the Supabase session cookie on every request.
- * Called from proxy.ts. Returns the response with updated cookies, plus the
+ * Called from middleware.ts. Returns the response with updated cookies, plus the
  * signed-in user so the caller can gate routes without a second round trip —
- * this function still only hydrates; the gating decision lives in proxy.ts.
+ * this function still only hydrates; the gating decision lives in middleware.ts.
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
