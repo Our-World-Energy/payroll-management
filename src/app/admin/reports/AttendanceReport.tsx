@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { LuCalendarDays, LuDownload, LuLoader } from "react-icons/lu";
 import { recentWeeks, weekLabel, addDaysIso } from "@/lib/weekUtils";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
-import { fetchAttendanceReport, fetchReportDepartments, MAX_REPORT_WEEKS, type AttendanceReportDay } from "./actions";
+import { fetchAttendanceReport, fetchReportDepartments, type AttendanceReportDay } from "./actions";
+import { MAX_REPORT_WEEKS } from "./reportLimits";
 
 const DAY_HEADERS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 

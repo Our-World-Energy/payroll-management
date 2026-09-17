@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 import { datesBetween, addDaysIso, sundayOf } from "@/lib/weekUtils";
 import { isPtoLeaveType } from "@/lib/timeOffBalances";
+import { MAX_REPORT_WEEKS } from "./reportLimits";
 
 /**
  * Data for the Attendance Report: one row per contractor per week, carrying the
@@ -16,9 +17,6 @@ import { isPtoLeaveType } from "@/lib/timeOffBalances";
  * grouped in memory, instead of five queries per week on a pooled connection
  * that barely overlaps concurrent calls.
  */
-
-/** A guard on the fan-out: contractors x weeks x 7 rows are produced. */
-export const MAX_REPORT_WEEKS = 26;
 
 export type AttendanceReportDay = {
   /** Worked minutes the attendance review accepted for the day. */
