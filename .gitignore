@@ -50,3 +50,6 @@ next-env.d.ts
 worksnap_*.log
 worksnap_week_*.csv
 dev_server.log
+
+# prisma client generated for workerd (see prisma/schema.prisma)
+/src/generated/

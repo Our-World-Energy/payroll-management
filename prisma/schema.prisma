@@ -1,12 +1,20 @@
 // Prisma schema — Our World Energy Contractor Suite
 
 generator client {
-  provider = "prisma-client-js"
-  // Cloudflare Workers cannot load a native Rust query-engine binary, so the
-  // client is generated in "client" (Rust-free) mode and talks to Postgres
-  // through a driver adapter instead — see src/lib/prisma.ts. Generally
-  // available since Prisma 6.16; no preview feature flag needed.
-  engineType = "client"
+  // Workers cannot load a native Rust query engine. Two settings are needed:
+  //   engineType = "client"  -> Rust-free query COMPILER (pairs with the pg
+  //                             driver adapter in src/lib/prisma.ts)
+  //   runtime    = "workerd" -> emits the compiler wasm as a module import
+  //                             instead of a filesystem read, which is what
+  //                             a Worker can actually resolve.
+  // The default prisma-client-js generator resolves @prisma/client's `node`
+  // export condition under serverExternalPackages, lands on the binary runtime
+  // and fails with: readAll '/bundle/.../query_compiler_bg.wasm'.
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  runtime      = "workerd"
+  moduleFormat = "esm"
+  engineType   = "client"
 }
 
 datasource db {

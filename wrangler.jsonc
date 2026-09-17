@@ -46,6 +46,9 @@
     ]
   },
 
+  // Keep the workers.dev URL alive as a DNS-independent fallback for testing.
+  "workers_dev": true,
+
   "observability": {
     "enabled": true
   },

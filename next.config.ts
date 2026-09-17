@@ -2,6 +2,13 @@ import type { NextConfig } from "next";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
+  // The Prisma client is generated with runtime = "workerd" (see
+  // prisma/schema.prisma), which imports the query-compiler wasm as a module.
+  // Webpack 5 refuses .wasm unless the experiment is switched on explicitly.
+  webpack: (config) => {
+    config.experiments = { ...config.experiments, asyncWebAssembly: true };
+    return config;
+  },
   trailingSlash: true,
   devIndicators: false,
   eslint: {
