@@ -431,6 +431,9 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
   // Settings → Time Away Settings → Enable Process Time Away. Starts true so
   // the button isn't briefly greyed out on every load; reloadData corrects it.
   const [processEnabled, setProcessEnabled] = useState(true);
+  // Settings → Import Settings → Time Away Import. True until the bundle says
+  // otherwise, so the button is not briefly dead on every load.
+  const [usedImportEnabled, setUsedImportEnabled] = useState(true);
 
   // The Scheduled Trigger Date (Settings → Time Away Settings → Reset Time
   // Off) is a one-time due date/time, not a recurring cron — checked as soon
@@ -460,9 +463,10 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
       // One Server Action, not five — see fetchTimeOffBundle. Next serialises
       // Server Action requests from a client, so a Promise.all here ran them
       // one after another instead of concurrently.
-      const { contractors: all, requests, grants, savedCutoff, processEnabled: canProcess } = await fetchTimeOffBundle();
+      const { contractors: all, requests, grants, savedCutoff, processEnabled: canProcess, importEnabled: canImport } = await fetchTimeOffBundle();
       setContractors(all); setLeaveRequests(requests); setSpecialLeaveGrants(grants); setCutoff(cutoffFromSaved(savedCutoff));
       setProcessEnabled(canProcess);
+      setUsedImportEnabled(canImport);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Unable to load contractors.");
     } finally {
@@ -1778,7 +1782,9 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
           </button>
           <button
             onClick={() => setShowUsedImportModal(true)}
-            className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors"
+            disabled={!usedImportEnabled}
+            title={usedImportEnabled ? undefined : "Time Away Import is turned off in Settings → Import Settings"}
+            className="inline-flex items-center gap-[clamp(0.25rem,0.5vw,0.375rem)] px-[clamp(0.5rem,0.9vw,0.75rem)] py-[clamp(0.25rem,0.5vw,0.375rem)] text-[clamp(0.625rem,0.85vw,0.75rem)] font-semibold whitespace-nowrap text-white bg-[#003527] hover:bg-[#064E3B] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#003527]"
           >
             <LuUpload size={13} strokeWidth={2} /> Time Away / SICK Used Import
           </button>

@@ -486,6 +486,38 @@ export async function saveContractorImportEnabled(enabled: boolean): Promise<{ o
   return { ok: true };
 }
 
+const TIME_AWAY_IMPORT_ENABLED = "time_away_import_enabled";
+
+/**
+ * Whether the Time Away / SICK Used Import button in Time Away Management is
+ * available. Defaults to **enabled** when no row exists, matching every switch
+ * above it.
+ */
+export async function fetchTimeAwayImportEnabled(): Promise<boolean> {
+  const sb = getSupabase();
+  const { data, error } = await sb
+    .from("app_settings")
+    .select("value")
+    .eq("key", TIME_AWAY_IMPORT_ENABLED)
+    .maybeSingle();
+
+  if (error || !data) return true;
+  return data.value !== "false";
+}
+
+export async function saveTimeAwayImportEnabled(enabled: boolean): Promise<{ ok: boolean; error?: string }> {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from("app_settings")
+    .upsert(
+      { key: TIME_AWAY_IMPORT_ENABLED, value: enabled ? "true" : "false", updatedAt: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // ── Notification Alerts ─────────────────────────────────────────────────────
 // Custom admin-defined alerts (name + a one-time scheduled date) — replaces
 // the old static notification-toggle list on Settings.
