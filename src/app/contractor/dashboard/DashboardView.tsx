@@ -444,7 +444,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
           h.date.startsWith(monthPfx) &&
           (h.country === country || h.country === "United States" || h.country === "Global")
         )
-        .sort((a, b) => a.date.localeCompare(b.date));
+        .sort((a, b) => b.date.localeCompare(a.date));
       setUpcomingHols(upcoming);
 
       // Announcements: the contractor's own country, plus "Offshore", which is
