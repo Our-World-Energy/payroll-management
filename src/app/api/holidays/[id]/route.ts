@@ -9,10 +9,14 @@ function getSupabase() {
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  // Next 15 hands route params to the handler as a Promise; awaiting it is
+  // required, and typing it as a plain object fails the generated route-type
+  // check that `next build` emits into .next/types.
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const sb = getSupabase();
-  const { error } = await sb.from("holidays").delete().eq("id", params.id);
+  const { id } = await params;
+  const { error } = await sb.from("holidays").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }

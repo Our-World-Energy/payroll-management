@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: install · typecheck · lint · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # Prisma requires DATABASE_URL to be *parseable* to generate the client and
+      # to run `next build`; it is never connected to here. A throwaway localhost
+      # URL keeps CI hermetic — no database, no secrets, no network dependency.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      # Next.js telemetry adds noise and a network call to every CI build.
+      NEXT_TELEMETRY_DISABLED: "1"
+      # `next build` prerenders pages that construct a Supabase client at build
+      # time (/admin/reports), and the client constructor throws on a missing or
+      # malformed URL. These placeholders only have to be well-formed — nothing
+      # here is connected to, and prerendering must not reach a live database.
+      # Real credentials would be the wrong call: CI should not hold production
+      # secrets just to compile.
+      NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: placeholder-service-role-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `npm ci` honours the lockfile exactly. Its postinstall runs
+      # `prisma generate`, which every later step depends on: without a freshly
+      # generated client, tsc reports hundreds of phantom errors about model
+      # fields that do exist in schema.prisma.
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run type-check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
