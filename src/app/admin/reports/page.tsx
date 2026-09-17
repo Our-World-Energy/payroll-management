@@ -1,6 +1,7 @@
 import { LuChartColumn } from "react-icons/lu";
 import { fetchAllContractors } from "../contractors/actions";
 import { countryFromLocation } from "@/lib/countryTimeZones";
+import { AttendanceReport } from "./AttendanceReport";
 
 export default async function ReportsPage() {
   const contractors = await fetchAllContractors({ country: "All Countries", status: "Active", rules: [] });
@@ -23,6 +24,8 @@ export default async function ReportsPage() {
           <p className="text-xs md:text-sm text-slate-600 mt-0.5">Workforce analytics and downloadable reports.</p>
         </div>
       </div>
+
+      <AttendanceReport />
 
       {/* Region breakdown */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-8">
