@@ -2,7 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { fetchAllContractors, fetchAllLeaveRequestsAdmin, fetchAllSpecialLeaveGrantsAdmin } from "../contractors/actions";
-import { fetchCutOffTime, fetchProcessTimeAwayEnabled } from "../settings/actions";
+import { fetchCutOffTime, fetchProcessTimeAwayEnabled, fetchTimeAwayImportEnabled } from "../settings/actions";
 
 const TABLE = "contractor_leave_requests";
 
@@ -82,12 +82,15 @@ export async function updateLeaveRequestStatus(id: string, status: "Approved" | 
  * much as the slowest one.
  */
 export async function fetchTimeOffBundle() {
-  const [contractors, requests, grants, savedCutoff, processEnabled] = await Promise.all([
+  const [contractors, requests, grants, savedCutoff, processEnabled, importEnabled] = await Promise.all([
     fetchAllContractors({ country: "All Countries", status: "All Statuses", rules: [] }),
     fetchAllLeaveRequestsAdmin(),
     fetchAllSpecialLeaveGrantsAdmin(),
     fetchCutOffTime(),
     fetchProcessTimeAwayEnabled(),
+    // Added to the bundle rather than fetched on its own: a sixth Server
+    // Action from the client would be a sixth serialised round trip.
+    fetchTimeAwayImportEnabled(),
   ]);
-  return { contractors, requests, grants, savedCutoff, processEnabled };
+  return { contractors, requests, grants, savedCutoff, processEnabled, importEnabled };
 }

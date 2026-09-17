@@ -6,8 +6,8 @@ import {
   LuChevronRight, LuRefreshCw, LuKey, LuCircleCheck, LuCircleX, LuUserCheck, LuSearch,
   LuHeartHandshake, LuBriefcaseBusiness, LuPencil, LuBan, LuUserX,
 } from "react-icons/lu";
-import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, type ContractorStatus, updateUserPages, setUserEnabled } from "./actions";
-import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL } from "@/lib/roles";
+import { fetchUsers, createUser, deleteUser, updateUserRole, resetUserPassword, backfillContractorAccounts, type AppUser, type ContractorStatus, updateUserPages, setUserEnabled, setUsersEnabled, mayAssignAdminRole } from "./actions";
+import { APP_ROLES, type AppRole, ROLE_LABEL, ROLE_OPTION_LABEL, ADMIN_ROLE_GRANTER_EMAIL } from "@/lib/roles";
 import { ACCOUNT_PAGES, ACCOUNT_PAGE_GROUPS } from "@/lib/accountPages";
 
 const INPUT = "w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-teal-500 transition-all";
@@ -112,6 +112,37 @@ function StatCard({ label, value, Icon, tint }: { label: string; value: number; 
   );
 }
 
+/**
+ * Enabled and Disabled in one card rather than two: they are two halves of the
+ * same total, so reading them side by side is the point — and a lone "Disabled:
+ * 0" card would take a slot to say nothing.
+ *
+ * The disabled figure turns red only when there is something to see; zero stays
+ * grey, so an all-enabled workspace doesn't read as a problem.
+ */
+function AccountStatusCard({ enabled, disabled }: { enabled: number; disabled: number }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Account Status</p>
+        <div className="mt-1 flex items-baseline gap-4">
+          <span>
+            <span className="text-2xl font-black text-[#003527]">{enabled}</span>
+            <span className="ml-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600">Enabled</span>
+          </span>
+          <span>
+            <span className={`text-2xl font-black ${disabled > 0 ? "text-red-600" : "text-slate-300"}`}>{disabled}</span>
+            <span className={`ml-1.5 text-[10px] font-bold uppercase tracking-wide ${disabled > 0 ? "text-red-500" : "text-slate-400"}`}>Disabled</span>
+          </span>
+        </div>
+      </div>
+      <div className="size-10 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500">
+        <LuUserCheck size={20} />
+      </div>
+    </div>
+  );
+}
+
 type Modal =
   | { type: "create" }
   | { type: "delete"; user: AppUser }
@@ -130,12 +161,26 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   const [syncing,       setSyncing]       = useState(false);
 
   // Table filters
+  // Which rows the bulk enable/disable applies to. Ids rather than indexes, so
+  // a filter change or a reload can't silently re-point a selection at
+  // different accounts.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<"enable" | "disable" | null>(null);
+  const [bulkResult, setBulkResult] = useState("");
+
+  // Whether this admin may hand out the admin role — only one account can (see
+  // ADMIN_ROLE_GRANTER_EMAIL). Starts false so the option is never briefly
+  // offered to someone who cannot use it; the action refuses it regardless.
+  const [canGrantAdmin, setCanGrantAdmin] = useState(false);
+
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState<"All" | AppRole>("All");
   const [statusFilter, setStatusFilter] = useState<"All" | "Enabled" | "Disabled">("All");
   // "None" covers accounts with no contractor record — the dash in the column.
   const [contractorFilter, setContractorFilter] =
     useState<"All" | ContractorStatus | "None">("All");
+  const [departmentFilter, setDepartmentFilter] = useState("All");
+  const [countryFilter,    setCountryFilter]    = useState("All");
 
   // Create form
   const [newName,     setNewName]     = useState("");
@@ -160,6 +205,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   }
 
   useEffect(() => { load(); }, []);
+  useEffect(() => { mayAssignAdminRole().then(setCanGrantAdmin).catch(() => setCanGrantAdmin(false)); }, []);
 
   async function handleSync() {
     setSyncing(true); setSyncResult(null); setError("");
@@ -248,6 +294,74 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
     });
   }
 
+  function toggleSelected(id: string) {
+    setBulkResult("");
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  /**
+   * Header checkbox. Scoped to the selectable rows currently shown, so "select
+   * all" on a filtered list means those rows and not the other 300 — and
+   * clearing it leaves any selection made under a different filter alone.
+   * Admin rows are never included.
+   */
+  function toggleSelectAllVisible() {
+    setBulkResult("");
+    const visibleIds = selectableUsers.map((u) => u.id);
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const id of visibleIds) {
+        if (allVisibleSelected) next.delete(id); else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function handleBulkEnabled(enabled: boolean) {
+    // Only the accounts that would actually change, so enabling a mixed
+    // selection doesn't re-ban or unban the ones already in that state — the
+    // same rule the single-row save follows.
+    const targets = users.filter((u) => selectedIds.has(u.id) && u.role !== "admin" && u.enabled !== enabled);
+    if (targets.length === 0) {
+      setBulkResult(`Nothing to do — every selected account is already ${enabled ? "enabled" : "disabled"}.`);
+      return;
+    }
+    setBulkBusy(enabled ? "enable" : "disable");
+    setBulkResult("");
+    startTransition(async () => {
+      try {
+        const { updated, failed, skippedSelf, skippedAdmins } = await setUsersEnabled(targets.map((u) => u.id), enabled);
+        const word = enabled ? "enabled" : "disabled";
+        // Named explicitly: silently leaving an account untouched would read as
+        // a bug to whoever selected it.
+        const selfNote = skippedSelf ? " Your own account was left enabled." : "";
+        const adminNote = skippedAdmins > 0
+          ? ` ${skippedAdmins} admin account${skippedAdmins === 1 ? "" : "s"} skipped.`
+          : "";
+        setBulkResult(
+          failed.length === 0
+            ? `${updated} account${updated === 1 ? "" : "s"} ${word}.${adminNote}${selfNote}`
+            // Says how far it got: the rest are already changed, so the reader
+            // needs to know this was partial rather than a no-op.
+            : `${updated} ${word}, ${failed.length} failed — ${failed[0].message}${adminNote}${selfNote}`
+        );
+        setSelectedIds(new Set());
+        // Re-read rather than patch locally, so each row shows what was
+        // actually stored on the account.
+        await load();
+      } catch (e) {
+        setBulkResult(e instanceof Error ? e.message : "Bulk update failed.");
+      } finally {
+        setBulkBusy(null);
+      }
+    });
+  }
+
   function handleResetPassword() {
     if (!resetPw || resetPw.length < 6) { setResetError("Password must be at least 6 characters."); return; }
     if (modal?.type !== "reset") return;
@@ -263,6 +377,14 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
   }
 
   const countByRole = (role: AppRole) => users.filter((u) => u.role === role).length;
+  const enabledCount  = users.filter((u) => u.enabled).length;
+  const disabledCount = users.length - enabledCount;
+
+  // Drawn from the accounts on file rather than a fixed list, so a new team or
+  // country appears here as soon as one contractor carries it. Blanks are
+  // dropped: an admin-only login has no team or country to offer.
+  const departmentOptions = Array.from(new Set(users.map((u) => u.department).filter(Boolean))).sort();
+  const countryOptions    = Array.from(new Set(users.map((u) => u.country).filter(Boolean))).sort();
 
   // Sorted alphabetically by the name actually shown in the row, falling back to
   // the email for accounts with no name — otherwise nameless rows would sort
@@ -276,11 +398,20 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
         || (contractorFilter === "None"
               ? u.contractorStatus === null
               : u.contractorStatus === contractorFilter)) &&
+      (departmentFilter === "All" || u.department === departmentFilter) &&
+      (countryFilter    === "All" || u.country    === countryFilter) &&
       (u.fullName || u.email).toLowerCase().includes(searchTerm.trim().toLowerCase())
     )
     .sort((a, b) =>
       (a.fullName?.trim() || a.email).localeCompare(b.fullName?.trim() || b.email, undefined, { sensitivity: "base" })
     );
+
+  // Admin accounts are not bulk-selectable — see setUsersEnabled. Select-all
+  // and the header's tick state both work off this list rather than every
+  // shown row, so "all selected" means what the action will actually change.
+  const selectableUsers = filteredUsers.filter((u) => u.role !== "admin");
+  const allVisibleSelected = selectableUsers.length > 0 && selectableUsers.every((u) => selectedIds.has(u.id));
+  const someVisibleSelected = selectableUsers.some((u) => selectedIds.has(u.id));
 
   return (
     <div className={embedded ? "max-w-full overflow-x-hidden" : "p-4 sm:p-6 md:p-8 max-w-full overflow-x-hidden"}>
@@ -336,7 +467,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
         <StatCard label="Total Users" value={users.length} Icon={LuUsers} tint="bg-teal-50 text-teal-600" />
         {APP_ROLES.map((role) => (
           <StatCard
@@ -347,6 +478,7 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
             tint={ROLE_BADGE[role].tint}
           />
         ))}
+        <AccountStatusCard enabled={enabledCount} disabled={disabledCount} />
       </div>
 
       {error && (
@@ -407,11 +539,29 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
           <option value="Dismissed">Dismissed</option>
           <option value="None">No contractor record</option>
         </select>
-        {(searchTerm !== "" || roleFilter !== "All" || statusFilter !== "All" || contractorFilter !== "All") && (
+        <select
+          value={departmentFilter}
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Assigned Teams</option>
+          {departmentOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <select
+          value={countryFilter}
+          onChange={(e) => setCountryFilter(e.target.value)}
+          className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
+        >
+          <option value="All">All Countries</option>
+          {countryOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {(searchTerm !== "" || roleFilter !== "All" || statusFilter !== "All" || contractorFilter !== "All"
+          || departmentFilter !== "All" || countryFilter !== "All") && (
           <button
             onClick={() => {
               setSearchTerm(""); setRoleFilter("All");
               setStatusFilter("All"); setContractorFilter("All");
+              setDepartmentFilter("All"); setCountryFilter("All");
             }}
             className="text-sm font-semibold text-teal-600 hover:text-teal-700"
           >
@@ -419,6 +569,44 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
           </button>
         )}
       </div>
+
+      {/* Bulk bar — only once something is selected, so it never takes up
+          room while nobody is using it. */}
+      {selectedIds.size > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2.5">
+          <span className="text-sm font-semibold text-teal-800">
+            {selectedIds.size} account{selectedIds.size === 1 ? "" : "s"} selected
+          </span>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleBulkEnabled(true)}
+              disabled={bulkBusy !== null || isPending}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkBusy === "enable" ? <LuLoader size={13} className="animate-spin" /> : <LuUserCheck size={13} strokeWidth={2} />}
+              {bulkBusy === "enable" ? "Enabling…" : "Enable"}
+            </button>
+            <button
+              onClick={() => handleBulkEnabled(false)}
+              disabled={bulkBusy !== null || isPending}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-red-700 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {bulkBusy === "disable" ? <LuLoader size={13} className="animate-spin" /> : <LuUserX size={13} strokeWidth={2} />}
+              {bulkBusy === "disable" ? "Disabling…" : "Disable"}
+            </button>
+            <button
+              onClick={() => { setSelectedIds(new Set()); setBulkResult(""); }}
+              disabled={bulkBusy !== null}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 disabled:opacity-50"
+            >
+              Clear selection
+            </button>
+          </div>
+        </div>
+      )}
+      {bulkResult && (
+        <p className="mb-3 text-xs font-medium text-slate-500">{bulkResult}</p>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -447,7 +635,21 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                         : ""
                     }`}
                   >
-                    {h}
+                    {h === "Full Name" ? (
+                      <span className="flex items-center gap-3">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          ref={(el) => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected; }}
+                          onChange={toggleSelectAllVisible}
+                          disabled={loading || selectableUsers.length === 0}
+                          aria-label="Select all shown accounts"
+                          title="Select all shown accounts. Admin accounts are excluded."
+                          className="size-3.5 shrink-0 cursor-pointer accent-teal-600 disabled:cursor-not-allowed"
+                        />
+                        {h}
+                      </span>
+                    ) : h}
                   </th>
                 ))}
               </tr>
@@ -472,6 +674,20 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                 <tr key={user.id} className="hover:bg-slate-50 transition-colors group">
                   <td className={`sticky left-0 z-10 ${FROZEN_NAME_W} px-5 py-4 bg-white group-hover:bg-slate-50 transition-colors shadow-[1px_0_0_0_#e2e8f0]`}>
                     <div className="flex items-center gap-3">
+                      {/* Admins are not bulk-selectable. A disabled checkbox
+                          rather than a blank, so the column stays aligned and
+                          the reason is available on hover. */}
+                      <input
+                        type="checkbox"
+                        checked={user.role !== "admin" && selectedIds.has(user.id)}
+                        onChange={() => toggleSelected(user.id)}
+                        disabled={bulkBusy !== null || user.role === "admin"}
+                        aria-label={user.role === "admin"
+                          ? `${user.fullName || user.email} — admin accounts cannot be changed in bulk`
+                          : `Select ${user.fullName || user.email}`}
+                        title={user.role === "admin" ? "Admin accounts cannot be enabled or disabled in bulk" : undefined}
+                        className="size-3.5 shrink-0 cursor-pointer accent-teal-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      />
                       <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${avatarColor(user.id)}`}>
                         {initials(user.fullName, user.email)}
                       </div>
@@ -582,9 +798,11 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Role</label>
                 <select className={INPUT + " cursor-pointer"} value={newRole} onChange={(e) => setNewRole(e.target.value as AppRole)}>
-                  {APP_ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
-                  ))}
+                  {APP_ROLES
+                    .filter((role) => role !== "admin" || canGrantAdmin)
+                    .map((role) => (
+                      <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                    ))}
                 </select>
               </div>
               {formError && <p className="text-xs text-red-500">{formError}</p>}
@@ -771,10 +989,17 @@ export function UsersView({ embedded }: { embedded?: boolean }) {
                   value={modal.newRole}
                   onChange={(e) => setModal({ ...modal, newRole: e.target.value as AppRole })}
                 >
-                  {APP_ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
-                  ))}
+                  {APP_ROLES
+                    .filter((role) => role !== "admin" || canGrantAdmin || modal.user.role === "admin")
+                    .map((role) => (
+                      <option key={role} value={role}>{ROLE_OPTION_LABEL[role]}</option>
+                    ))}
                 </select>
+                {!canGrantAdmin && (
+                  <p className="text-[11px] text-slate-400">
+                    Only {ADMIN_ROLE_GRANTER_EMAIL} can assign the Admin role.
+                  </p>
+                )}
               </div>
             </div>
             <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50 rounded-b-2xl">

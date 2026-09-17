@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner";
 import type { Contractor, FilterRule } from "./types";
 import { fmtBalance, calculatePtoBalance, calculateSickLeaveBalance, cutoffFromSaved, type CutoffDate } from "@/lib/timeOffBalances";
-import { fetchCutOffTime } from "../settings/actions";
+import { fetchCutOffTime, fetchContractorImportEnabled } from "../settings/actions";
 import { AddContractorModal, PAY_CATEGORIES } from "@/components/AddContractorModal";
 import { ImportContractorsModal } from "@/components/ImportContractorsModal";
 import { FilterModal } from "@/components/FilterModal";
@@ -164,6 +164,10 @@ export default function ContractorsPage() {
 
   const [showAdd, setShowAdd]         = useState(false);
   const [showImport, setShowImport]   = useState(false);
+  // Settings → Import Settings → Contractor Import. Starts true so the button
+  // is not briefly dead on every load; the fetch corrects it, and a read
+  // failure leaves it available rather than silently withdrawing it.
+  const [importEnabled, setImportEnabled] = useState(true);
   const [editTarget, setEditTarget]   = useState<Contractor | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Contractor | null>(null);
   const [deleting, setDeleting]       = useState(false);
@@ -212,6 +216,12 @@ export default function ContractorsPage() {
     if (salaryLoading) return;
     loadPage(page, pageSize, country, status, activeRules, nameSearch, payCategory);
   }, [page, pageSize, country, status, activeRules, nameSearch, payCategory, loadPage, salaryLoading]);
+
+  // Read once on mount: the switch changes rarely, and a failure leaves the
+  // button available rather than withdrawing a control nobody turned off.
+  useEffect(() => {
+    fetchContractorImportEnabled().then(setImportEnabled).catch(() => setImportEnabled(true));
+  }, []);
 
   // Unlocking (or locking) salary changes what the server returns for the
   // same query, so the cached page is stale — force a re-fetch.
@@ -426,7 +436,9 @@ export default function ContractorsPage() {
             </button>
             <button
               onClick={() => setShowImport(true)}
-              className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm"
+              disabled={!importEnabled}
+              title={importEnabled ? undefined : "Contractor Import is turned off in Settings → Import Settings"}
+              className="inline-flex items-center justify-center gap-1.5 w-28 sm:w-36 py-1.5 bg-white border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white"
             >
               <LuUpload size={14} strokeWidth={2} />
               Import

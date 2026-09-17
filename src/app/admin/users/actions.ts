@@ -1,8 +1,10 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { normalizeAccountPages, defaultAccountPages, accountPagesAreDefault } from "@/lib/accountPages";
-import { type AppRole, normalizeRole } from "@/lib/roles";
+import { type AppRole, normalizeRole, canGrantAdminRole, ADMIN_ROLE_GRANTER_EMAIL } from "@/lib/roles";
+import { countryFromLocation } from "@/lib/countryTimeZones";
 
 function getSupabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -30,13 +32,24 @@ export type AppUser = {
    * a contractor who is on file and dismissed.
    */
   contractorStatus: ContractorStatus | null;
+  /**
+   * Assigned Team and country, from the contractor record. Both are "" for an
+   * account with none (admin-only logins) — they have no team or country to
+   * filter by, rather than an unknown one.
+   *
+   * Country is derived through countryFromLocation, the same mapping every
+   * other view uses, so "Philippines" means the same thing here as it does on
+   * Attendance and Payroll.
+   */
+  department: string;
+  country: string;
 };
 
 export type ContractorStatus = "Active" | "Dismissed";
 
 function toAppUser(
   u: Record<string, unknown>,
-  profile?: { fullName: string; status: string },
+  profile?: { fullName: string; status: string; department: string; location: string },
 ): AppUser {
   const metadata = u.user_metadata as Record<string, unknown> | undefined;
   const fullName = profile?.fullName ?? "";
@@ -60,6 +73,8 @@ function toAppUser(
     contractorStatus: profile == null
       ? null
       : profile.status === "Dismissed" ? "Dismissed" : "Active",
+    department: profile?.department ?? "",
+    country: profile?.location ? countryFromLocation(profile.location) : "",
   };
 }
 
@@ -88,7 +103,7 @@ export async function fetchUsers(): Promise<AppUser[]> {
   const sb = getSupabase();
   const [authUsers, contractorsRes] = await Promise.all([
     listAllAuthUsers(sb),
-    sb.from("contractor_profiles").select("email, status, fullName"),
+    sb.from("contractor_profiles").select("email, status, fullName, department, location"),
   ]);
 
   // Every account is listed, dismissed contractors included — the Contractor
@@ -99,7 +114,12 @@ export async function fetchUsers(): Promise<AppUser[]> {
   const profileByEmail = new Map(
     (contractorsRes.data ?? []).map((c) => [
       String(c.email ?? "").trim().toLowerCase(),
-      { status: String(c.status ?? ""), fullName: String(c.fullName ?? "") },
+      {
+        status: String(c.status ?? ""),
+        fullName: String(c.fullName ?? ""),
+        department: String(c.department ?? ""),
+        location: String(c.location ?? ""),
+      },
     ])
   );
 
@@ -108,12 +128,38 @@ export async function fetchUsers(): Promise<AppUser[]> {
   );
 }
 
+/**
+ * Refuses to hand out the admin role unless the caller is the one account
+ * allowed to (see ADMIN_ROLE_GRANTER_EMAIL). Enforced server-side because
+ * these actions run with the service-role key — the UI hiding the option is a
+ * convenience, not the rule.
+ *
+ * The caller comes from the session rather than an argument, so it cannot be
+ * claimed by whoever is calling.
+ */
+async function assertMayAssignRole(role: AppRole): Promise<void> {
+  if (role !== "admin") return;
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  if (!canGrantAdminRole(user?.email)) {
+    throw new Error(`Only ${ADMIN_ROLE_GRANTER_EMAIL} can assign the Admin role.`);
+  }
+}
+
+/** Whether the signed-in caller may assign the admin role — drives the UI. */
+export async function mayAssignAdminRole(): Promise<boolean> {
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  return canGrantAdminRole(user?.email);
+}
+
 export async function createUser(
   email: string,
   password: string,
   role: AppRole,
   fullName = "",
 ): Promise<AppUser> {
+  await assertMayAssignRole(role);
   const sb = getSupabase();
   const name = fullName.trim();
   const { data, error } = await sb.auth.admin.createUser({
@@ -136,6 +182,7 @@ export async function deleteUser(id: string): Promise<void> {
 }
 
 export async function updateUserRole(id: string, role: AppRole): Promise<void> {
+  await assertMayAssignRole(role);
   const sb = getSupabase();
   // Merge rather than replace: updateUserById overwrites user_metadata whole,
   // so writing { role } alone dropped fullName and (now) the granted pages.
@@ -235,4 +282,78 @@ export async function setUserEnabled(id: string, enabled: boolean): Promise<void
     ban_duration: enabled ? "none" : "876000h", // ~100 years
   });
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Enable or disable several accounts in one call.
+ *
+ * One Server Action rather than the client calling setUserEnabled per row:
+ * Next serialises Server Action requests from a client, so N rows would mean N
+ * round trips each carrying the page payload. The loop here is sequential on
+ * purpose — these are GoTrue admin writes, and firing a few hundred at once
+ * invites rate limiting for no gain, since the round trip was the cost.
+ *
+ * Partial success is reported rather than thrown: with 300 accounts selected,
+ * one failure must not leave the caller unable to tell which of the others
+ * went through.
+ *
+ * Admin accounts are never touched in bulk, enabling or disabling. They are
+ * the accounts that can restore any of the others, so a sweep across a
+ * filtered list is the wrong instrument for them — one at a time through the
+ * account editor still works, where it is a deliberate act on a named person.
+ * A "select all" then Disable would otherwise lock every admin out of the
+ * console at once, with no way back in through the UI.
+ *
+ * The caller's own account is never disabled either. That is redundant while
+ * only admins reach this page, but it holds for any other role given access to
+ * it later.
+ *
+ * Both rules are enforced here rather than by hiding a checkbox: this runs with
+ * the service-role key, so the client's list of ids is a request, not a fact.
+ * Roles are read from GoTrue rather than taken from the caller for the same
+ * reason.
+ */
+export async function setUsersEnabled(
+  ids: string[],
+  enabled: boolean
+): Promise<{
+  updated: number;
+  failed: { id: string; message: string }[];
+  skippedSelf: boolean;
+  skippedAdmins: number;
+}> {
+  const sb = getSupabase();
+  const failed: { id: string; message: string }[] = [];
+  let updated = 0;
+
+  const session = await createSessionClient();
+  const { data: { user } } = await session.auth.getUser();
+  const selfId = user?.id ?? null;
+
+  // One paged listing (2 requests for ~360 accounts) rather than a
+  // getUserById per id, which would be one round trip per selected row.
+  const roleById = new Map(
+    (await listAllAuthUsers(sb)).map((u) => [
+      String(u.id ?? ""),
+      normalizeRole((u.user_metadata as Record<string, unknown> | undefined)?.role),
+    ])
+  );
+
+  const requested = new Set(ids);
+  const adminIds = [...requested].filter((id) => roleById.get(id) === "admin");
+  const targets = [...requested].filter(
+    (id) => roleById.get(id) !== "admin" && !(!enabled && id === selfId)
+  );
+  const skippedAdmins = adminIds.length;
+  const skippedSelf = !enabled && selfId != null && requested.has(selfId) && roleById.get(selfId) !== "admin";
+
+  for (const id of targets) {
+    const { error } = await sb.auth.admin.updateUserById(id, {
+      ban_duration: enabled ? "none" : "876000h", // ~100 years, as setUserEnabled
+    });
+    if (error) failed.push({ id, message: error.message });
+    else updated++;
+  }
+
+  return { updated, failed, skippedSelf, skippedAdmins };
 }

@@ -13,6 +13,8 @@ import {
   addRole, removeRole,
   fetchCutOffTime, saveCutOffTime,
   fetchProcessTimeAwayEnabled, saveProcessTimeAwayEnabled,
+  fetchContractorImportEnabled, saveContractorImportEnabled,
+  fetchTimeAwayImportEnabled, saveTimeAwayImportEnabled,
   fetchTimeAwayRequestsEnabled, saveTimeAwayRequestsEnabled,
   fetchAlerts, addAlert, updateAlert, removeAlert, type AdminAlert,
 } from "./actions";
@@ -69,6 +71,7 @@ export default function SettingsPage() {
     departments: false,
     currencies: false,
     timeOff: false,
+    imports: false,
   });
   function toggleSection(key: string) {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -111,6 +114,61 @@ export default function SettingsPage() {
     if (!res.ok) {
       setTimeAwayEnabled(prev);
       setTimeAwayError(res.error ?? "Could not save the setting.");
+    }
+  }
+
+  // ── Enable Contractor Import ──────────────────────────────────────────────
+  // Controls the Import button on Contractor Details. Same
+  // save-on-toggle-and-revert-on-failure handling as the switches below.
+  const [importEnabled, setImportEnabled] = useState(true);
+  const [importLoaded, setImportLoaded] = useState(false);
+  const [importSaving, setImportSaving] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchContractorImportEnabled()
+      .then(setImportEnabled)
+      .catch(() => setImportEnabled(true))
+      .finally(() => setImportLoaded(true));
+  }, []);
+
+  async function handleToggleImport(next: boolean) {
+    const prev = importEnabled;
+    setImportEnabled(next);
+    setImportSaving(true);
+    setImportError(null);
+    const res = await saveContractorImportEnabled(next);
+    setImportSaving(false);
+    if (!res.ok) {
+      setImportEnabled(prev);
+      setImportError(res.error ?? "Could not save the setting.");
+    }
+  }
+
+  // ── Time Away Import ────────────────────────────────────────────
+  // Controls the Time Away / SICK Used Import button in Time Away Management.
+  const [taImportEnabled, setTaImportEnabled] = useState(true);
+  const [taImportLoaded, setTaImportLoaded] = useState(false);
+  const [taImportSaving, setTaImportSaving] = useState(false);
+  const [taImportError, setTaImportError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchTimeAwayImportEnabled()
+      .then(setTaImportEnabled)
+      .catch(() => setTaImportEnabled(true))
+      .finally(() => setTaImportLoaded(true));
+  }, []);
+
+  async function handleToggleTaImport(next: boolean) {
+    const prev = taImportEnabled;
+    setTaImportEnabled(next);
+    setTaImportSaving(true);
+    setTaImportError(null);
+    const res = await saveTimeAwayImportEnabled(next);
+    setTaImportSaving(false);
+    if (!res.ok) {
+      setTaImportEnabled(prev);
+      setTaImportError(res.error ?? "Could not save the setting.");
     }
   }
 
@@ -829,6 +887,99 @@ export default function SettingsPage() {
                   </button>
                 </span>
               ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Import Settings */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <button
+          onClick={() => toggleSection("imports")}
+          className="w-full px-6 py-4 border-b border-slate-100 flex items-center gap-2 text-left"
+        >
+          {openSections.imports ? <LuChevronUp size={15} className="text-slate-400 shrink-0" /> : <LuChevronDown size={15} className="text-slate-400 shrink-0" />}
+          <h4 className="text-base font-semibold text-[#003527]">Import Settings</h4>
+        </button>
+        {openSections.imports && (
+          <div className="px-6 py-5">
+            {/* Contractor Import — global switch for the Import button on
+                Contractor Details. Disabling blocks bringing contractors in
+                from a file; nothing else on that page is affected. */}
+            <div className="mb-5 pb-5 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-semibold text-[#003527]">Contractor Import</h5>
+                  <p className="text-xs text-slate-400 mt-0.5 max-w-lg">
+                    When off, the Import button on Contractor Details is disabled and no contractors can be
+                    brought in from a file. Adding, editing and exporting contractors are unaffected.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={importEnabled}
+                  aria-label="Contractor Import"
+                  disabled={!importLoaded || importSaving}
+                  onClick={() => handleToggleImport(!importEnabled)}
+                  className={`relative shrink-0 mt-0.5 h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${importEnabled ? "bg-emerald-600" : "bg-slate-300"}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${importEnabled ? "left-[1.375rem]" : "left-0.5"}`} />
+                </button>
+              </div>
+              <p className="mt-2 text-xs font-semibold">
+                {!importLoaded ? (
+                  <span className="text-slate-400">Loading…</span>
+                ) : importSaving ? (
+                  <span className="text-slate-400">Saving…</span>
+                ) : importError ? (
+                  <span className="text-red-600">{importError}</span>
+                ) : importEnabled ? (
+                  <span className="text-emerald-600">Enabled — contractors can be imported from a file.</span>
+                ) : (
+                  <span className="text-amber-700">Disabled — the Import button on Contractor Details is turned off.</span>
+                )}
+              </p>
+            </div>
+
+            {/* Time Away Import — the Used Import button in Time Away
+                Management. Balances, overrides and approvals are unaffected;
+                only bringing used hours in from a file is blocked. */}
+            <div>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h5 className="text-sm font-semibold text-[#003527]">Time Away Import</h5>
+                  <p className="text-xs text-slate-400 mt-0.5 max-w-lg">
+                    When off, the Time Away / SICK Used Import button in Time Away Management is disabled, so no
+                    used-hours baseline can be brought in from a file. Balances, overrides and approvals are
+                    unaffected.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={taImportEnabled}
+                  aria-label="Time Away Import"
+                  disabled={!taImportLoaded || taImportSaving}
+                  onClick={() => handleToggleTaImport(!taImportEnabled)}
+                  className={`relative shrink-0 mt-0.5 h-6 w-11 rounded-full transition-colors disabled:opacity-50 ${taImportEnabled ? "bg-emerald-600" : "bg-slate-300"}`}
+                >
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${taImportEnabled ? "left-[1.375rem]" : "left-0.5"}`} />
+                </button>
+              </div>
+              <p className="mt-2 text-xs font-semibold">
+                {!taImportLoaded ? (
+                  <span className="text-slate-400">Loading…</span>
+                ) : taImportSaving ? (
+                  <span className="text-slate-400">Saving…</span>
+                ) : taImportError ? (
+                  <span className="text-red-600">{taImportError}</span>
+                ) : taImportEnabled ? (
+                  <span className="text-emerald-600">Enabled — used hours can be imported from a file.</span>
+                ) : (
+                  <span className="text-amber-700">Disabled — the Used Import button in Time Away Management is turned off.</span>
+                )}
+              </p>
             </div>
           </div>
         )}

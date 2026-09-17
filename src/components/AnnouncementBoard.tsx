@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { LuMegaphone, LuPlus, LuX, LuChevronDown, LuPencil, LuLoader, LuUpload, LuCircleAlert } from "react-icons/lu";
+import { useAdminTheme } from "@/components/AdminThemeContext";
 import {
   fetchAnnouncements, createAnnouncement, updateAnnouncement, deleteAnnouncement,
   uploadAnnouncementImage, removeAnnouncementImage,
@@ -65,6 +66,7 @@ function formatAnnouncementDate(iso: string) {
 }
 
 export function AnnouncementBoard() {
+  const { dark } = useAdminTheme();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -208,6 +210,34 @@ export function AnnouncementBoard() {
       setDeletingId(null);
     }
   }
+
+  /**
+   * Dark-mode colours for the "Banner" (Global) announcement.
+   *
+   * Its card is bg-purple-50/60, and globals.css has dark overrides for the
+   * slate/emerald/teal palettes but none for purple — so in dark mode the card
+   * stayed light while every text rule around it lightened: text-[#003527]
+   * became teal-200 and text-slate-500 became white-ish, giving light text on
+   * a light card.
+   *
+   * Fixed by giving the card a deeper violet and setting the text dark to
+   * match, using arbitrary colour values that the class-name-based dark rules
+   * don't target, rather than another layer of !important overrides fighting
+   * them.
+   *
+   * violet-300 is as dark as the card goes while dark text still clears WCAG
+   * AA on it — measured 8.25:1 for the title and 5.93:1 for the body. A step
+   * further (violet-400) drops the body to 3.30:1, at which point the text
+   * would have to flip light and the banner would stop standing out from the
+   * page at all, which is what made it unreadable to begin with.
+   */
+  const bannerCardCls = dark
+    ? "bg-[#c4b5fd] border-[#a78bfa]"
+    : "bg-purple-50/60 border-purple-100";
+  const bannerTitleCls = dark ? "text-[#2e1065]" : "text-[#003527]";
+  const bannerBodyCls = dark ? "text-[#4c1d95]" : "text-slate-500";
+  const bannerLiveCls = dark ? "text-[#065f46] bg-[#a7f3d0]" : "text-emerald-700 bg-emerald-50";
+  const bannerScheduledCls = dark ? "text-[#78350f] bg-[#fde68a]" : "text-amber-700 bg-amber-50";
 
   const filtered =
     filterLocation === ANY_LOCATION
@@ -463,21 +493,21 @@ export function AnnouncementBoard() {
             const isGlobal = a.location === GLOBAL;
             const isLive = a.date <= today;
             return (
-            <div key={a.id} className={`p-3 rounded-lg border flex gap-3 ${isGlobal ? "bg-purple-50/60 border-purple-100" : "bg-slate-50 border-slate-100"}`}>
+            <div key={a.id} className={`p-3 rounded-lg border flex gap-3 ${isGlobal ? bannerCardCls : "bg-slate-50 border-slate-100"}`}>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                  <span className="text-sm font-semibold text-[#003527]">{a.title}</span>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${isGlobal ? "bg-purple-100 text-purple-700 border-purple-200" : "bg-teal-50 text-teal-700 border-teal-100"}`}>
+                  <span className={`text-sm font-semibold ${isGlobal ? bannerTitleCls : "text-[#003527]"}`}>{a.title}</span>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${isGlobal ? (dark ? "bg-[#ede9fe] text-[#4c1d95] border-[#8b5cf6]" : "bg-purple-100 text-purple-700 border-purple-200") : "bg-teal-50 text-teal-700 border-teal-100"}`}>
                     {locationLabel(a.location)}
                   </span>
                   {/* Only Global is date-gated, so only Global gets a live/scheduled state. */}
                   {isGlobal && (
-                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${isLive ? "text-emerald-700 bg-emerald-50" : "text-amber-700 bg-amber-50"}`}>
+                    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${isLive ? bannerLiveCls : bannerScheduledCls}`}>
                       {isLive ? `Live since ${formatAnnouncementDate(a.date)}` : `Scheduled for ${formatAnnouncementDate(a.date)}`}
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed">{a.body}</p>
+                <p className={`text-xs leading-relaxed ${isGlobal ? bannerBodyCls : "text-slate-500"}`}>{a.body}</p>
                 {!isGlobal && <p className="text-xs text-slate-400 mt-1">{formatAnnouncementDate(a.date)}</p>}
               </div>
               <div className="shrink-0 flex items-center gap-1 self-start">
