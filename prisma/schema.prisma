@@ -1,9 +1,12 @@
 // Prisma schema — Our World Energy Contractor Suite
 
 generator client {
-  provider      = "prisma-client-js"
-  // "native" for local; rhel-openssl-3.0.x for Netlify/AWS Lambda functions
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  provider = "prisma-client-js"
+  // Cloudflare Workers cannot load a native Rust query-engine binary, so the
+  // client is generated in "client" (Rust-free) mode and talks to Postgres
+  // through a driver adapter instead — see src/lib/prisma.ts. Generally
+  // available since Prisma 6.16; no preview feature flag needed.
+  engineType = "client"
 }
 
 datasource db {

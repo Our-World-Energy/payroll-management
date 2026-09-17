@@ -1,0 +1,56 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "owe-payroll",
+  "account_id": "5e99f0578b4db40e6c3f9c86ceb6ad4d",
+
+  // Custom entrypoint rather than .open-next/worker.js directly: it re-exports
+  // OpenNext's fetch handler and adds the scheduled() handler for the two cron
+  // jobs that used to live in vercel.json. See worker.ts.
+  "main": "./worker.ts",
+
+  "compatibility_date": "2026-09-17",
+  // Required by OpenNext, and by node:crypto — salaryCrypto.ts needs
+  // createCipheriv/aes-256-gcm, which nodejs_compat provides.
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  // Hyperdrive pools and caches connections to the Supabase Postgres database.
+  // Point it at Supabase's DIRECT connection (port 5432), not the Supavisor
+  // pooler on 6543 — Hyperdrive does the pooling itself.
+  // Config "owe-payroll-supabase" → db.usmqpeutnpzmtonnxucg.supabase.co:5432
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "af95137bcb554189bcaf47068b5ddf1e"
+    }
+  ],
+
+  // custom_domain: true makes Cloudflare create and manage the DNS record for
+  // team.ourworldenergy.com in the ourworldenergy.com zone.
+  "routes": [
+    {
+      "pattern": "team.ourworldenergy.com",
+      "custom_domain": true
+    }
+  ],
+
+  "triggers": {
+    // UTC, carried over verbatim from vercel.json.
+    "crons": [
+      "0 8 * * *", // worksnap-sync
+      "0 9 * * *" // leave-balance-reset
+    ]
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    "NODE_ENV": "production"
+  }
+}

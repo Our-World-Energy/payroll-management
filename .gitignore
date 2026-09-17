@@ -30,6 +30,12 @@ yarn-error.log*
 .env*
 !.env.example
 
+# cloudflare (opennext build output + wrangler local state)
+/.open-next/
+/.wrangler/
+.dev.vars
+cloudflare-env.d.ts
+
 # vercel
 .vercel
 
