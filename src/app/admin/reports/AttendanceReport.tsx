@@ -5,7 +5,6 @@ import { LuCalendarDays, LuDownload, LuLoader } from "react-icons/lu";
 import { recentWeeks, weekLabel, addDaysIso } from "@/lib/weekUtils";
 import { PAY_CATEGORIES } from "@/components/AddContractorModal";
 import { fetchAttendanceReport, fetchReportDepartments, type AttendanceReportDay } from "./actions";
-import { MAX_REPORT_WEEKS } from "./reportLimits";
 
 const DAY_HEADERS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 
@@ -41,8 +40,7 @@ const SELECT =
 export function AttendanceReport() {
   // Enough history to cover a quarter without an unbounded list.
   const weeks = recentWeeks(26);
-  const [fromWeek, setFromWeek] = useState(weeks[3] ?? weeks[0]);
-  const [toWeek, setToWeek] = useState(weeks[0]);
+  const [week, setWeek] = useState(weeks[0]);
   const [payCategory, setPayCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [departments, setDepartments] = useState<string[]>([]);
@@ -59,9 +57,9 @@ export function AttendanceReport() {
     setBusy(true);
     setMessage("");
     try {
-      const { rows, error } = await fetchAttendanceReport({ fromWeek, toWeek, payCategory, department });
+      const { rows, error } = await fetchAttendanceReport({ week, payCategory, department });
       if (error) { setMessage(error); return; }
-      if (rows.length === 0) { setMessage("No attendance found for that range and filters."); return; }
+      if (rows.length === 0) { setMessage("No attendance found for that week and filters."); return; }
 
       const headers = [
         "Week", "Name", "Contractor ID", "Email", "Pay Category", "Assigned Team", "Country",
@@ -75,7 +73,7 @@ export function AttendanceReport() {
           return [
             // The week's own Sun-Sat span, so a row says which days its seven
             // columns are without the reader counting from a single date.
-            `${r.weekStart} to ${addDaysIso(r.weekStart, 6)}`,
+            `${r.weekStart} to ${r.weekEnd}`,
             r.name, r.contractorId, r.email, r.payCategory, r.department, r.country,
             ...r.days.map(dayCell),
             (totalMinutes / 60).toFixed(2),
@@ -88,7 +86,7 @@ export function AttendanceReport() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `attendance-report_${fromWeek}_to_${addDaysIso(toWeek, 6)}.csv`;
+      a.download = `attendance-report_${week}_to_${addDaysIso(week, 6)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
       setMessage(`Exported ${rows.length} row${rows.length === 1 ? "" : "s"}.`);
@@ -106,8 +104,8 @@ export function AttendanceReport() {
         <div>
           <h4 className="text-lg font-semibold text-[#003527]">Attendance Report</h4>
           <p className="text-xs text-slate-500 mt-0.5">
-            Daily hours per contractor, one row per week, Sunday to Saturday. Time Away and holidays are marked on
-            the day they fall.
+            Daily hours per contractor for one week, Sunday to Saturday. Time Away and holidays are marked on the
+            day they fall.
           </p>
         </div>
       </div>
@@ -115,14 +113,8 @@ export function AttendanceReport() {
       <div className="px-6 py-5">
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">From Week</span>
-            <select className={SELECT} value={fromWeek} onChange={(e) => setFromWeek(e.target.value)}>
-              {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">To Week</span>
-            <select className={SELECT} value={toWeek} onChange={(e) => setToWeek(e.target.value)}>
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Week</span>
+            <select className={SELECT} value={week} onChange={(e) => setWeek(e.target.value)}>
               {weeks.map((w) => <option key={w} value={w}>{weekLabel(w)}</option>)}
             </select>
           </label>
@@ -155,7 +147,6 @@ export function AttendanceReport() {
         <p className="mt-3 text-[11px] text-slate-400">
           Hours are the Evaluated Time each day was reviewed at; a week nobody has reviewed yet falls back to the
           raw Worksnap total. A day carrying both work and leave shows the hours with the reason beside them.
-          Ranges are capped at {MAX_REPORT_WEEKS} weeks.
         </p>
       </div>
     </div>

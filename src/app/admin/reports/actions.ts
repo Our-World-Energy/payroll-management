@@ -4,18 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { countryFromLocation } from "@/lib/countryTimeZones";
 import { datesBetween, addDaysIso, sundayOf } from "@/lib/weekUtils";
 import { isPtoLeaveType } from "@/lib/timeOffBalances";
-import { MAX_REPORT_WEEKS } from "./reportLimits";
 
 /**
- * Data for the Attendance Report: one row per contractor per week, carrying the
- * seven Sun→Sat day cells.
+ * Data for the Attendance Report: one row per contractor for a single Sun→Sat
+ * week, carrying the seven day cells.
  *
  * Prisma rather than Supabase REST, unlike most actions here: REST caps a
  * response at 1,000 rows, and attendance_day_status alone runs to ~2,500 rows
- * for a single week across 358 contractors. The reads are also deliberately
- * whole-range rather than per-week — one query per table for the entire span,
- * grouped in memory, instead of five queries per week on a pooled connection
- * that barely overlaps concurrent calls.
+ * for one week across 358 contractors.
  */
 
 export type AttendanceReportDay = {
@@ -32,6 +28,7 @@ export type AttendanceReportDay = {
 
 export type AttendanceReportRow = {
   weekStart: string;
+  weekEnd: string;
   name: string;
   contractorId: string;
   email: string;
@@ -43,18 +40,15 @@ export type AttendanceReportRow = {
 
 export type AttendanceReportResult = {
   rows: AttendanceReportRow[];
-  weeks: string[];
-  /** Departments and categories present in the data, for the filter lists. */
-  departments: string[];
   error?: string;
 };
 
 /**
  * Just the Assigned Team list, for the filter dropdown.
  *
- * Its own action because the report itself reads five tables: asking it for an
- * empty range on mount, purely to get this list, ran four queries whose
- * results were thrown away.
+ * Its own action because the report itself reads five tables: asking it for a
+ * throwaway week on mount, purely to get this list, ran four queries whose
+ * results were discarded.
  */
 export async function fetchReportDepartments(): Promise<string[]> {
   const rows = await prisma.contractorProfile.findMany({
@@ -82,30 +76,16 @@ function isRestDay(date: string, restDaysStr: string): boolean {
 }
 
 export async function fetchAttendanceReport(params: {
-  fromWeek: string;
-  toWeek: string;
+  week: string;
   payCategory: string;
   department: string;
 }): Promise<AttendanceReportResult> {
-  const fromWeek = sundayOf(params.fromWeek);
-  const toWeek = sundayOf(params.toWeek);
-  if (!fromWeek || !toWeek || fromWeek > toWeek) {
-    return { rows: [], weeks: [], departments: [], error: "Pick a start week on or before the end week." };
-  }
-
-  // Every Sunday in the span, inclusive.
-  const weeks: string[] = [];
-  for (let w = fromWeek; w <= toWeek; w = addDaysIso(w, 7)) {
-    weeks.push(w);
-    if (weeks.length > MAX_REPORT_WEEKS) {
-      return {
-        rows: [], weeks: [], departments: [],
-        error: `That range is ${MAX_REPORT_WEEKS}+ weeks. Narrow it to ${MAX_REPORT_WEEKS} or fewer.`,
-      };
-    }
-  }
-  const rangeFrom = weeks[0];
-  const rangeTo = addDaysIso(weeks[weeks.length - 1], 6);
+  // Normalised through sundayOf so the report always covers a whole Sun→Sat
+  // week, whichever day of it the caller happened to send.
+  const weekStart = sundayOf(params.week);
+  if (!weekStart) return { rows: [], error: "Pick a week." };
+  const weekEnd = addDaysIso(weekStart, 6);
+  const dates = datesBetween(weekStart, weekEnd);
 
   const [profiles, dayStatuses, dailyLogs, leaveRequests, holidays] = await Promise.all([
     prisma.contractorProfile.findMany({
@@ -113,21 +93,21 @@ export async function fetchAttendanceReport(params: {
       select: { email: true, fullName: true, contractorId: true, payCategory: true, department: true, location: true, restDay: true },
     }),
     prisma.attendanceDayStatus.findMany({
-      where: { date: { gte: new Date(`${rangeFrom}T00:00:00.000Z`), lte: new Date(`${rangeTo}T00:00:00.000Z`) } },
+      where: { date: { gte: new Date(`${weekStart}T00:00:00.000Z`), lte: new Date(`${weekEnd}T00:00:00.000Z`) } },
       select: { email: true, date: true, evaluatedMinutes: true },
     }),
     // Fallback for a week nobody has reviewed: the raw clock-in/out totals, so
     // the report shows what was logged rather than a blank week.
     prisma.worksnapDailyLog.findMany({
-      where: { entryDate: { gte: new Date(`${rangeFrom}T00:00:00.000Z`), lte: new Date(`${rangeTo}T00:00:00.000Z`) } },
+      where: { entryDate: { gte: new Date(`${weekStart}T00:00:00.000Z`), lte: new Date(`${weekEnd}T00:00:00.000Z`) } },
       select: { email: true, entryDate: true, totalMins: true },
     }),
     prisma.contractorLeaveRequest.findMany({
-      where: { status: "Approved", startDate: { lte: rangeTo }, endDate: { gte: rangeFrom } },
+      where: { status: "Approved", startDate: { lte: weekEnd }, endDate: { gte: weekStart } },
       select: { email: true, type: true, startDate: true, endDate: true },
     }),
     prisma.holiday.findMany({
-      where: { date: { gte: new Date(`${rangeFrom}T00:00:00.000Z`), lte: new Date(`${rangeTo}T00:00:00.000Z`) } },
+      where: { date: { gte: new Date(`${weekStart}T00:00:00.000Z`), lte: new Date(`${weekEnd}T00:00:00.000Z`) } },
       select: { date: true, name: true, country: true },
     }),
   ]);
@@ -158,13 +138,9 @@ export async function fetchAttendanceReport(params: {
     if (!holidayByKey.has(key)) holidayByKey.set(key, h.name);
   }
 
-  const wantedCategory = params.payCategory;
-  const wantedDepartment = params.department;
-  const departments = Array.from(new Set(profiles.map((p) => p.department?.trim()).filter(Boolean) as string[])).sort();
-
   const scoped = profiles.filter((p) =>
-    (wantedCategory === "All" || (p.payCategory ?? "").trim() === wantedCategory) &&
-    (wantedDepartment === "All" || (p.department ?? "").trim() === wantedDepartment)
+    (params.payCategory === "All" || (p.payCategory ?? "").trim() === params.payCategory) &&
+    (params.department === "All" || (p.department ?? "").trim() === params.department)
   );
 
   const rows: AttendanceReportRow[] = [];
@@ -174,44 +150,41 @@ export async function fetchAttendanceReport(params: {
     const country = countryFromLocation(p.location ?? "");
     const restDaysStr = (p.restDay ?? "").trim();
 
-    for (const weekStart of weeks) {
-      const dates = datesBetween(weekStart, addDaysIso(weekStart, 6));
-      const days: AttendanceReportDay[] = dates.map((date) => {
-        const key = `${email}|${date}`;
-        const reviewed = evaluatedByKey.get(key);
-        const minutes = reviewed ?? loggedByKey.get(key) ?? 0;
-        return {
-          minutes,
-          leave: leaveByKey.get(key) ?? "",
-          holiday:
-            holidayByKey.get(`${country}|${date}`)
-            ?? holidayByKey.get(`Global|${date}`)
-            ?? holidayByKey.get(`United States|${date}`)
-            ?? "",
-          restDay: isRestDay(date, restDaysStr),
-          unreviewed: reviewed == null,
-        };
-      });
+    const days: AttendanceReportDay[] = dates.map((date) => {
+      const key = `${email}|${date}`;
+      const reviewed = evaluatedByKey.get(key);
+      const minutes = reviewed ?? loggedByKey.get(key) ?? 0;
+      return {
+        minutes,
+        leave: leaveByKey.get(key) ?? "",
+        holiday:
+          holidayByKey.get(`${country}|${date}`)
+          ?? holidayByKey.get(`Global|${date}`)
+          ?? holidayByKey.get(`United States|${date}`)
+          ?? "",
+        restDay: isRestDay(date, restDaysStr),
+        unreviewed: reviewed == null,
+      };
+    });
 
-      // A week with nothing at all — no time, no leave, no holiday — is left
-      // out rather than exported as a row of dashes for every contractor who
-      // had not started yet.
-      const hasAnything = days.some((d) => d.minutes > 0 || d.leave || d.holiday);
-      if (!hasAnything) continue;
+    // A contractor with nothing at all this week — no time, no leave, no
+    // holiday — is left out rather than exported as a row of dashes for
+    // everyone who had not started yet.
+    if (!days.some((d) => d.minutes > 0 || d.leave || d.holiday)) continue;
 
-      rows.push({
-        weekStart,
-        name: (p.fullName ?? "").trim() || email,
-        contractorId: (p.contractorId ?? "").trim(),
-        email,
-        payCategory: (p.payCategory ?? "").trim(),
-        department: (p.department ?? "").trim(),
-        country,
-        days,
-      });
-    }
+    rows.push({
+      weekStart,
+      weekEnd,
+      name: (p.fullName ?? "").trim() || email,
+      contractorId: (p.contractorId ?? "").trim(),
+      email,
+      payCategory: (p.payCategory ?? "").trim(),
+      department: (p.department ?? "").trim(),
+      country,
+      days,
+    });
   }
 
-  rows.sort((a, b) => a.name.localeCompare(b.name) || a.weekStart.localeCompare(b.weekStart));
-  return { rows, weeks, departments };
+  rows.sort((a, b) => a.name.localeCompare(b.name));
+  return { rows };
 }
