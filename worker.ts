@@ -14,8 +14,10 @@ import { default as handler } from "./.open-next/worker.js";
  * hitting them by hand for a manual re-run still behaves identically.
  */
 
+// Keyed by the exact cron string from wrangler.jsonc — Cloudflare passes the
+// expression that fired as controller.cron, so these two must stay in step.
 const JOBS: Record<string, string> = {
-  "0 8 * * *": "/api/cron/worksnap-sync/",
+  "0 0,3,15,18,21 * * *": "/api/cron/worksnap-sync/",
   "0 9 * * *": "/api/cron/leave-balance-reset/",
 };
 

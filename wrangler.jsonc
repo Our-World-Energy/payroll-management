@@ -39,10 +39,22 @@
   ],
 
   "triggers": {
-    // UTC, carried over verbatim from vercel.json.
+    // Cloudflare cron is always UTC. Arizona does not observe DST, so
+    // America/Phoenix is UTC-7 all year and these need no seasonal fixup.
+    //
+    // worksnap-sync runs every 3 hours across the Arizona working day, so the
+    // "Last updated" figure on /admin/attendance stays fresh rather than
+    // showing one overnight pull:
+    //   15:00 UTC = 08:00 AZ    18:00 UTC = 11:00 AZ    21:00 UTC = 14:00 AZ
+    //   00:00 UTC = 17:00 AZ    03:00 UTC = 20:00 AZ
+    // Every gap is >= 1 hour, which keeps each run in Cloudflare's 15-minute
+    // CPU tier for cron triggers rather than the 30-second one.
+    //
+    // Keep these in step with the JOBS map in worker.ts — it dispatches on the
+    // exact cron string, so an edit here alone would stop the job firing.
     "crons": [
-      "0 8 * * *", // worksnap-sync
-      "0 9 * * *" // leave-balance-reset
+      "0 0,3,15,18,21 * * *", // worksnap-sync — 8am/11am/2pm/5pm/8pm Arizona
+      "0 9 * * *" // leave-balance-reset — 2am Arizona
     ]
   },
 
