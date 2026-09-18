@@ -11,8 +11,7 @@ import {
   LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
-import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor, usesAdminConsole, CONSOLE_LABEL, ROLE_LABEL, type AppRole } from "@/lib/roles";
-import { navItemsForRole } from "@/lib/adminNav";
+import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor, CONSOLE_LABEL, ROLE_LABEL, consoleHrefForPortalPath, type AppRole } from "@/lib/roles";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -64,14 +63,22 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
       const limited  = role === "manager" || role === "user";
       setVisiblePages(limited ? granted : null);
 
-      // Allow admins who clicked "Contractor View" to pass through. Only a
-      // full admin gets that switch — HR and Managers belong in their own
-      // console, so a stale override in their browser must not let them in.
-      // A Manager may open the pages an admin ticked for them on User
-      // Management, and nothing else here. Anything ungranted sends them back
-      // to their own console rather than 404ing.
-      const managerMayOpen = role === "manager" && pageGrantsPath(granted, pathname);
-      if (role !== "user" && !(role === "admin" && override === "contractor") && !managerMayOpen) {
+      // A manager never renders this layout. The pages an admin ticked for
+      // them are theirs to open, but through the console mirror of the same
+      // view (/admin/my-profile and friends) — arriving here by bookmark or an
+      // old link would replace their menu with a contractor's, which is the
+      // whole reason the mirrors exist. Anything ungranted sends them back to
+      // their own Dashboard rather than 404ing.
+      if (role === "manager") {
+        const mirror = pageGrantsPath(granted, pathname) ? consoleHrefForPortalPath(pathname) : null;
+        router.replace(mirror ?? "/admin");
+        return;
+      }
+
+      // Admins who clicked "Contractor View" pass through. Only a full admin
+      // gets that switch — HR belongs in its own console, so a stale override
+      // in their browser must not let them in.
+      if (role !== "user" && !(role === "admin" && override === "contractor")) {
         router.replace("/admin");
         return;
       }
@@ -116,19 +123,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
 
   const isActive = (href: string) => pathname.startsWith(href);
 
-  /**
-   * The console menu to keep alongside the portal one.
-   *
-   * Managers only. They are the one console role that legitimately browses
-   * this layout — an admin arrives here through "Contractor View", which
-   * exists precisely to see the portal as a contractor does, and appending
-   * nine console entries would bury the five they switched in to look at.
-   * Their own switch button covers the way back. HR never reaches this layout
-   * at all.
-   */
-  const consoleItems = accountRole === "manager" && usesAdminConsole(accountRole)
-    ? navItemsForRole(accountRole)
-    : [];
+
 
   if (!checked) {
     return (
@@ -209,43 +204,6 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
             );
           })}
 
-          {/* A console account browsing the portal keeps its own menu.
-              Without this, a manager who opened Profile lost Time Away
-              Request — and the way back to their Dashboard — because this
-              layout's sidebar only lists contractor pages. Rendered from the
-              same navItemsForRole the console sidebar uses, so the two can
-              never list different things. */}
-          {consoleItems.length > 0 && (
-            <>
-              <div className={`my-2 border-t ${sidebar.divider}`} />
-              {(!collapsed || mobile) && (
-                <p className={`px-3 pb-1 text-[10px] font-bold uppercase tracking-widest ${sidebar.label}`}>
-                  {CONSOLE_LABEL[accountRole]}
-                </p>
-              )}
-              {consoleItems.map(({ href, label, Icon }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  onClick={() => mobile && setDrawerOpen(false)}
-                  title={collapsed && !mobile ? label : undefined}
-                  className={[
-                    "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-all rounded-lg relative group",
-                    collapsed && !mobile ? "justify-center px-2" : "",
-                    `${sidebar.nav} ${sidebar.navHover}`,
-                  ].join(" ")}
-                >
-                  <Icon size={18} strokeWidth={1.75} className={`shrink-0 ${sidebar.icon}`} />
-                  {(!collapsed || mobile) && <span>{label}</span>}
-                  {collapsed && !mobile && (
-                    <span className="absolute left-full ml-3 px-2 py-1 bg-slate-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
-                      {label}
-                    </span>
-                  )}
-                </Link>
-              ))}
-            </>
-          )}
         </nav>
 
         {/* Dark mode toggle + logout */}

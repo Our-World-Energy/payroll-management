@@ -32,7 +32,9 @@ export function AdminSidebar() {
     ...accountNavItems(role, rawPages),
     ...(role === "manager"
       ? PORTAL_PAGES.filter((p) => pages.includes(p.key)).map((p) => ({
-          href: p.href, label: p.label, Icon: PORTAL_PAGE_ICONS[p.key], roles: ["manager"] as const,
+          // consoleHref, not href: the portal route would swap this whole
+          // layout for the contractor one and take the manager's menu with it.
+          href: p.consoleHref, label: p.label, Icon: PORTAL_PAGE_ICONS[p.key], roles: ["manager"] as const,
         }))
       : []),
   ];

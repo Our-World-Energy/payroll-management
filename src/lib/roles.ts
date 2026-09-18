@@ -91,12 +91,36 @@ export const ROLE_OPTION_LABEL: Record<AppRole, string> = {
 //     own console rather than the whole portal.
 // A contractor's Dashboard and a manager's Dashboard / Time Away Request are
 // always available and aren't part of this.
+/**
+ * The four personal pages, each with two routes to the same view.
+ *
+ * `href` is the Contractor Portal route. `consoleHref` renders the identical
+ * page inside the admin console shell, which is how a console account opens it
+ * — a manager following the portal route would land in the contractor layout
+ * and watch their own menu be replaced by a contractor's.
+ *
+ * `key` is unchanged and stays short, because grants already stored against
+ * manager accounts are keyed by it.
+ */
 export const PORTAL_PAGES = [
-  { key: "profile",      label: "Profile",      href: "/contractor/profile" },
-  { key: "time-off",     label: "Time Away",    href: "/contractor/time-off" },
-  { key: "attendance",   label: "Attendance",   href: "/contractor/attendance" },
-  { key: "pay-vouchers", label: "Pay Vouchers", href: "/contractor/pay-vouchers" },
+  { key: "profile",      label: "Profile",      href: "/contractor/profile",      consoleHref: "/admin/my-profile" },
+  { key: "time-off",     label: "Time Away",    href: "/contractor/time-off",     consoleHref: "/admin/my-time-away" },
+  { key: "attendance",   label: "Attendance",   href: "/contractor/attendance",   consoleHref: "/admin/my-attendance" },
+  { key: "pay-vouchers", label: "Pay Vouchers", href: "/contractor/pay-vouchers", consoleHref: "/admin/my-pay-vouchers" },
 ] as const;
+
+/** The console route for a portal path, or null if it isn't a portal page. */
+export function consoleHrefForPortalPath(pathname: string): string | null {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  const page = PORTAL_PAGES.find((p) => path === p.href || path.startsWith(`${p.href}/`));
+  return page?.consoleHref ?? null;
+}
+
+/** The personal page a console path belongs to, or null. */
+export function portalPageForConsolePath(pathname: string) {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  return PORTAL_PAGES.find((p) => path === p.consoleHref || path.startsWith(`${p.consoleHref}/`)) ?? null;
+}
 
 export type PortalPageKey = (typeof PORTAL_PAGES)[number]["key"];
 
