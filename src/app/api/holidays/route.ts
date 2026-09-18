@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import { timeZoneForCountry, arizonaDateForCountryDate } from "@/lib/countryTimeZones";
 
@@ -20,6 +21,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  // Same exposure as DELETE on [id]: service-role writes with no caller check.
+  const denied = await requireAdmin();
+  if (denied) return denied;
+
   const { name, country, date } = await request.json();
   if (!name || !country || !date) {
     return NextResponse.json({ error: "name, country and date are required." }, { status: 400 });
@@ -30,7 +35,7 @@ export async function POST(request: Request) {
   const arizonaDate = arizonaDateForCountryDate(date, country);
   const { data, error } = await sb
     .from("holidays")
-    .insert({ name, country, date, timeZone, arizonaDate })
+    .insert({ id: crypto.randomUUID(), name, country, date, timeZone, arizonaDate })
     .select("id, name, country, date, timeZone, arizonaDate")
     .single();
 
