@@ -3702,6 +3702,56 @@ export default function AttendancePage() {
     };
   }, [rangeFrom, rangeTo, reloadKey]);
 
+  // Worksnap is pulled every 3 hours across the Arizona working day (the cron
+  // schedule lives in wrangler.jsonc), so a console left open all day would
+  // otherwise keep showing whatever it loaded on arrival — including a "Last
+  // updated" time that quietly goes hours stale.
+  //
+  // Held off while anything is being edited. The loader above replaces
+  // worksnapRows wholesale and the review modal reads from that same array, so
+  // refetching underneath an open reviewer would swap the week out from under
+  // them mid-edit. A skipped tick just waits for the next one.
+  const refreshBlockedRef = useRef(false);
+  useEffect(() => {
+    refreshBlockedRef.current =
+      Boolean(reviewTarget) ||
+      Boolean(breakdownTarget) ||
+      showBulkApproveModal ||
+      showProcessModal ||
+      showFixedTimeModal ||
+      syncing;
+  }, [reviewTarget, breakdownTarget, showBulkApproveModal, showProcessModal, showFixedTimeModal, syncing]);
+
+  useEffect(() => {
+    const INTERVAL_MS = 30 * 60 * 1000;
+    let lastRefresh = Date.now();
+
+    const refresh = () => {
+      if (refreshBlockedRef.current) return;
+      lastRefresh = Date.now();
+      setReloadKey((key) => key + 1);
+    };
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, INTERVAL_MS);
+
+    // Hidden tabs aren't polled — there is no one to show it to, and this page
+    // pulls the whole week. Catch up on return instead, so coming back to a
+    // tab left open overnight doesn't present yesterday's figures as current.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastRefresh >= INTERVAL_MS) {
+        refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
   async function handleSync() {
     setSyncing(true);
     setWorksnapError("");
