@@ -370,8 +370,15 @@ export async function createContractor(c: Contractor): Promise<void> {
   });
   if (error) throw new Error(error.message);
 
-  // Auto-provision portal login + send welcome email
-  await provisionContractorUser(c);
+  // Auto-provision the portal login. No welcome email is sent — the
+  // contractor gets in via "Forgot password" on the sign-in page.
+  //
+  // Deliberately not thrown on: the contractor row is already saved by this
+  // point, so failing here would report the whole save as failed.
+  const provisioned = await provisionContractorUser(c);
+  if (!provisioned.ok) {
+    console.error(`provisionContractorUser(${c.email}): ${provisioned.error}`);
+  }
 }
 
 export async function updateContractor(c: Contractor): Promise<void> {
