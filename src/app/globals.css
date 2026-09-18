@@ -367,3 +367,41 @@
     linear-gradient(135deg, #34d399, #14b8a6) border-box;
 }
 
+
+/* ── Dashboard masthead in dark mode ────────────────────────────────────────
+   The band is bg-linear-to-b from-white to-emerald-50/40. The dark rules above
+   override .bg-white, but a gradient's colour stops are their own classes
+   (from-white / to-emerald-50) and nothing was touching them — so the masthead
+   stayed a white-to-cream band across the top of an otherwise dark page.
+
+   Restyled here rather than branched in the component: DashboardView renders
+   inside two layouts (the Contractor Portal and, for a manager, the admin
+   console), each stamping its own data-theme, so CSS is the only place that
+   can see the theme without threading a prop through both.
+
+   #16241d sits just above the page's #111a15, enough to still read as a band
+   rather than melting into the page. */
+[data-theme="dark"] .portal-masthead {
+  background-image: linear-gradient(to bottom, #16241d, #101a15) !important;
+}
+
+/* The solar array is text-[#0B4F3A] — dark green chosen to sit on white, and
+   1.68:1 against the new band, so it all but vanished. Lifted to a mid green
+   that reads as artwork without competing with the wordmark over it. */
+[data-theme="dark"] .portal-masthead-solar {
+  color: #26936b !important;
+}
+
+/* The pull-quote is text-slate-500, which the dark rules take to white at 40%
+   — 2.68:1 on the band. Italic text at that size needs more. */
+[data-theme="dark"] .portal-masthead-quote {
+  color: #93a79d !important;
+}
+
+/* Same gradient blind spot as the masthead: the Apply for Leave banner is
+   bg-linear-to-r from-emerald-50/80 to-white, so it stayed a light band in
+   dark mode while everything around it went dark. Kept green-tinted rather
+   than flat, so it still reads as the call to action it is. */
+[data-theme="dark"] .portal-banner {
+  background-image: linear-gradient(to right, rgba(16,185,129,0.14), rgba(255,255,255,0.03)) !important;
+}

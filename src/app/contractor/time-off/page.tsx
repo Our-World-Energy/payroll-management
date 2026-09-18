@@ -703,7 +703,7 @@ export default function ContractorTimeOffPage() {
 
       {/* Apply for Leave — a banner that opens the form, rather than the whole
           form sitting open on the page. */}
-      <section className="rounded-2xl border border-emerald-100 bg-linear-to-r from-emerald-50/80 to-white shadow-sm px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
+      <section className="portal-banner rounded-2xl border border-emerald-100 bg-linear-to-r from-emerald-50/80 to-white shadow-sm px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4">
         <div className="size-11 rounded-xl bg-emerald-100 text-emerald-700 grid place-items-center shrink-0">
           <LuClipboardList size={20} strokeWidth={1.75} />
         </div>

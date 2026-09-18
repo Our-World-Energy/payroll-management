@@ -622,7 +622,7 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       </div>
 
       {/* ── Masthead: the nameplate ── */}
-      <div className="relative -mx-4 sm:-mx-5 md:-mx-6 overflow-hidden border-b-2 border-[#003527] bg-linear-to-b from-white to-emerald-50/40">
+      <div className="portal-masthead relative -mx-4 sm:-mx-5 md:-mx-6 overflow-hidden border-b-2 border-[#003527] bg-linear-to-b from-white to-emerald-50/40">
         {/* Artwork layer. Hills anchor the band, the sprout and the array stand
             on them, and all of it sits behind the type. */}
         {/* Height scales with the viewport, not fixed. preserveAspectRatio
@@ -634,10 +634,10 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
         <SproutMark className="pointer-events-none absolute bottom-1 left-4 w-[clamp(2.5rem,3.2vw,4rem)] text-emerald-300/80 sm:left-5 md:left-6" />
         {/* Right of centre so it clears the wordmark, and hidden on small
             screens where there is no room for it beside the type. */}
-        <SolarArrayScene className="pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(9rem,13vw,15rem)] text-[#0B4F3A] md:block" />
+        <SolarArrayScene className="portal-masthead-solar pointer-events-none absolute bottom-0 right-[8%] hidden w-[clamp(9rem,13vw,15rem)] text-[#0B4F3A] md:block" />
 
         <div className="relative grid grid-cols-1 items-center gap-4 px-4 py-5 sm:px-5 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-6 md:py-7 lg:py-9 xl:py-11">
-          <p className="hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
+          <p className="portal-masthead-quote hidden md:block font-serif italic text-xs leading-snug text-slate-500 justify-self-start w-36 border-l-2 border-emerald-200 pl-3">
             &ldquo;Together<br />We Power<br />Possibilities&rdquo;
           </p>
           <div className="text-center">
