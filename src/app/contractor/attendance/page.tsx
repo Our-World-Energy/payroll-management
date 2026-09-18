@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { fetchContractorProfileByEmail, type ContractorProfile } from "../profile/actions";
 import { fetchAllLeaveRequests, type LeaveRequest } from "../time-off/actions";
 import { fetchHolidays, type Holiday } from "@/app/admin/holidays/actions";
+import { leaveTypeDisplayLabel, requestStatusDisplayLabel } from "@/lib/timeOffBalances";
 import { parseIsoDate, toIsoDate, sundayOf, addDaysIso, datesBetween, arizonaTodayIso } from "@/lib/weekUtils";
 import { ARIZONA_TIME_ZONE, countryFromLocation } from "@/lib/countryTimeZones";
 import {
@@ -74,6 +75,50 @@ function holidayInitialFor(date: string, holidays: Holiday[], country: string): 
   if (holidays.some((h) => h.date === date && h.country === "United States")) return "USO";
   if (country && country !== "United States" && holidays.some((h) => h.date === date && h.country === country)) return "LHO";
   return null;
+}
+
+/**
+ * Everything that explains a date besides the hours on it: the holiday in
+ * effect, an approved leave request covering it, and whether it is a rest day.
+ *
+ * The calendar already badges these, but a badge is two or three letters — it
+ * says a day was something without saying which holiday, which kind of leave,
+ * or whether the request was approved. This is what the Daily Logs panel
+ * shows when that date is picked.
+ *
+ * Pending and declined requests are included rather than filtered out like the
+ * badge does: "no time logged" on a day whose request is still pending is a
+ * different situation from one nobody ever asked for, and the contractor
+ * looking at it is the person who filed it.
+ */
+function dayDetailFor(
+  date: string,
+  requests: LeaveRequest[],
+  holidays: Holiday[],
+  country: string,
+  restDaysStr: string,
+) {
+  const usHoliday = holidays.find((h) => h.date === date && h.country === "United States");
+  const localHoliday = country && country !== "United States"
+    ? holidays.find((h) => h.date === date && h.country === country)
+    : undefined;
+  const globalHoliday = holidays.find((h) => h.date === date && h.country === "Global");
+
+  // Approved first: a date can carry a decided request and an older declined
+  // one, and the decided one is what actually explains the day.
+  const covering = requests.filter((r) => date >= r.startDate && date <= r.endDate);
+  const leave = covering.find((r) => r.status === "Approved") ?? covering[0];
+
+  return {
+    usHoliday,
+    localHoliday,
+    globalHoliday,
+    leave,
+    restDay: isRestDayDate(date, restDaysStr),
+    get any() {
+      return Boolean(this.usHoliday || this.localHoliday || this.globalHoliday || this.leave || this.restDay);
+    },
+  };
 }
 
 // Seconds are included so the In/Out cards show the exact logged instant —
@@ -512,20 +557,87 @@ export default function ContractorAttendancePage() {
                   const full    = mins >= STANDARD_SHIFT_MINUTES;
                   const isOver  = mins > STANDARD_SHIFT_MINUTES;
                   const isExact = mins === STANDARD_SHIFT_MINUTES;
+                  const detail  = dayDetailFor(activeDate, leaveRequests, holidays, contractorCountry, restStr);
+
+                  /* Why the day is what it is, spelled out. Rendered above the
+                     hours rather than instead of them: a holiday or a half day
+                     of leave can carry worked time too, and both halves of
+                     that day are worth seeing. */
+                  const detailBlock = detail.any ? (
+                    <div className="space-y-2">
+                      {[detail.usHoliday && { icon: "🎉", title: detail.usHoliday.name, sub: "US Holiday", tone: "bg-blue-50 border-blue-100 text-blue-800" },
+                        detail.localHoliday && { icon: "🎉", title: detail.localHoliday.name, sub: `${detail.localHoliday.country} Holiday`, tone: "bg-blue-50 border-blue-100 text-blue-800" },
+                        detail.globalHoliday && { icon: "🌐", title: detail.globalHoliday.name, sub: "Company-wide Holiday", tone: "bg-blue-50 border-blue-100 text-blue-800" },
+                      ].filter(Boolean).map((h, i) => {
+                        const item = h as { icon: string; title: string; sub: string; tone: string };
+                        return (
+                          <div key={i} className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${item.tone}`}>
+                            <span className="text-base leading-none shrink-0" aria-hidden>{item.icon}</span>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold break-words">{item.title}</p>
+                              <p className="text-[11px] opacity-80">{item.sub}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {detail.leave && (
+                        <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+                          detail.leave.status === "Approved" ? "bg-emerald-50 border-emerald-100 text-emerald-800"
+                          : detail.leave.status === "Pending" ? "bg-amber-50 border-amber-100 text-amber-800"
+                          : "bg-slate-50 border-slate-200 text-slate-600"
+                        }`}>
+                          <span className="text-base leading-none shrink-0" aria-hidden>
+                            {detail.leave.type.startsWith("PTO") ? "🏖️" : "🤒"}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold break-words">
+                              {leaveTypeDisplayLabel(detail.leave.type)} · {requestStatusDisplayLabel(detail.leave.status)}
+                            </p>
+                            <p className="text-[11px] opacity-80">
+                              {detail.leave.startDate}
+                              {detail.leave.endDate !== detail.leave.startDate && ` to ${detail.leave.endDate}`}
+                              {" · "}
+                              {detail.leave.type.endsWith("Half Day")
+                                ? "Half day"
+                                : `${detail.leave.durationDays} day${detail.leave.durationDays !== 1 ? "s" : ""}`}
+                            </p>
+                            {detail.leave.reason && (
+                              <p className="text-[11px] opacity-70 mt-0.5 break-words">{detail.leave.reason}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {detail.restDay && (
+                        <div className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-600">
+                          <span className="text-base leading-none shrink-0" aria-hidden>🌙</span>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold">Rest Day</p>
+                            <p className="text-[11px] opacity-80">Not a scheduled working day for you.</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : null;
 
                   if (mins <= 0) {
                     return (
-                      <div className="flex flex-col items-center justify-center text-center py-16">
-                        <div className="w-12 h-12 rounded-2xl bg-slate-50 grid place-items-center mb-3">
-                          <LuCalendar size={20} className="text-slate-300" strokeWidth={1.75} />
+                      <>
+                        {detailBlock}
+                        <div className={`flex flex-col items-center justify-center text-center ${detail.any ? "py-8" : "py-16"}`}>
+                          <div className="w-12 h-12 rounded-2xl bg-slate-50 grid place-items-center mb-3">
+                            <LuCalendar size={20} className="text-slate-300" strokeWidth={1.75} />
+                          </div>
+                          <p className="text-sm text-slate-400">No time logged this day.</p>
                         </div>
-                        <p className="text-sm text-slate-400">No time logged this day.</p>
-                      </div>
+                      </>
                     );
                   }
 
                   return (
                     <>
+                      {detailBlock && <div className="mb-4">{detailBlock}</div>}
                       <div className="flex justify-between items-center gap-2">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide whitespace-nowrap ${
                           isOver ? "bg-yellow-50 text-yellow-700" : isExact ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"

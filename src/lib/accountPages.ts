@@ -1,5 +1,5 @@
 import { NAV_ITEMS, navItemsForRole, matchesPath, type NavItem } from "./adminNav";
-import { PORTAL_PAGES, type AppRole, effectivePagesFor, usesAdminConsole } from "./roles";
+import { PORTAL_PAGES, type AppRole, effectivePagesFor, usesAdminConsole, portalPageForConsolePath } from "./roles";
 
 /**
  * Every menu an account can be given, for the tick boxes on User Management.
@@ -93,6 +93,17 @@ export function accountCanAccessAdminPath(role: AppRole, raw: unknown, pathname:
   // ones with no sidebar entry — unless a custom menu has been composed for
   // that specific account, which is then honoured like anyone else's.
   if (role === "admin" && !Array.isArray(raw)) return true;
+
+  // The console mirrors of the four personal pages (/admin/my-profile and
+  // friends) are governed by the personal-page grant they render, not by the
+  // console menu — they are the same view as the /contractor route, reached
+  // without leaving the console. Without this they would fall through to the
+  // no-sidebar-entry rule below and be admin-only, which is exactly the menu
+  // entry a manager can be given.
+  const personalPage = portalPageForConsolePath(pathname);
+  if (personalPage) {
+    return effectivePagesFor(role, raw).includes(personalPage.key);
+  }
 
   // Some console pages have no sidebar entry — /admin/holidays,
   // /admin/salary-access, /admin/announcements. They can't be ticked in User

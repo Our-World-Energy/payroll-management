@@ -11,7 +11,7 @@ import {
   LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
-import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor } from "@/lib/roles";
+import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor, CONSOLE_LABEL, ROLE_LABEL, consoleHrefForPortalPath, type AppRole } from "@/lib/roles";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -34,6 +34,9 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   const [collapsed,      setCollapsed]      = useState(false);
   const [dark,           setDark]           = useState(false);
   const [isAdminViewing, setIsAdminViewing] = useState(false);
+  // The actual role, not just whether it is a console one: the sidebar shows
+  // that role's own console menu, and the header names it.
+  const [accountRole, setAccountRole] = useState<AppRole>("user");
   // null = not page-limited (admin in Contractor View); otherwise the keys
   // this account may open.
   const [visiblePages, setVisiblePages] = useState<PortalPageKey[] | null>(null);
@@ -60,14 +63,22 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
       const limited  = role === "manager" || role === "user";
       setVisiblePages(limited ? granted : null);
 
-      // Allow admins who clicked "Contractor View" to pass through. Only a
-      // full admin gets that switch — HR and Managers belong in their own
-      // console, so a stale override in their browser must not let them in.
-      // A Manager may open the pages an admin ticked for them on User
-      // Management, and nothing else here. Anything ungranted sends them back
-      // to their own console rather than 404ing.
-      const managerMayOpen = role === "manager" && pageGrantsPath(granted, pathname);
-      if (role !== "user" && !(role === "admin" && override === "contractor") && !managerMayOpen) {
+      // A manager never renders this layout. The pages an admin ticked for
+      // them are theirs to open, but through the console mirror of the same
+      // view (/admin/my-profile and friends) — arriving here by bookmark or an
+      // old link would replace their menu with a contractor's, which is the
+      // whole reason the mirrors exist. Anything ungranted sends them back to
+      // their own Dashboard rather than 404ing.
+      if (role === "manager") {
+        const mirror = pageGrantsPath(granted, pathname) ? consoleHrefForPortalPath(pathname) : null;
+        router.replace(mirror ?? "/admin");
+        return;
+      }
+
+      // Admins who clicked "Contractor View" pass through. Only a full admin
+      // gets that switch — HR belongs in its own console, so a stale override
+      // in their browser must not let them in.
+      if (role !== "user" && !(role === "admin" && override === "contractor")) {
         router.replace("/admin");
         return;
       }
@@ -83,6 +94,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
         return;
       }
 
+      setAccountRole(role);
       if (role !== "user") setIsAdminViewing(true);
 
       const em = account.email ?? "";
@@ -110,6 +122,8 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   }
 
   const isActive = (href: string) => pathname.startsWith(href);
+
+
 
   if (!checked) {
     return (
@@ -189,6 +203,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
               </Link>
             );
           })}
+
         </nav>
 
         {/* Dark mode toggle + logout */}
@@ -276,7 +291,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
               <button
                 onClick={switchToAdmin}
                 disabled={switching}
-                title="Back to Admin View"
+                title={`Back to ${CONSOLE_LABEL[accountRole]}`}
                 className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed ${
                   dark
                     ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
@@ -287,7 +302,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
                   ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
                   : <LuArrowLeftRight size={13} strokeWidth={2} />
                 }
-                {switching ? "Switching…" : "Admin View"}
+                {switching ? "Switching…" : CONSOLE_LABEL[accountRole]}
               </button>
             )}
             <ContractorBell dark={dark} />
@@ -296,7 +311,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
                 <p className={`text-sm font-semibold leading-tight truncate max-w-40 ${dark ? "text-white" : "text-emerald-900"}`}>
                   {email.split("@")[0]}
                 </p>
-                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{isAdminViewing ? "Admin (Viewing)" : "Contractor"}</p>
+                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{isAdminViewing ? `${ROLE_LABEL[accountRole]} (Viewing)` : "Contractor"}</p>
               </div>
               <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
                 {initials}

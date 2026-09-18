@@ -424,8 +424,18 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       const email = session.user.email;
 
       // One Server Action, not four — see fetchDashboardBundle.
-      const { profile: prof, holidays: hols, announcements: allAnnouncements, birthdays: bdays } =
-        await fetchDashboardBundle(email);
+      //
+      // Read off the result rather than destructured: a console account can
+      // have no contractor record at all (a manager whose login was never
+      // paired with one), and if the action resolves to nothing the
+      // destructure threw "Cannot destructure property 'profile'" and took the
+      // whole page down. Every field has a usable empty value, so the rest of
+      // the dashboard — announcements, holidays, birthdays — still renders.
+      const bundle = await fetchDashboardBundle(email);
+      const prof = bundle?.profile ?? null;
+      const hols = bundle?.holidays ?? [];
+      const allAnnouncements = bundle?.announcements ?? [];
+      const bdays = bundle?.birthdays ?? [];
 
       setProfile(prof);
       setAllHolidays(hols);
