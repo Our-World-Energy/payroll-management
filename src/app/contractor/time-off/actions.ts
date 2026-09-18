@@ -7,6 +7,7 @@ import {
   isHalfDayLeaveType, MAX_LEAVE_HOURS_PER_DAY,
 } from "@/lib/timeOffBalances";
 import { fetchCutOffTime, fetchTimeAwayRequestsEnabled } from "../../admin/settings/actions";
+import { notifyManagerOfTimeOffRequest } from "@/lib/timeOffNotifications";
 
 function getSupabase() {
   return createClient(
@@ -235,6 +236,27 @@ export async function submitLeaveRequest(params: {
   const { error } = await sb.from(LEAVE_TABLE).insert(rows);
 
   if (error) return { ok: false, error: error.message };
+
+  // The request is filed. Telling the manager is best-effort and deliberately
+  // cannot fail the submission: the rows are already committed, so a mail
+  // outage must not be reported to the contractor as a failure to file.
+  //
+  // Awaited rather than left floating — on Workers a promise not tied to the
+  // response can be cancelled once the action returns, which would drop the
+  // email silently. One email covers the whole range, not one per inserted row.
+  const notified = await notifyManagerOfTimeOffRequest({
+    email:      params.email,
+    leaveType:  params.type,
+    startDate:  dates[0],
+    endDate:    dates[dates.length - 1],
+    dayCount:   dates.length,
+    totalHours: hours * dates.length,
+    reason:     params.reason.trim(),
+  });
+  if (!notified.sent) {
+    console.warn(`submitLeaveRequest(${params.email}): manager not notified — ${notified.reason}`);
+  }
+
   return { ok: true };
 }
 

@@ -4,16 +4,14 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { LuMail, LuKeyRound, LuMailCheck, LuLoaderCircle, LuArrowLeft } from "react-icons/lu";
-import { createClient } from "@/lib/supabase/client";
+import { sendPasswordReset } from "./actions";
 
-// Step 1 of password recovery. Supabase Auth emails a one-time link that lands
+// Step 1 of password recovery. The sendPasswordReset server action mints a
+// one-time recovery link and emails it through SendGrid (see
+// src/lib/mailer.ts) — Supabase's own email is no longer used. The link lands
 // on /auth/callback, which turns it into a session and forwards to
-// /reset-password where the new password is set. The redirect URL must be in
-// the Supabase project's Auth → URL Configuration → Redirect URLs allowlist
-// (one entry per environment, e.g. http://localhost:3000/** and the
-// production origin) or Supabase silently falls back to the Site URL.
-// useSearchParams() forces a client-side bailout during prerender, so Next
-// requires it under a Suspense boundary — hence the thin wrapper.
+// /reset-password. useSearchParams() forces a client-side bailout during
+// prerender, so Next requires it under a Suspense boundary — hence the wrapper.
 export default function ForgotPasswordPage() {
   return (
     <Suspense fallback={null}>
@@ -37,13 +35,10 @@ function ForgotPasswordForm() {
     e.preventDefault();
     setError("");
     setSending(true);
-    const supabase = createClient();
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: `${window.location.origin}/auth/callback/?next=${encodeURIComponent("/reset-password/")}`,
-    });
+    const result = await sendPasswordReset(email.trim());
     setSending(false);
-    if (resetError) {
-      setError(resetError.message);
+    if (!result.ok) {
+      setError(result.error ?? "Something went wrong. Please try again.");
       return;
     }
     setSent(true);
