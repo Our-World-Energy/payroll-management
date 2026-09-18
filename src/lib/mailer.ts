@@ -1,30 +1,69 @@
-import { Resend } from "resend";
-
-// Transactional email via Resend (the package was already a dependency but
-// unused). Configure with:
-//   RESEND_API_KEY   — from resend.com → API Keys
-//   MAIL_FROM        — a sender on a domain verified in Resend, e.g.
-//                      "OWE Payroll <payroll@ourworldenergy.com>". The default
-//                      onboarding@resend.dev sender only delivers to the Resend
-//                      account owner's own inbox, so it's fine for a first
-//                      local test but not for real users.
+// Transactional email via SendGrid. Configure with:
+//   SENDGRID_API_KEY — from sendgrid.com → Settings → API Keys (needs mail.send)
+//   MAIL_FROM        — a sender on a domain authenticated in SendGrid, either
+//                      "OWE Payroll <team@ourworldenergy.com>" or a bare
+//                      address. ourworldenergy.com is domain-authenticated, so
+//                      any address on it is a valid sender.
+//
+// Called over the v3 REST API with plain fetch rather than @sendgrid/mail: the
+// SDK pulls in Node built-ins, and this runs on Cloudflare Workers.
 
 export type SendEmailResult = { ok: true; id?: string } | { ok: false; error: string; notConfigured?: boolean };
 
+const ENDPOINT = "https://api.sendgrid.com/v3/mail/send";
+
 export function isMailConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY?.trim());
+  return Boolean(process.env.SENDGRID_API_KEY?.trim());
+}
+
+/** Splits "Name <addr@host>" into SendGrid's shape; a bare address works too. */
+function parseFrom(raw: string): { email: string; name?: string } {
+  const m = raw.match(/^\s*(.*?)\s*<\s*([^>]+)\s*>\s*$/);
+  if (m) return { email: m[2].trim(), name: m[1].replace(/^"|"$/g, "").trim() || undefined };
+  return { email: raw.trim() };
 }
 
 export async function sendEmail(params: { to: string; subject: string; html: string; text: string }): Promise<SendEmailResult> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) return { ok: false, notConfigured: true, error: "Email is not configured (RESEND_API_KEY is missing)." };
+  const apiKey = process.env.SENDGRID_API_KEY?.trim();
+  if (!apiKey) return { ok: false, notConfigured: true, error: "Email is not configured (SENDGRID_API_KEY is missing)." };
 
-  const from = process.env.MAIL_FROM?.trim() || "OWE Payroll <onboarding@resend.dev>";
+  const rawFrom = process.env.MAIL_FROM?.trim();
+  if (!rawFrom) return { ok: false, notConfigured: true, error: "Email is not configured (MAIL_FROM is missing)." };
+
   try {
-    const resend = new Resend(apiKey);
-    const { data, error } = await resend.emails.send({ from, to: params.to, subject: params.subject, html: params.html, text: params.text });
-    if (error) return { ok: false, error: error.message };
-    return { ok: true, id: data?.id };
+    const response = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: params.to }] }],
+        from: parseFrom(rawFrom),
+        subject: params.subject,
+        // Order matters to SendGrid: the last part is the preferred one, so
+        // text/plain must come first for HTML to win in clients that take it.
+        content: [
+          { type: "text/plain", value: params.text },
+          { type: "text/html", value: params.html },
+        ],
+      }),
+    });
+
+    // A successful send is 202 with an empty body; the id is in a header.
+    if (response.status === 202) {
+      return { ok: true, id: response.headers.get("x-message-id") ?? undefined };
+    }
+
+    // Failures carry { errors: [{ message, field }] }.
+    const body = await response.text();
+    let detail = body.slice(0, 300);
+    try {
+      const parsed = JSON.parse(body) as { errors?: Array<{ message?: string; field?: string }> };
+      if (parsed.errors?.length) {
+        detail = parsed.errors.map((e) => (e.field ? `${e.field}: ${e.message}` : e.message)).join("; ");
+      }
+    } catch {
+      // Not JSON — fall back to the raw body above.
+    }
+    return { ok: false, error: `SendGrid ${response.status}: ${detail}` };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
