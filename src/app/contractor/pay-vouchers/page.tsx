@@ -343,8 +343,16 @@ function Voucher({ profile, v, vouchers, onSelect, onDownload }: {
                 ["Overtime (REG/RD/HO)", overtimePay, false],
                 ["Holiday Pay (US/Local)", holidayPay, false],
                 ["Time Off Pay", t.timeOffPay, false],
-                ["Bonus & Miscellaneous", bonus + misc, false],
-                ["Retroactive Pay & REIM", retroPay + reim, false],
+                // One line each rather than the two combined pairs this used
+                // to show ("Bonus & Miscellaneous", "Retroactive Pay & REIM").
+                // They are four separate figures on the adjustment behind the
+                // voucher, and the full voucher below has always listed them
+                // apart — a contractor could see a combined total here and no
+                // way to tell which half of it they were owed.
+                ["Bonus", bonus, false],
+                ["Miscellaneous", misc, false],
+                ["Retroactive Pay", retroPay, false],
+                ["REIM", reim, false],
               ] as const).map(([label, value, strong]) => (
                 <div key={label} className="flex justify-between items-center py-1.5 border-b border-dotted border-slate-100 last:border-0">
                   <span className={`text-xs ${strong ? "font-semibold text-slate-600" : value > 0 ? "text-slate-600" : "text-slate-400"}`}>{label}</span>
