@@ -11,7 +11,8 @@ import {
   LuChevronLeft, LuChevronRight, LuSun, LuMoon, LuArrowLeftRight, LuLoader,
 } from "react-icons/lu";
 import { ContractorBell } from "./_components/ContractorBell";
-import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor } from "@/lib/roles";
+import { normalizeRole, pageGrantsPath, PORTAL_PAGES, type PortalPageKey, effectivePagesFor, usesAdminConsole, CONSOLE_LABEL, ROLE_LABEL, type AppRole } from "@/lib/roles";
+import { navItemsForRole } from "@/lib/adminNav";
 
 type NavItem = { href: string; label: string; Icon: React.ElementType };
 
@@ -34,6 +35,9 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   const [collapsed,      setCollapsed]      = useState(false);
   const [dark,           setDark]           = useState(false);
   const [isAdminViewing, setIsAdminViewing] = useState(false);
+  // The actual role, not just whether it is a console one: the sidebar shows
+  // that role's own console menu, and the header names it.
+  const [accountRole, setAccountRole] = useState<AppRole>("user");
   // null = not page-limited (admin in Contractor View); otherwise the keys
   // this account may open.
   const [visiblePages, setVisiblePages] = useState<PortalPageKey[] | null>(null);
@@ -83,6 +87,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
         return;
       }
 
+      setAccountRole(role);
       if (role !== "user") setIsAdminViewing(true);
 
       const em = account.email ?? "";
@@ -110,6 +115,20 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
   }
 
   const isActive = (href: string) => pathname.startsWith(href);
+
+  /**
+   * The console menu to keep alongside the portal one.
+   *
+   * Managers only. They are the one console role that legitimately browses
+   * this layout — an admin arrives here through "Contractor View", which
+   * exists precisely to see the portal as a contractor does, and appending
+   * nine console entries would bury the five they switched in to look at.
+   * Their own switch button covers the way back. HR never reaches this layout
+   * at all.
+   */
+  const consoleItems = accountRole === "manager" && usesAdminConsole(accountRole)
+    ? navItemsForRole(accountRole)
+    : [];
 
   if (!checked) {
     return (
@@ -189,6 +208,44 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
               </Link>
             );
           })}
+
+          {/* A console account browsing the portal keeps its own menu.
+              Without this, a manager who opened Profile lost Time Away
+              Request — and the way back to their Dashboard — because this
+              layout's sidebar only lists contractor pages. Rendered from the
+              same navItemsForRole the console sidebar uses, so the two can
+              never list different things. */}
+          {consoleItems.length > 0 && (
+            <>
+              <div className={`my-2 border-t ${sidebar.divider}`} />
+              {(!collapsed || mobile) && (
+                <p className={`px-3 pb-1 text-[10px] font-bold uppercase tracking-widest ${sidebar.label}`}>
+                  {CONSOLE_LABEL[accountRole]}
+                </p>
+              )}
+              {consoleItems.map(({ href, label, Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  onClick={() => mobile && setDrawerOpen(false)}
+                  title={collapsed && !mobile ? label : undefined}
+                  className={[
+                    "flex items-center gap-3 px-3 py-2.5 text-sm font-medium transition-all rounded-lg relative group",
+                    collapsed && !mobile ? "justify-center px-2" : "",
+                    `${sidebar.nav} ${sidebar.navHover}`,
+                  ].join(" ")}
+                >
+                  <Icon size={18} strokeWidth={1.75} className={`shrink-0 ${sidebar.icon}`} />
+                  {(!collapsed || mobile) && <span>{label}</span>}
+                  {collapsed && !mobile && (
+                    <span className="absolute left-full ml-3 px-2 py-1 bg-slate-800 text-white text-xs font-medium rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+                      {label}
+                    </span>
+                  )}
+                </Link>
+              ))}
+            </>
+          )}
         </nav>
 
         {/* Dark mode toggle + logout */}
@@ -276,7 +333,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
               <button
                 onClick={switchToAdmin}
                 disabled={switching}
-                title="Back to Admin View"
+                title={`Back to ${CONSOLE_LABEL[accountRole]}`}
                 className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer disabled:cursor-not-allowed ${
                   dark
                     ? "bg-white/8 text-white/70 hover:bg-white/15 hover:text-white"
@@ -287,7 +344,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
                   ? <LuLoader size={13} strokeWidth={2} className="animate-spin" />
                   : <LuArrowLeftRight size={13} strokeWidth={2} />
                 }
-                {switching ? "Switching…" : "Admin View"}
+                {switching ? "Switching…" : CONSOLE_LABEL[accountRole]}
               </button>
             )}
             <ContractorBell dark={dark} />
@@ -296,7 +353,7 @@ export default function ContractorLayout({ children }: { children: React.ReactNo
                 <p className={`text-sm font-semibold leading-tight truncate max-w-40 ${dark ? "text-white" : "text-emerald-900"}`}>
                   {email.split("@")[0]}
                 </p>
-                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{isAdminViewing ? "Admin (Viewing)" : "Contractor"}</p>
+                <p className={`text-xs leading-tight ${dark ? "text-white/40" : "text-slate-500"}`}>{isAdminViewing ? `${ROLE_LABEL[accountRole]} (Viewing)` : "Contractor"}</p>
               </div>
               <div className="w-9 h-9 rounded-full bg-linear-to-br from-teal-400 to-emerald-700 grid place-items-center text-white text-sm font-bold shrink-0">
                 {initials}
