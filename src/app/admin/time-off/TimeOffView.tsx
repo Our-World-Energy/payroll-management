@@ -1934,20 +1934,20 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
             <thead className="sticky top-0 z-20" style={{ background: "#003527" }}>
               <tr style={{ background: "#003527" }}>
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky left-0 z-20 border-r border-white/20"
-                  style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined, background: "#003527" }}>Contractor</th>
+                  style={{ minWidth: readOnly ? 200 : 210, width: readOnly ? "20%" : undefined, background: "#003527" }}>Contractor</th>
                 {COLS.slice(1, -1).map((h) => (
                   <th key={h} className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap border-r border-white/20"
                     style={readOnly ? { width: `${60 / Math.max(1, COLS.length - 2)}%` } : undefined}>{h}</th>
                 ))}
                 <th className="px-4 py-3 text-xs font-semibold text-white uppercase tracking-wider whitespace-nowrap sticky right-0 z-20 border-l border-white/20"
-                  style={readOnly ? { width: "10%", background: "#003527" } : { background: "#003527" }}>Action</th>
+                  style={readOnly ? { width: "20%", background: "#003527" } : { background: "#003527" }}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 Array.from({ length: 6 }).map((_, i) => (
                   <tr key={i} className="animate-pulse">
-                    <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined }}>
+                    <td className="px-4 py-3 sticky left-0 bg-white border-r border-slate-200" style={{ minWidth: readOnly ? 200 : 210, width: readOnly ? "20%" : undefined }}>
                       <div className="flex items-center gap-3">
                         <div className="size-8 rounded-full bg-slate-100 shrink-0" />
                         <div className="space-y-1.5"><div className="h-3 bg-slate-100 rounded w-28" /><div className="h-2 bg-slate-100 rounded w-20" /></div>
@@ -1974,7 +1974,7 @@ export function TimeOffView({ readOnly, assignedTo }: { readOnly?: boolean; assi
                 const reviewStatus: RequestDecision | "-" = (latest?.status as RequestDecision) ?? "-";
                 return (
                   <tr key={row.id} className="hover:bg-slate-50 transition-colors group">
-                    <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: readOnly ? 260 : 210, width: readOnly ? "30%" : undefined }}>
+                    <td className="px-4 py-3 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r border-slate-200" style={{ minWidth: readOnly ? 200 : 210, width: readOnly ? "20%" : undefined }}>
                       <div className="flex items-center gap-3">
                         <div className="relative shrink-0">
                           <div className={`size-8 rounded-full flex items-center justify-center text-xs font-bold ${avatarColor(row.id)}`}>
