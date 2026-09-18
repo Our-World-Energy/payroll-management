@@ -130,11 +130,20 @@ export function passwordResetEmail(opts: {
                       We received a request to reset the password for your Our World Energy account on the payroll &amp; contractor portal. Click the button below to choose a new password.
                     </p>
 
-                    <!-- Bulletproof CTA -->
-                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" align="left" style="margin:0 0 24px 0;">
+                    <!-- Bulletproof CTA. Wrapped in a full-width row so the
+                         fallback copy below stacks under it — a bare
+                         align="left" button table floats in Outlook.com and
+                         lets the next paragraph wrap to its right. -->
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
                       <tr>
-                        <td align="center" bgcolor="#006b5f" style="border-radius:10px; background-color:#006b5f;">
-                          <a href="${url}" target="_blank" rel="noopener" class="owe-btn" style="display:inline-block; padding:16px 34px; font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:16px; line-height:20px; font-weight:600; color:#ffffff; text-decoration:none; border-radius:10px; background-color:#006b5f;">Reset my password</a>
+                        <td align="left">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                            <tr>
+                              <td align="center" bgcolor="#006b5f" style="border-radius:10px; background-color:#006b5f;">
+                                <a href="${url}" target="_blank" rel="noopener" class="owe-btn" style="display:inline-block; padding:16px 34px; font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; font-size:16px; line-height:20px; font-weight:600; color:#ffffff; text-decoration:none; border-radius:10px; background-color:#006b5f;">Reset my password</a>
+                              </td>
+                            </tr>
+                          </table>
                         </td>
                       </tr>
                     </table>
