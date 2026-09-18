@@ -12,7 +12,7 @@ import { Confetti } from "../_components/Confetti";
 import {
   LuCalendarDays, LuCake, LuGlobe,
   LuChevronRight, LuShieldCheck,
-  LuX, LuChevronLeft,
+  LuX, LuChevronLeft, LuInfo,
 } from "react-icons/lu";
 
 // ── Masthead artwork ─────────────────────────────────────────────────────────
@@ -405,6 +405,10 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
   const [newsOpen, setNewsOpen] = useState(false);
   const [birthdays,     setBirthdays]     = useState<BirthdayEntry[]>([]);
   const [loading,       setLoading]       = useState(true);
+  // False once the load finds no contractor record for this account — the
+  // page says so rather than quietly showing a nameless greeting and blank
+  // personal figures.
+  const [hasProfile,    setHasProfile]    = useState(true);
   const [calOpen,       setCalOpen]       = useState(false);
   // Birthday wishes: my email, colleagues I've already wished today, and wishes
   // I've received today (shown when it's my own birthday).
@@ -424,8 +428,19 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
       const email = session.user.email;
 
       // One Server Action, not four — see fetchDashboardBundle.
-      const { profile: prof, holidays: hols, announcements: allAnnouncements, birthdays: bdays } =
-        await fetchDashboardBundle(email);
+      //
+      // Read off the result rather than destructured: a console account can
+      // have no contractor record at all (a manager whose login was never
+      // paired with one), and if the action resolves to nothing the
+      // destructure threw "Cannot destructure property 'profile'" and took the
+      // whole page down. Every field has a usable empty value, so the rest of
+      // the dashboard — announcements, holidays, birthdays — still renders.
+      const bundle = await fetchDashboardBundle(email);
+      const prof = bundle?.profile ?? null;
+      const hols = bundle?.holidays ?? [];
+      const allAnnouncements = bundle?.announcements ?? [];
+      const bdays = bundle?.birthdays ?? [];
+      setHasProfile(prof != null);
 
       setProfile(prof);
       setAllHolidays(hols);
@@ -687,6 +702,25 @@ export function DashboardView({ eyebrow }: { eyebrow?: string }) {
             {statusChip}
           </div>
         </>
+      )}
+
+      {/* No contractor record behind this login — a manager account that was
+          never paired with one. Said plainly, and only once the load has
+          finished, rather than leaving a nameless greeting and blank personal
+          figures to be read as a fault. The rest of the page is still worth
+          showing: announcements, holidays and birthdays need no profile. */}
+      {!hasProfile && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <LuInfo size={16} strokeWidth={2} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-amber-800">No contractor profile on this account</p>
+            <p className="text-xs text-amber-700/90 mt-0.5">
+              Nothing personal can be shown — no profile, time away balance, attendance or pay voucher. Company
+              announcements and holidays below are unaffected. Ask an admin to add a Contractor Details record
+              against this email if you need the rest.
+            </p>
+          </div>
+        </div>
       )}
 
       {/* ── Front-page feature: today's global announcement(s) ── */}
